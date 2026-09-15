@@ -5,16 +5,9 @@ PROJECT_PATH = r"C:\Akakiy agent"
 
 
 def run_git_command(arguments):
-    """
-    Выполняет Git-команду в проекте.
-    """
-
     try:
         result = subprocess.run(
-            [
-                "git",
-                *arguments
-            ],
+            ["git", *arguments],
             cwd=PROJECT_PATH,
             capture_output=True,
             text=True,
@@ -48,16 +41,7 @@ def run_git_command(arguments):
 
 
 def git_status():
-    """
-    Показывает состояние Git-репозитория.
-    """
-
-    result = run_git_command(
-        [
-            "status",
-            "--short"
-        ]
-    )
+    result = run_git_command(["status", "--short"])
 
     if not result["success"]:
         return result
@@ -71,15 +55,7 @@ def git_status():
 
 
 def git_diff():
-    """
-    Показывает текущие изменения Git.
-    """
-
-    return run_git_command(
-        [
-            "diff"
-        ]
-    )
+    return run_git_command(["diff"])
 
 
 def get_next_commit_number():
@@ -218,4 +194,55 @@ def git_commit(message):
         "message": f"Создан commit: {commit_message}",
         "stdout": result["stdout"],
         "commit_message": commit_message
+    }
+
+
+def git_log(limit=10):
+    """
+    Показывает последние Git-коммиты проекта.
+    """
+
+    try:
+        limit = int(limit)
+    except (TypeError, ValueError):
+        limit = 10
+
+    if limit < 1:
+        limit = 10
+
+    if limit > 50:
+        limit = 50
+
+    result = run_git_command(
+        [
+            "log",
+            f"-{limit}",
+            "--pretty=format:%h|%s|%an|%ad",
+            "--date=format:%Y-%m-%d %H:%M"
+        ]
+    )
+
+    if not result["success"]:
+        return result
+
+    commits = []
+
+    for line in result["stdout"].splitlines():
+
+        parts = line.split("|", 3)
+
+        if len(parts) != 4:
+            continue
+
+        commits.append({
+            "hash": parts[0],
+            "message": parts[1],
+            "author": parts[2],
+            "date": parts[3]
+        })
+
+    return {
+        "success": True,
+        "commits": commits,
+        "count": len(commits)
     }

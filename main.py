@@ -22,11 +22,9 @@ while True:
     try:
         result = agent.process(user_input)
 
-        # Обычный ответ ИИ
         if result["type"] == "chat":
             print(f"\nАкакий:\n{result['answer']}")
 
-        # Результат работы инструмента
         elif result["type"] == "tool":
             tool_name = result["tool"]
             tool_result = result["result"]
@@ -35,11 +33,102 @@ while True:
 
             if isinstance(tool_result, dict):
 
-                if tool_result.get("success"):
+                if not tool_result.get("success"):
+                    error = tool_result.get("error")
+                    message = tool_result.get("message")
+
+                    if error:
+                        print(f"\nОшибка: {error}")
+                    elif message:
+                        print(f"\nАкакий:\n{message}")
+                    else:
+                        print(f"\nОшибка: {tool_result}")
+
+                else:
                     value = tool_result.get("result")
 
-                    # Выполнение PowerShell-команды
-                    if tool_name == "run_command" and isinstance(value, dict):
+                    if tool_name == "git_status":
+
+                        if isinstance(value, dict):
+                            message = value.get("message")
+                            stdout = value.get("stdout", "")
+                            stderr = value.get("stderr", "")
+
+                            if message:
+                                print(f"\nАкакий:\n{message}")
+
+                            if stdout.strip():
+                                print("\nИзменения:")
+                                print(stdout)
+
+                            if stderr.strip():
+                                print("\nОшибка:")
+                                print(stderr)
+
+                    elif tool_name == "git_diff":
+
+                        if isinstance(value, dict):
+                            stdout = value.get("stdout", "")
+                            stderr = value.get("stderr", "")
+
+                            if stdout.strip():
+                                print(f"\nАкакий:\n{stdout}")
+                            else:
+                                print("\nАкакий:\nИзменений нет.")
+
+                            if stderr.strip():
+                                print("\nОшибка:")
+                                print(stderr)
+
+                    elif tool_name == "git_commit":
+
+                        if isinstance(value, dict):
+                            message = value.get("message")
+                            stdout = value.get("stdout", "")
+                            stderr = value.get("stderr", "")
+
+                            if message:
+                                print(f"\nАкакий:\n{message}")
+
+                            if stdout.strip():
+                                print("\nGit:")
+                                print(stdout)
+
+                            if stderr.strip():
+                                print("\nОшибка:")
+                                print(stderr)
+
+                    elif tool_name == "git_log":
+
+                        if isinstance(value, dict):
+                            commits = value.get("commits", [])
+                            count = value.get("count", 0)
+
+                            print("\nАкакий:\nИстория Git:\n")
+
+                            if not commits:
+                                print("Коммитов пока нет.")
+                            else:
+                                for index, commit in enumerate(commits, start=1):
+                                    print(
+                                        f"{index}. "
+                                        f"{commit.get('hash', '')} — "
+                                        f"{commit.get('message', '')}"
+                                    )
+
+                                    print(
+                                        f"   Автор: {commit.get('author', '')}"
+                                    )
+
+                                    print(
+                                        f"   Дата: {commit.get('date', '')}"
+                                    )
+
+                                    print()
+
+                            print(f"Всего коммитов: {count}")
+
+                    elif tool_name == "run_command" and isinstance(value, dict):
 
                         stdout = value.get("stdout", "")
                         stderr = value.get("stderr", "")
@@ -53,7 +142,6 @@ while True:
 
                         print(f"\nКод завершения: {return_code}")
 
-                    # Запись файла
                     elif tool_name == "write_file" and isinstance(value, dict):
 
                         message = value.get("message")
@@ -61,7 +149,6 @@ while True:
                         if message:
                             print(f"\nАкакий:\n{message}")
 
-                    # Проверка всего проекта
                     elif tool_name == "validate_project" and isinstance(value, dict):
 
                         print(f"\nАкакий:\n{value.get('message')}")
@@ -80,7 +167,6 @@ while True:
                             f"{value.get('files_checked', 0)}"
                         )
 
-                    # Чтение файла
                     elif isinstance(value, tuple):
 
                         content, error = value
@@ -90,12 +176,8 @@ while True:
                         else:
                             print(f"\nАкакий:\n{content}")
 
-                    # Обычный результат инструмента
                     else:
                         print(f"\nАкакий:\n{value}")
-
-                else:
-                    print(f"\nОшибка: {tool_result.get('error')}")
 
             elif isinstance(tool_result, list):
 

@@ -11,6 +11,69 @@ class Agent:
         self.ai = OllamaClient()
 
     def choose_tool(self, user_input):
+        """
+        Выбирает инструмент для запроса пользователя.
+
+        Явные команды Git обрабатываются напрямую,
+        чтобы модель не превращала их в обычный ответ.
+        """
+
+        normalized_input = user_input.lower().strip()
+
+        git_commit_phrases = [
+            "сделай коммит",
+            "создай коммит",
+            "закоммить изменения",
+            "закоммить изменения в git",
+            "создай git коммит",
+        ]
+
+        if any(phrase in normalized_input for phrase in git_commit_phrases):
+            print("\nАкакий: Как назвать этот коммит?")
+            commit_message = input("Описание: ").strip()
+
+        if not commit_message:
+            return {
+            "tool": "git_commit",
+            "arguments": {
+                "message": "изменения"
+            }
+        }
+
+        return {
+        "tool": "git_commit",
+        "arguments": {
+            "message": commit_message
+        }
+    }
+
+        # Явные запросы истории Git.
+        git_history_phrases = [
+            "история git",
+            "историю git",
+            "истории git",
+            "покажи историю git",
+            "покажи историю гит",
+            "история гит",
+            "историю гит",
+            "покажи коммиты",
+            "покажи последние коммиты",
+            "последние коммиты",
+            "какие были коммиты",
+            "какие коммиты",
+        ]
+
+        if any(
+            phrase in normalized_input
+            for phrase in git_history_phrases
+        ):
+            return {
+                "tool": "git_log",
+                "arguments": {
+                    "limit": 10
+                }
+            }
+
         tools = get_tools_description()
 
         prompt = f"""
@@ -99,6 +162,14 @@ class Agent:
     }}
 }}
 
+Для git_log:
+{{
+    "tool": "git_log",
+    "arguments": {{
+        "limit": 10
+    }}
+}}
+
 Если инструмент не нужен:
 
 {{
@@ -116,9 +187,10 @@ class Agent:
 6. Для edit_file используй только filename на первом этапе.
 7. Для run_command используй command.
 8. Для git_commit используй message.
-9. Не выполняй команды самостоятельно.
-10. Не добавляй пояснения.
-11. Отвечай только валидным JSON.
+9. Для git_log используй limit.
+10. Не выполняй команды самостоятельно.
+11. Не добавляй пояснения.
+12. Отвечай только валидным JSON.
 """
 
         answer = self.ai.ask(
@@ -287,6 +359,16 @@ class Agent:
 
             if "message" not in arguments:
                 arguments["message"] = user_input
+
+        if tool_name == "git_log":
+
+            if "limit" not in arguments:
+                arguments["limit"] = 10
+
+            try:
+                arguments["limit"] = int(arguments["limit"])
+            except (TypeError, ValueError):
+                arguments["limit"] = 10
 
         decision["arguments"] = arguments
 

@@ -8,7 +8,13 @@ from tools.files import (
 from tools.terminal import run_command
 from tools.analysis import analyze_file
 from tools.validation import validate_project
-from tools.git import git_status, git_diff, git_commit
+from tools.git import (
+    git_status,
+    git_diff,
+    git_commit,
+    git_log
+)
+
 
 TOOLS = {
     "list_files": {
@@ -65,9 +71,15 @@ TOOLS = {
         "requires_confirmation": False,
     },
 
-        "git_commit": {
+    "git_commit": {
         "description": "Создаёт нумерованный Git-коммит с описанием изменений.",
         "function": git_commit,
+        "requires_confirmation": False,
+    },
+
+    "git_log": {
+        "description": "Показывает историю последних Git-коммитов проекта.",
+        "function": git_log,
         "requires_confirmation": False,
     },
 }
