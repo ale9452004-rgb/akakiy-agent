@@ -73,6 +73,32 @@ class Agent:
     "arguments": {{}}
 }}
 
+Для validate_project:
+{{
+    "tool": "validate_project",
+    "arguments": {{}}
+}}
+
+Для git_status:
+{{
+    "tool": "git_status",
+    "arguments": {{}}
+}}
+
+Для git_diff:
+{{
+    "tool": "git_diff",
+    "arguments": {{}}
+}}
+
+Для git_commit:
+{{
+    "tool": "git_commit",
+    "arguments": {{
+        "message": "краткое описание изменений"
+    }}
+}}
+
 Если инструмент не нужен:
 
 {{
@@ -89,9 +115,10 @@ class Agent:
 5. Для write_file используй filename и content.
 6. Для edit_file используй только filename на первом этапе.
 7. Для run_command используй command.
-8. Не выполняй команды самостоятельно.
-9. Не добавляй пояснения.
-10. Отвечай только валидным JSON.
+8. Для git_commit используй message.
+9. Не выполняй команды самостоятельно.
+10. Не добавляй пояснения.
+11. Отвечай только валидным JSON.
 """
 
         answer = self.ai.ask(
@@ -115,7 +142,10 @@ class Agent:
                 "arguments": {}
             }
 
-        self.normalize_arguments(decision)
+        self.normalize_arguments(
+            decision,
+            user_input
+        )
 
         return decision
 
@@ -214,7 +244,7 @@ class Agent:
             "new_text": new_text
         }
 
-    def normalize_arguments(self, decision):
+    def normalize_arguments(self, decision, user_input):
         """
         Исправляет распространённые варианты аргументов,
         которые может вернуть модель.
@@ -252,6 +282,11 @@ class Agent:
 
             if "code" in arguments and "content" not in arguments:
                 arguments["content"] = arguments.pop("code")
+
+        if tool_name == "git_commit":
+
+            if "message" not in arguments:
+                arguments["message"] = user_input
 
         decision["arguments"] = arguments
 

@@ -8,7 +8,7 @@ from tools.files import (
 from tools.terminal import run_command
 from tools.analysis import analyze_file
 from tools.validation import validate_project
-from tools.git import git_status, git_diff
+from tools.git import git_status, git_diff, git_commit
 
 TOOLS = {
     "list_files": {
@@ -62,6 +62,12 @@ TOOLS = {
     "git_diff": {
         "description": "Показывает подробные изменения файлов Git-репозитория.",
         "function": git_diff,
+        "requires_confirmation": False,
+    },
+
+        "git_commit": {
+        "description": "Создаёт нумерованный Git-коммит с описанием изменений.",
+        "function": git_commit,
         "requires_confirmation": False,
     },
 }
