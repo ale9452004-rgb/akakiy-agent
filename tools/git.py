@@ -246,3 +246,77 @@ def git_log(limit=10):
         "commits": commits,
         "count": len(commits)
     }
+
+def git_push():
+    """
+    Отправляет текущую ветку в удалённый Git-репозиторий.
+    Перед выполнением требует подтверждение пользователя.
+    """
+
+    result = run_git_command(
+        [
+            "rev-parse",
+            "--abbrev-ref",
+            "HEAD"
+        ]
+    )
+
+    if not result["success"]:
+        return result
+
+    branch = result["stdout"].strip()
+
+    if not branch:
+        return {
+            "success": False,
+            "error": "Не удалось определить текущую Git-ветку."
+        }
+
+    remote_result = run_git_command(
+        [
+            "remote",
+            "-v"
+        ]
+    )
+
+    if not remote_result["success"]:
+        return remote_result
+
+    if not remote_result["stdout"].strip():
+        return {
+            "success": False,
+            "error": "Удалённый Git-репозиторий не настроен."
+        }
+
+    print("\n--- Отправка изменений в GitHub ---")
+    print(f"Ветка: {branch}")
+    print("Удалённый репозиторий:")
+    print(remote_result["stdout"])
+
+    confirmation = input(
+        "\nОтправить изменения в удалённый репозиторий? (да/нет): "
+    ).strip().lower()
+
+    if confirmation not in ["да", "д", "yes", "y"]:
+        return {
+            "success": False,
+            "message": "Push отменён пользователем."
+        }
+
+    push_result = run_git_command(
+        [
+            "push",
+            "origin",
+            branch
+        ]
+    )
+
+    if not push_result["success"]:
+        return push_result
+
+    return {
+    "success": True,
+    "message": f"Изменения отправлены в GitHub. Ветка: {branch}",
+    "stdout": push_result["stdout"],
+    "branch": branch
+    }

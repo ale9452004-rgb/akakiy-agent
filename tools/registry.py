@@ -12,8 +12,8 @@ from tools.git import (
     git_status,
     git_diff,
     git_commit,
-    git_log
-)
+    git_log,
+    git_push)
 
 
 TOOLS = {
@@ -82,6 +82,12 @@ TOOLS = {
         "function": git_log,
         "requires_confirmation": False,
     },
+
+    "git_push": {
+        "description": "Отправляет текущую ветку Git в удалённый репозиторий после подтверждения пользователя.",
+        "function": git_push,
+        "requires_confirmation": False,
+    }
 }
 
 

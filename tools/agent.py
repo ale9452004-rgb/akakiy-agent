@@ -20,32 +20,61 @@ class Agent:
 
         normalized_input = user_input.lower().strip()
 
+        # Явная команда создания Git-коммита.
         git_commit_phrases = [
             "сделай коммит",
+            "сделай commit",
             "создай коммит",
+            "создай commit",
+            "сделай git коммит",
+            "сделай git commit",
+            "создай git коммит",
+            "создай git commit",
             "закоммить изменения",
             "закоммить изменения в git",
-            "создай git коммит",
+            "закоммить",
+            "закоммить в git",
+            "сохрани изменения в git",
         ]
 
-        if any(phrase in normalized_input for phrase in git_commit_phrases):
+        if any(
+            phrase in normalized_input
+            for phrase in git_commit_phrases
+        ):
             print("\nАкакий: Как назвать этот коммит?")
             commit_message = input("Описание: ").strip()
 
-        if not commit_message:
-            return {
-            "tool": "git_commit",
-            "arguments": {
-                "message": "изменения"
-            }
-        }
+            if not commit_message:
+                commit_message = "изменения"
 
-        return {
-        "tool": "git_commit",
-        "arguments": {
-            "message": commit_message
-        }
-    }
+            return {
+                "tool": "git_commit",
+                "arguments": {
+                    "message": commit_message
+                }
+            }
+
+        # Явная команда Git push.
+        git_push_phrases = [
+            "сделай push",
+            "сделай пуш",
+            "сделай git push",
+            "запушь изменения",
+            "запушить изменения",
+            "отправь изменения в git",
+            "отправь изменения на github",
+            "отправь изменения в github",
+            "отправь в github",
+        ]
+
+        if any(
+            phrase in normalized_input
+            for phrase in git_push_phrases
+        ):
+            return {
+                "tool": "git_push",
+                "arguments": {}
+            }
 
         # Явные запросы истории Git.
         git_history_phrases = [
@@ -170,6 +199,12 @@ class Agent:
     }}
 }}
 
+Для git_push:
+{{
+    "tool": "git_push",
+    "arguments": {{}}
+}}
+
 Если инструмент не нужен:
 
 {{
@@ -188,9 +223,10 @@ class Agent:
 7. Для run_command используй command.
 8. Для git_commit используй message.
 9. Для git_log используй limit.
-10. Не выполняй команды самостоятельно.
-11. Не добавляй пояснения.
-12. Отвечай только валидным JSON.
+10. Для git_push не используй аргументы.
+11. Не выполняй команды самостоятельно.
+12. Не добавляй пояснения.
+13. Отвечай только валидным JSON.
 """
 
         answer = self.ai.ask(
@@ -370,6 +406,9 @@ class Agent:
             except (TypeError, ValueError):
                 arguments["limit"] = 10
 
+        if tool_name == "git_push":
+            arguments = {}
+
         decision["arguments"] = arguments
 
     def process(self, user_input):
@@ -384,7 +423,7 @@ class Agent:
                 "answer": self.ai.ask(user_input)
             }
 
-        # Специальный двухэтапный процесс редактирования
+        # Специальный двухэтапный процесс редактирования.
         if tool_name == "edit_file":
 
             filename = arguments.get("filename")

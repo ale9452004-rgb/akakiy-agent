@@ -48,7 +48,6 @@ while True:
                     value = tool_result.get("result")
 
                     if tool_name == "git_status":
-
                         if isinstance(value, dict):
                             message = value.get("message")
                             stdout = value.get("stdout", "")
@@ -66,7 +65,6 @@ while True:
                                 print(stderr)
 
                     elif tool_name == "git_diff":
-
                         if isinstance(value, dict):
                             stdout = value.get("stdout", "")
                             stderr = value.get("stderr", "")
@@ -81,7 +79,6 @@ while True:
                                 print(stderr)
 
                     elif tool_name == "git_commit":
-
                         if isinstance(value, dict):
                             message = value.get("message")
                             stdout = value.get("stdout", "")
@@ -98,8 +95,29 @@ while True:
                                 print("\nОшибка:")
                                 print(stderr)
 
-                    elif tool_name == "git_log":
+                    elif tool_name == "git_push":
+                        if isinstance(value, dict):
+                            message = value.get("message")
+                            branch = value.get("branch")
+                            stdout = value.get("stdout", "")
+                            stderr = value.get("stderr", "")
 
+                            if message:
+                                print("\nАкакий:")
+                                print(f"✓ {message}")
+
+                            if branch:
+                                print(f"✓ Ветка: {branch}")
+
+                            if stdout.strip():
+                                print("\nGit:")
+                                print(stdout)
+
+                            if stderr.strip():
+                                print("\nОшибка:")
+                                print(stderr)
+
+                    elif tool_name == "git_log":
                         if isinstance(value, dict):
                             commits = value.get("commits", [])
                             count = value.get("count", 0)
@@ -115,21 +133,17 @@ while True:
                                         f"{commit.get('hash', '')} — "
                                         f"{commit.get('message', '')}"
                                     )
-
                                     print(
                                         f"   Автор: {commit.get('author', '')}"
                                     )
-
                                     print(
                                         f"   Дата: {commit.get('date', '')}"
                                     )
-
                                     print()
 
                             print(f"Всего коммитов: {count}")
 
                     elif tool_name == "run_command" and isinstance(value, dict):
-
                         stdout = value.get("stdout", "")
                         stderr = value.get("stderr", "")
                         return_code = value.get("return_code")
@@ -143,14 +157,12 @@ while True:
                         print(f"\nКод завершения: {return_code}")
 
                     elif tool_name == "write_file" and isinstance(value, dict):
-
                         message = value.get("message")
 
                         if message:
                             print(f"\nАкакий:\n{message}")
 
                     elif tool_name == "validate_project" and isinstance(value, dict):
-
                         print(f"\nАкакий:\n{value.get('message')}")
 
                         errors = value.get("errors", [])
@@ -168,7 +180,6 @@ while True:
                         )
 
                     elif isinstance(value, tuple):
-
                         content, error = value
 
                         if error:
@@ -180,7 +191,6 @@ while True:
                         print(f"\nАкакий:\n{value}")
 
             elif isinstance(tool_result, list):
-
                 for item in tool_result:
                     print(item)
 
