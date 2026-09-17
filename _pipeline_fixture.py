@@ -1,7 +1,7 @@
 ﻿def process_request(request):
     if not request:
         return {
-            "message": "Пустой запрос.",
+            "message": "Запрос пуст.",
             "answer": "Пустой запрос."
         }
 
