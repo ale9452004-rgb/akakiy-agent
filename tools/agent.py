@@ -4,21 +4,61 @@ from ollama_client import OllamaClient
 from tools.registry import get_tools_description
 from tools.dispatcher import dispatch
 from tools.files import read_file
+from tools.planner import Planner
 
 
 class Agent:
     def __init__(self):
         self.ai = OllamaClient()
+        self.planner = Planner()
 
     def choose_tool(self, user_input):
         """
         Выбирает инструмент для запроса пользователя.
 
-        Явные команды Git обрабатываются напрямую,
+        Явные команды Git и планирования обрабатываются напрямую,
         чтобы модель не превращала их в обычный ответ.
         """
 
         normalized_input = user_input.lower().strip()
+
+        # Показ текущего плана.
+        current_plan_phrases = [
+            "покажи текущий план",
+            "покажи план",
+            "какой текущий план",
+            "какой план",
+            "текущий план",
+        ]
+
+        if any(
+            phrase in normalized_input
+            for phrase in current_plan_phrases
+        ):
+            return {
+                "tool": "get_current_plan",
+                "arguments": {}
+            }
+
+        # Явная команда создания плана.
+        plan_phrases = [
+            "план:",
+            "план ",
+            "составь план",
+            "сделай план",
+            "спланируй",
+        ]
+
+        if any(
+            phrase in normalized_input
+            for phrase in plan_phrases
+        ):
+            return {
+                "tool": "plan",
+                "arguments": {
+                    "request": user_input
+                }
+            }
 
         # Явная команда создания Git-коммита.
         git_commit_phrases = [
@@ -421,6 +461,37 @@ class Agent:
             return {
                 "type": "chat",
                 "answer": self.ai.ask(user_input)
+            }
+
+        # Получение текущего плана.
+        if tool_name == "get_current_plan":
+
+            current_plan = self.planner.get_current_plan()
+
+            if not current_plan.get("success"):
+                return {
+                    "type": "plan",
+                    "tool": "get_current_plan",
+                    "result": current_plan
+                }
+
+            return {
+                "type": "plan",
+                "tool": "get_current_plan",
+                "result": current_plan
+            }
+
+        # Создание нового плана.
+        if tool_name == "plan":
+
+            plan_result = self.planner.create_plan(
+                arguments.get("request", user_input)
+            )
+
+            return {
+                "type": "plan",
+                "tool": "plan",
+                "result": plan_result
             }
 
         # Специальный двухэтапный процесс редактирования.

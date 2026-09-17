@@ -13,80 +13,81 @@ from tools.git import (
     git_diff,
     git_commit,
     git_log,
-    git_push)
+    git_push
+)
 
 
 TOOLS = {
     "list_files": {
-        "description": "Показывает список файлов и папок проекта.",
         "function": list_files,
-        "requires_confirmation": False,
+        "description": "Показывает список файлов проекта.",
+        "requires_confirmation": False
     },
 
     "read_file": {
-        "description": "Читает содержимое указанного файла проекта.",
         "function": read_file,
-        "requires_confirmation": False,
+        "description": "Читает содержимое указанного файла.",
+        "requires_confirmation": False
     },
 
     "write_file": {
-        "description": "Записывает содержимое в файл проекта. Может создать новый файл или полностью заменить существующий.",
         "function": write_file,
-        "requires_confirmation": True,
+        "description": "Создаёт или полностью перезаписывает файл.",
+        "requires_confirmation": True
     },
 
     "edit_file": {
-        "description": "Точечно изменяет существующий файл через old_text и new_text с показом diff.",
         "function": edit_file,
-        "requires_confirmation": False,
+        "description": "Точечно изменяет существующий файл.",
+        "requires_confirmation": False
     },
 
     "run_command": {
-        "description": "Выполняет PowerShell-команду в проекте.",
         "function": run_command,
-        "requires_confirmation": True,
+        "description": "Выполняет PowerShell-команду в проекте.",
+        "requires_confirmation": True
     },
 
     "analyze_file": {
-        "description": "Анализирует указанный файл и ищет проблемы и улучшения.",
         "function": analyze_file,
-        "requires_confirmation": False,
+        "description": "Анализирует указанный файл без изменения кода.",
+        "requires_confirmation": False
     },
 
     "validate_project": {
-        "description": "Проверяет все Python-файлы проекта на синтаксические ошибки.",
         "function": validate_project,
-        "requires_confirmation": False,
+        "description": "Проверяет Python-файлы проекта на синтаксические ошибки.",
+        "requires_confirmation": False
     },
 
     "git_status": {
-        "description": "Показывает изменённые и новые файлы Git-репозитория проекта.",
         "function": git_status,
-        "requires_confirmation": False,
+        "description": "Показывает текущее состояние Git-репозитория.",
+        "requires_confirmation": False
     },
 
     "git_diff": {
-        "description": "Показывает подробные изменения файлов Git-репозитория.",
         "function": git_diff,
-        "requires_confirmation": False,
+        "description": "Показывает изменения в Git-репозитории.",
+        "requires_confirmation": False
     },
 
     "git_commit": {
-        "description": "Создаёт нумерованный Git-коммит с описанием изменений.",
         "function": git_commit,
-        "requires_confirmation": False,
+        "description": "Создаёт Git-коммит после показа изменений и подтверждения.",
+        "requires_confirmation": False
     },
 
     "git_log": {
-        "description": "Показывает историю последних Git-коммитов проекта.",
         "function": git_log,
-        "requires_confirmation": False,
+        "description": "Показывает историю последних Git-коммитов.",
+        "requires_confirmation": False
     },
 
     "git_push": {
-        "description": "Отправляет текущую ветку Git в удалённый репозиторий после подтверждения пользователя.",
         "function": git_push,
-        "requires_confirmation": False,
+        "description": "Отправляет текущую ветку Git в удалённый репозиторий.",
+        "requires_confirmation": False
     }
 }
 
@@ -96,17 +97,11 @@ def get_tool(name):
 
 
 def get_tools_description():
-    result = []
+    descriptions = []
 
     for name, tool in TOOLS.items():
-        confirmation = (
-            "требует подтверждения"
-            if tool["requires_confirmation"]
-            else "без подтверждения"
+        descriptions.append(
+            f"- {name}: {tool['description']}"
         )
 
-        result.append(
-            f"- {name}: {tool['description']} ({confirmation})"
-        )
-
-    return "\n".join(result)
+    return "\n".join(descriptions)
