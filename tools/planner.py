@@ -1,5 +1,6 @@
 from ollama_client import OllamaClient
 import json
+import re
 
 
 class Planner:
@@ -78,10 +79,10 @@ class Planner:
    поиск ошибок или получение информации,
    НЕ добавляй "edit".
 
-3. Если пользователь хочет найти конкретную
-   функцию, класс или другой фрагмент,
-   который может находиться в неизвестном файле,
-   используй "search".
+3. Если пользователь явно просит найти конкретную
+   функцию, класс или другой объект кода,
+   ОБЯЗАТЕЛЬНО используй "search",
+   даже если имя файла уже известно.
 
 4. Если после поиска необходимо изучить
    найденный файл, после "search" используй
@@ -93,8 +94,10 @@ class Planner:
    прочитай найденный файл через "read",
    затем используй "analyze".
 
-6. Если точный файл уже известен пользователю,
-   "search" не обязателен.
+6. Если пользователь просто просит прочитать
+   или изменить конкретный уже известный файл
+   и НЕ просит предварительно найти конкретную
+   функцию, класс или объект, "search" не обязателен.
 
 7. Если пользователь хочет изменить код,
    добавить функцию, исправить ошибку или
@@ -203,6 +206,27 @@ class Planner:
 
 40. Не придумывай название файла, если оно ещё
     неизвестно и должно быть найдено через search.
+
+41. Если запрос содержит одновременно:
+    - просьбу найти конкретную функцию;
+    - известное имя файла;
+    - последующий анализ или изменение функции,
+
+    ОБЯЗАТЕЛЬНА последовательность:
+
+    search → read → analyze → edit → validate
+
+42. Если присутствует search для конкретной функции,
+    search должен идти раньше read и analyze.
+
+43. Если присутствуют search и read,
+    read должен идти после search.
+
+44. Если присутствуют read и analyze,
+    analyze должен идти после read.
+
+45. Если присутствует edit,
+    validate должен идти после edit.
 
 ФОРМАТ ШАГА ПОИСКА:
 
@@ -346,7 +370,8 @@ class Planner:
             }
 
         validation_error = self._validate_plan(
-            steps
+            steps,
+            user_request
         )
 
         if validation_error:
@@ -369,9 +394,9 @@ class Planner:
             "plan": self.current_plan,
         }
 
-    def _validate_plan(self, steps):
+    def _validate_plan(self, steps, user_request=""):
         """
-        Проверяет структуру плана.
+        Проверяет структуру и последовательность плана.
         """
 
         has_edit = False
@@ -502,6 +527,94 @@ class Planner:
 
                 has_edit = True
                 edit_index = index
+
+        # =============================================
+        # Проверка последовательности поиска функции
+        # =============================================
+
+        function_match = re.search(
+            r"(?:найди|найти)\s+"
+            r"(?:функцию|метод)\s+"
+            r"([A-Za-z_][A-Za-z0-9_]*)",
+            user_request.lower()
+        )
+
+        if function_match:
+
+            expected_function = function_match.group(1)
+
+            search_indices = [
+                index
+                for index, step in enumerate(steps)
+                if step.get("action") == "search"
+            ]
+
+            if not search_indices:
+                return (
+                    "Для запроса на поиск конкретной "
+                    f"функции '{expected_function}' "
+                    "план обязан содержать действие search."
+                )
+
+            search_index = search_indices[0]
+            search_step = steps[search_index]
+
+            expected_query = f"def {expected_function}"
+
+            if search_step.get("query") != expected_query:
+                return (
+                    "Для поиска функции "
+                    f"'{expected_function}' "
+                    f"search должен использовать query "
+                    f"'{expected_query}'."
+                )
+
+            for index, step in enumerate(steps):
+
+                if step.get("action") in {
+                    "read",
+                    "analyze",
+                } and index < search_index:
+
+                    return (
+                        "Для поиска функции действие "
+                        "search должно идти раньше "
+                        "read и analyze."
+                    )
+
+            read_indices = [
+                index
+                for index, step in enumerate(steps)
+                if step.get("action") == "read"
+            ]
+
+            analyze_indices = [
+                index
+                for index, step in enumerate(steps)
+                if step.get("action") == "analyze"
+            ]
+
+            if analyze_indices:
+
+                analyze_index = analyze_indices[0]
+
+                if not read_indices:
+                    return (
+                        "После поиска функции перед analyze "
+                        "должен присутствовать read."
+                    )
+
+                read_index = read_indices[0]
+
+                if read_index < search_index:
+                    return (
+                        "После search должен идти read."
+                    )
+
+                if analyze_index < read_index:
+                    return (
+                        "После read должен идти analyze."
+                    )
 
         # =============================================
         # После edit должен быть validate

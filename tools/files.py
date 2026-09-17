@@ -1,46 +1,45 @@
 from pathlib import Path
-import difflib
-import shutil
+import re
 import subprocess
-
 
 PROJECT_PATH = Path(r"C:\Akakiy agent")
 
 
 def list_files():
-    """Возвращает список файлов и папок проекта."""
+    files = []
 
-    items = []
-
-    for item in sorted(PROJECT_PATH.iterdir()):
-        if item.name in [".venv", "__pycache__"]:
+    for file_path in PROJECT_PATH.rglob("*"):
+        if not file_path.is_file():
             continue
 
-        if item.is_dir():
-            items.append(f"[ПАПКА] {item.name}")
-        else:
-            items.append(f"[ФАЙЛ]  {item.name}")
+        if ".venv" in file_path.parts:
+            continue
 
-    return items
+        if "__pycache__" in file_path.parts:
+            continue
+
+        files.append(str(file_path.relative_to(PROJECT_PATH)))
+
+    return {
+        "success": True,
+        "files": files,
+        "count": len(files)
+    }
 
 
 def read_file(filename):
-    """Читает файл проекта."""
-
     file_path = PROJECT_PATH / filename
 
     if not file_path.exists():
         return {
             "success": False,
-            "filename": filename,
-            "message": f"Файл не найден: {filename}"
+            "error": f"Файл не найден: {filename}"
         }
 
     if not file_path.is_file():
         return {
             "success": False,
-            "filename": filename,
-            "message": f"Это не файл: {filename}"
+            "error": f"Это не файл: {filename}"
         }
 
     try:
@@ -57,20 +56,18 @@ def read_file(filename):
     except Exception as error:
         return {
             "success": False,
-            "filename": filename,
-            "message": (
-                f"Ошибка чтения файла: {error}"
-            )
+            "error": str(error)
         }
 
 
 def write_file(filename, content):
-    """Записывает содержимое в файл проекта."""
-
     file_path = PROJECT_PATH / filename
 
     try:
-        file_path.parent.mkdir(parents=True, exist_ok=True)
+        file_path.parent.mkdir(
+            parents=True,
+            exist_ok=True
+        )
 
         file_path.write_text(
             content,
@@ -80,22 +77,17 @@ def write_file(filename, content):
         return {
             "success": True,
             "filename": filename,
-            "message": f"Файл записан: {filename}"
+            "message": "Файл записан."
         }
 
     except Exception as error:
         return {
             "success": False,
-            "filename": filename,
-            "message": f"Ошибка записи файла: {error}"
+            "error": str(error)
         }
 
 
 def validate_python_file(file_path):
-    """
-    Проверяет Python-файл на синтаксические ошибки.
-    """
-
     try:
         result = subprocess.run(
             [
@@ -108,277 +100,190 @@ def validate_python_file(file_path):
             capture_output=True,
             text=True,
             encoding="utf-8",
-            errors="replace",
-            timeout=30
+            errors="replace"
         )
 
-        return {
-            "success": result.returncode == 0,
-            "stdout": result.stdout,
-            "stderr": result.stderr,
-            "return_code": result.returncode
-        }
+        if result.returncode == 0:
+            return {
+                "success": True,
+                "message": "Синтаксис корректен."
+            }
 
-    except subprocess.TimeoutExpired:
         return {
             "success": False,
-            "stdout": "",
-            "stderr": "Проверка Python выполнялась слишком долго.",
-            "return_code": -1
+            "error": result.stderr
         }
 
     except Exception as error:
         return {
             "success": False,
-            "stdout": "",
-            "stderr": str(error),
-            "return_code": -1
+            "error": str(error)
         }
 
 
 def edit_file(filename, old_text, new_text):
-    """
-    Точечно изменяет существующий файл.
-
-    Перед изменением показывает diff.
-    После подтверждения создаёт резервную копию.
-    После записи проверяет Python-файлы.
-    При ошибке автоматически восстанавливает резервную копию.
-    """
-
     file_path = PROJECT_PATH / filename
 
     if not file_path.exists():
         return {
             "success": False,
-            "message": f"Файл не найден: {filename}"
-        }
-
-    if not file_path.is_file():
-        return {
-            "success": False,
-            "message": f"Это не файл: {filename}"
+            "error": f"Файл не найден: {filename}"
         }
 
     try:
-        current_content = file_path.read_text(
+        content = file_path.read_text(
             encoding="utf-8"
         )
-
     except Exception as error:
         return {
             "success": False,
-            "message": f"Ошибка чтения файла: {error}"
+            "error": str(error)
         }
 
-    if not old_text:
+    if old_text not in content:
         return {
             "success": False,
-            "message": "Старый фрагмент для замены пустой."
+            "error": "Искомый текст не найден в файле."
         }
 
-    occurrences = current_content.count(old_text)
-
-    if occurrences == 0:
-        return {
-            "success": False,
-            "message": (
-                "Исходный фрагмент не найден в файле. "
-                "Файл не изменён."
-            )
-        }
+    occurrences = content.count(old_text)
 
     if occurrences > 1:
         return {
             "success": False,
-            "message": (
-                f"Исходный фрагмент найден {occurrences} раз. "
-                "Изменение отменено для безопасности."
+            "error": (
+                f"Искомый текст найден {occurrences} раз. "
+                "Изменение не выполнено."
             )
         }
 
-    new_content = current_content.replace(
+    new_content = content.replace(
         old_text,
         new_text,
         1
     )
 
-    diff = list(
+    import difflib
+
+    diff = "".join(
         difflib.unified_diff(
-            current_content.splitlines(),
-            new_content.splitlines(),
-            fromfile=f"{filename} (текущий)",
-            tofile=f"{filename} (новый)",
-            lineterm=""
+            content.splitlines(keepends=True),
+            new_content.splitlines(keepends=True),
+            fromfile=filename,
+            tofile=filename
         )
     )
 
-    if not diff:
-        return {
-            "success": False,
-            "message": "Изменений нет."
-        }
-
     print("\n--- Предлагаемые изменения ---")
-
-    for line in diff:
-        print(line)
-
+    print(diff)
     print("--- Конец изменений ---")
 
     confirmation = input(
-        "\nПрименить изменения? (да/нет): "
+        "Применить изменения? (да/нет): "
     ).strip().lower()
 
     if confirmation not in ["да", "д", "yes", "y"]:
         return {
             "success": False,
-            "message": "Изменение отменено пользователем."
+            "error": "Пользователь отменил изменение."
         }
 
-    # Создаём резервную копию
     backup_path = file_path.with_suffix(
         file_path.suffix + ".bak"
     )
 
     try:
-        shutil.copy2(
-            file_path,
-            backup_path
+        backup_path.write_text(
+            content,
+            encoding="utf-8"
         )
 
-    except Exception as error:
-        return {
-            "success": False,
-            "message": (
-                "Не удалось создать резервную копию. "
-                f"Файл не изменён.\nОшибка: {error}"
-            )
-        }
-
-    # Записываем новое содержимое
-    try:
         file_path.write_text(
             new_content,
             encoding="utf-8"
         )
 
-    except Exception as error:
-        return {
-            "success": False,
-            "message": (
-                "Ошибка записи файла. "
-                f"Резервная копия сохранена: {backup_path.name}\n"
-                f"Ошибка: {error}"
-            )
-        }
+        if file_path.suffix.lower() == ".py":
+            validation = validate_python_file(file_path)
 
-    # Проверяем Python-файл
-    if file_path.suffix.lower() == ".py":
-
-        validation = validate_python_file(
-            file_path
-        )
-
-        if not validation["success"]:
-
-            print("\n--- Обнаружена ошибка Python ---")
-
-            if validation["stderr"]:
-                print(validation["stderr"])
-
-            print("\nВосстанавливаю резервную копию...")
-
-            try:
-                shutil.copy2(
-                    backup_path,
-                    file_path
+            if not validation["success"]:
+                file_path.write_text(
+                    content,
+                    encoding="utf-8"
                 )
 
                 return {
                     "success": False,
-                    "message": (
-                        f"Изменение отменено автоматически.\n"
-                        f"Файл восстановлен из: {backup_path.name}\n"
-                        f"Причина: ошибка Python."
+                    "error": (
+                        "Изменение откатено: "
+                        f"{validation.get('error', 'ошибка синтаксиса')}"
                     )
                 }
 
-            except Exception as error:
-                return {
-                    "success": False,
-                    "message": (
-                        "КРИТИЧЕСКАЯ ОШИБКА: "
-                        "не удалось восстановить файл.\n"
-                        f"Резервная копия: {backup_path}\n"
-                        f"Ошибка восстановления: {error}"
-                    )
-                }
+        return {
+            "success": True,
+            "filename": filename,
+            "message": "Изменение применено.",
+            "backup": str(
+                backup_path.relative_to(PROJECT_PATH)
+            )
+        }
 
-    return {
-        "success": True,
-        "filename": filename,
-        "backup": str(backup_path),
-        "message": (
-            f"Изменения применены: {filename}\n"
-            f"Резервная копия: {backup_path.name}\n"
-            f"Проверка: успешно"
-        )
-    }
+    except Exception as error:
+        try:
+            file_path.write_text(
+                content,
+                encoding="utf-8"
+            )
+        except Exception:
+            pass
+
+        return {
+            "success": False,
+            "error": str(error)
+        }
+
 
 def search_files(query):
-    """
-    Ищет текст во всех файлах проекта.
-
-    Если запрос имеет вид:
-        def имя_функции
-
-    выполняется более точный поиск определения функции,
-    а не обычного текстового совпадения.
-    """
-
-    import re
-
-    matches = []
-
-    # Нормализуем запрос
     query = query.strip()
 
-    # Определяем, является ли запрос поиском функции
+    if not query:
+        return {
+            "success": False,
+            "error": "Поисковый запрос пуст."
+        }
+
     function_match = re.fullmatch(
         r"def\s+([A-Za-z_][A-Za-z0-9_]*)",
         query
     )
 
-    function_name = None
+    function_name = (
+        function_match.group(1)
+        if function_match
+        else None
+    )
 
-    if function_match:
-        function_name = function_match.group(1)
+    matches = []
 
-    # Перебираем файлы проекта
     for file_path in PROJECT_PATH.rglob("*"):
-
-        # Пропускаем директории
         if not file_path.is_file():
             continue
 
-        # Пропускаем виртуальное окружение
         if ".venv" in file_path.parts:
             continue
 
-        # Пропускаем кэш Python
         if "__pycache__" in file_path.parts:
+            continue
+
+        if file_path.suffix.lower() != ".py":
             continue
 
         try:
             content = file_path.read_text(
-                encoding="utf-8"
+                encoding="utf-8-sig"
             )
-        except (
-            UnicodeDecodeError,
-            PermissionError,
-            OSError
-        ):
+        except (UnicodeDecodeError, OSError):
             continue
 
         lines = content.splitlines()
@@ -387,43 +292,14 @@ def search_files(query):
             lines,
             start=1
         ):
-
-            # =========================================
-            # Точный поиск определения функции
-            # =========================================
-
             if function_name:
-
                 pattern = (
                     rf"^\s*def\s+"
-                    rf"{re.escape(function_name)}"
-                    rf"\s*\("
+                    rf"{re.escape(function_name)}\s*\("
                 )
 
                 if re.search(pattern, line):
-
-                    matches.append(
-                        {
-                            "file": str(
-                                file_path.relative_to(
-                                    PROJECT_PATH
-                                )
-                            ),
-                            "line": line_number,
-                            "content": line.strip()
-                        }
-                    )
-
-                continue
-
-            # =========================================
-            # Обычный поиск текста
-            # =========================================
-
-            if query.lower() in line.lower():
-
-                matches.append(
-                    {
+                    matches.append({
                         "file": str(
                             file_path.relative_to(
                                 PROJECT_PATH
@@ -431,8 +307,18 @@ def search_files(query):
                         ),
                         "line": line_number,
                         "content": line.strip()
-                    }
-                )
+                    })
+
+            elif query.lower() in line.lower():
+                matches.append({
+                    "file": str(
+                        file_path.relative_to(
+                            PROJECT_PATH
+                        )
+                    ),
+                    "line": line_number,
+                    "content": line.strip()
+                })
 
     return {
         "success": True,
