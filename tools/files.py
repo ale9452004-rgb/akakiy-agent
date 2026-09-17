@@ -30,17 +30,38 @@ def read_file(filename):
     file_path = PROJECT_PATH / filename
 
     if not file_path.exists():
-        return None, f"Файл не найден: {filename}"
+        return {
+            "success": False,
+            "filename": filename,
+            "message": f"Файл не найден: {filename}"
+        }
 
     if not file_path.is_file():
-        return None, f"Это не файл: {filename}"
+        return {
+            "success": False,
+            "filename": filename,
+            "message": f"Это не файл: {filename}"
+        }
 
     try:
-        content = file_path.read_text(encoding="utf-8")
-        return content, None
+        content = file_path.read_text(
+            encoding="utf-8"
+        )
+
+        return {
+            "success": True,
+            "filename": filename,
+            "content": content
+        }
 
     except Exception as error:
-        return None, f"Ошибка чтения файла: {error}"
+        return {
+            "success": False,
+            "filename": filename,
+            "message": (
+                f"Ошибка чтения файла: {error}"
+            )
+        }
 
 
 def write_file(filename, content):
@@ -303,4 +324,119 @@ def edit_file(filename, old_text, new_text):
             f"Резервная копия: {backup_path.name}\n"
             f"Проверка: успешно"
         )
+    }
+
+def search_files(query):
+    """
+    Ищет текст во всех файлах проекта.
+
+    Если запрос имеет вид:
+        def имя_функции
+
+    выполняется более точный поиск определения функции,
+    а не обычного текстового совпадения.
+    """
+
+    import re
+
+    matches = []
+
+    # Нормализуем запрос
+    query = query.strip()
+
+    # Определяем, является ли запрос поиском функции
+    function_match = re.fullmatch(
+        r"def\s+([A-Za-z_][A-Za-z0-9_]*)",
+        query
+    )
+
+    function_name = None
+
+    if function_match:
+        function_name = function_match.group(1)
+
+    # Перебираем файлы проекта
+    for file_path in PROJECT_PATH.rglob("*"):
+
+        # Пропускаем директории
+        if not file_path.is_file():
+            continue
+
+        # Пропускаем виртуальное окружение
+        if ".venv" in file_path.parts:
+            continue
+
+        # Пропускаем кэш Python
+        if "__pycache__" in file_path.parts:
+            continue
+
+        try:
+            content = file_path.read_text(
+                encoding="utf-8"
+            )
+        except (
+            UnicodeDecodeError,
+            PermissionError,
+            OSError
+        ):
+            continue
+
+        lines = content.splitlines()
+
+        for line_number, line in enumerate(
+            lines,
+            start=1
+        ):
+
+            # =========================================
+            # Точный поиск определения функции
+            # =========================================
+
+            if function_name:
+
+                pattern = (
+                    rf"^\s*def\s+"
+                    rf"{re.escape(function_name)}"
+                    rf"\s*\("
+                )
+
+                if re.search(pattern, line):
+
+                    matches.append(
+                        {
+                            "file": str(
+                                file_path.relative_to(
+                                    PROJECT_PATH
+                                )
+                            ),
+                            "line": line_number,
+                            "content": line.strip()
+                        }
+                    )
+
+                continue
+
+            # =========================================
+            # Обычный поиск текста
+            # =========================================
+
+            if query.lower() in line.lower():
+
+                matches.append(
+                    {
+                        "file": str(
+                            file_path.relative_to(
+                                PROJECT_PATH
+                            )
+                        ),
+                        "line": line_number,
+                        "content": line.strip()
+                    }
+                )
+
+    return {
+        "success": True,
+        "query": query,
+        "matches": matches,
+        "count": len(matches)
     }

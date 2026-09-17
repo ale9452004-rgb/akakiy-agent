@@ -2,7 +2,8 @@ from tools.files import (
     list_files,
     read_file,
     write_file,
-    edit_file
+    edit_file,
+    search_files
 )
 
 from tools.terminal import run_command
@@ -39,6 +40,12 @@ TOOLS = {
     "edit_file": {
         "function": edit_file,
         "description": "Точечно изменяет существующий файл.",
+        "requires_confirmation": False
+    },
+
+    "search_files": {
+        "function": search_files,
+        "description": "Ищет указанный текст во всех файлах проекта и показывает файлы, номера строк и найденные строки.",
         "requires_confirmation": False
     },
 
