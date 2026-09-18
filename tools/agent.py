@@ -1,10 +1,18 @@
+import inspect
+
 import json
+
 import re
 
 from ollama_client import OllamaClient
+
 from tools.dispatcher import dispatch
+
 from tools.planner import Planner
+
 from tools.plan_executor import PlanExecutor
+
+from tools.registry import TOOLS, get_tools_schema
 
 
 class Agent:
@@ -27,7 +35,84 @@ class Agent:
         """
         Определяет, какой инструмент необходимо использовать.
         """
+
         normalized_input = user_input.strip().lower()
+
+        # =================================================
+        # Поиск конкретного файла
+        # =================================================
+
+        file_search_patterns = [
+            r"^найди\s+файл\s+([^\s,!?;:]+)",
+            r"^найти\s+файл\s+([^\s,!?;:]+)",
+            r"^найди\s+в\s+проекте\s+файл\s+([^\s,!?;:]+)",
+            r"^найти\s+в\s+проекте\s+файл\s+([^\s,!?;:]+)",
+        ]
+
+        for pattern in file_search_patterns:
+            match = re.search(
+                pattern,
+                normalized_input,
+                flags=re.IGNORECASE
+            )
+
+            if match:
+                filename = match.group(1).strip()
+                filename = filename.rstrip(".,!?;:")
+
+                return {
+                    "tool": "find_file",
+                    "arguments": {
+                        "filename": filename
+                    }
+                }
+
+        # =================================================
+        # Просмотр списка файлов проекта
+        # =================================================
+
+        list_files_patterns = [
+            "покажи список файлов проекта",
+            "покажи файлы проекта",
+            "список файлов проекта",
+            "перечисли файлы проекта",
+            "покажи список файлов",
+            "покажи файлы",
+            "список файлов",
+            "перечисли файлы",
+        ]
+
+        if any(
+            phrase in normalized_input
+            for phrase in list_files_patterns
+        ):
+            return {
+                "tool": "list_files",
+                "arguments": {}
+            }
+
+        # =================================================
+        # Анализ структуры проекта
+        # =================================================
+
+        structure_patterns = [
+            "проанализируй структуру проекта",
+            "анализ структуры проекта",
+            "покажи структуру проекта",
+            "покажи структуру проекта акакия",
+            "структура проекта",
+        ]
+
+        if any(
+            phrase in normalized_input
+            for phrase in structure_patterns
+        ):
+            return {
+                "tool": "list_files",
+                "arguments": {}
+            }
+
+
 
         # =================================================
         # Поиск функции
@@ -99,104 +184,153 @@ class Agent:
                 }
             }
 
-        # =================================================
-        # Обычный выбор инструмента через AI
-        # =================================================
-
-        prompt = f"""
-Ты — локальный ИИ-ассистент Акакий.
-
-Определи, какой инструмент лучше всего
-подходит для запроса пользователя.
-
-Запрос пользователя:
-
-{user_input}
-
-Доступные инструменты:
-
-1. read_file
-
-Использовать для чтения конкретного файла.
-
-2. write_file
-
-Использовать для создания или полной записи файла.
-
-3. edit_file
-
-Использовать для изменения существующего файла.
-
-4. search_files
-
-Использовать для поиска текста, функции,
-класса или другого фрагмента по всему проекту.
-
-5. analyze_file
-
-Использовать для анализа конкретного файла.
-
-6. run_command
-
-Использовать для выполнения команды PowerShell.
-
-7. validate_project
-
-Использовать для проверки Python-файлов проекта.
-
-8. git_status
-
-Использовать для проверки состояния Git.
-
-9. git_diff
-
-Использовать для просмотра изменений Git.
-
-10. git_commit
-
-Использовать для создания Git-коммита.
-
-11. git_push
-
-Использовать для отправки изменений в GitHub.
-
-Верни только JSON.
-
-Формат:
-
-{{
-    "tool": "название инструмента",
-    "arguments": {{
-        "параметр": "значение"
-    }}
-}}
-"""
-
-        response = self.ai.ask(
-            prompt,
-            add_to_history=False
-        )
-
-        try:
-            result = json.loads(response)
-        except json.JSONDecodeError:
-            return {
-                "tool": None,
-                "arguments": {},
-                "error": "AI вернул некорректный JSON.",
-                "raw_response": response
-            }
-
-        return result
+        # Если ни один детерминированный шаблон не подошёл,
+        # возвращаем отсутствие инструмента (маршрутизация передаётся в Native Tool Calling)
+        return {
+            "tool": None,
+            "arguments": {}
+        }
 
     def execute_tool(self, tool_name, arguments):
         """
-        Выполняет выбранный инструмент.
+        Безопасно выполняет выбранный инструмент.
+
+        Перед dispatch:
+        - проверяется существование инструмента;
+        - проверяется тип аргументов;
+        - нормализуются известные синонимы;
+        - проверяются неизвестные аргументы;
+        - проверяются обязательные параметры.
+
+        Это защищает инструментальный слой от ошибок,
+        когда AI передаёт параметр, которого нет
+        в реальной сигнатуре функции.
         """
+
+        if not isinstance(tool_name, str) or not tool_name.strip():
+            return {
+                "success": False,
+                "error": "Не указано имя инструмента."
+            }
+
+        tool_name = tool_name.strip()
+
+        if tool_name not in TOOLS:
+            return {
+                "success": False,
+                "error": (
+                    f"Инструмент не найден: {tool_name}"
+                )
+            }
+
+        if arguments is None:
+            arguments = {}
+
+        if not isinstance(arguments, dict):
+            return {
+                "success": False,
+                "error": (
+                    "Аргументы инструмента должны "
+                    "быть объектом JSON."
+                )
+            }
+
+        normalized_arguments = dict(arguments)
+
+        # =================================================
+        # Нормализация известных синонимов
+        # =================================================
+
+        if tool_name == "search_files":
+            if (
+                "pattern" in normalized_arguments
+                and "query" not in normalized_arguments
+            ):
+                normalized_arguments["query"] = (
+                    normalized_arguments.pop("pattern")
+                )
+
+        # =================================================
+        # Получаем реальную сигнатуру инструмента
+        # =================================================
+
+        function = TOOLS[tool_name]["function"]
+        signature = inspect.signature(function)
+        parameters = signature.parameters
+
+        # =================================================
+        # Проверяем неизвестные аргументы
+        # =================================================
+
+        unknown_arguments = [
+            name
+            for name in normalized_arguments
+            if name not in parameters
+        ]
+
+        if unknown_arguments:
+            return {
+                "success": False,
+                "error": (
+                    f"Инструмент '{tool_name}' "
+                    f"не принимает следующие аргументы: "
+                    f"{', '.join(unknown_arguments)}."
+                )
+            }
+
+        # =================================================
+        # Проверяем обязательные аргументы
+        # =================================================
+
+        missing_arguments = []
+
+        for name, parameter in parameters.items():
+            if parameter.kind in (
+                inspect.Parameter.VAR_POSITIONAL,
+                inspect.Parameter.VAR_KEYWORD
+            ):
+                continue
+
+            if (
+                parameter.default is inspect.Parameter.empty
+                and name not in normalized_arguments
+            ):
+                missing_arguments.append(name)
+
+        if missing_arguments:
+            return {
+                "success": False,
+                "error": (
+                    f"Для инструмента '{tool_name}' "
+                    f"не хватает обязательных аргументов: "
+                    f"{', '.join(missing_arguments)}."
+                )
+            }
+
+        # =================================================
+        # Выполняем инструмент
+        # =================================================
+
         return dispatch(
             tool_name,
-            **arguments
+            **normalized_arguments
         )
+
+    def serialize_tool_result(self, result):
+        """
+        Сериализует результат выполнения инструмента для передачи в Ollama с role: tool.
+        """
+        if isinstance(result, dict):
+            # Если это стандартная обёртка dispatch {"success": True, "result": ...}
+            if "result" in result and result.get("success") is True:
+                inner = result["result"]
+                if isinstance(inner, (dict, list)):
+                    return json.dumps(inner, ensure_ascii=False, indent=2)
+                return str(inner)
+            return json.dumps(result, ensure_ascii=False, indent=2)
+        elif isinstance(result, (list, tuple)):
+            return json.dumps(result, ensure_ascii=False, indent=2)
+        return str(result)
 
     def prepare_edit(self, filename, user_request):
         """
@@ -372,7 +506,6 @@ class Agent:
         """
         Пытается определить простое текстовое изменение
         без обращения к AI.
-
         Поддерживаемый формат:
 
         Измени строку с сообщением X
@@ -389,7 +522,6 @@ class Agent:
         кода, а не строка внутри prompt/docstring.
 
         Метод ничего не изменяет в файле.
-
         Он только возвращает old_text/new_text.
         """
 
@@ -443,26 +575,8 @@ class Agent:
         # -------------------------------------------------
         # Форматы простых текстовых замен
         # -------------------------------------------------
-        #
-        # Сначала идут варианты с явно заключённым
-        # новым значением в кавычки.
-        #
-        # Это важно для запросов вида:
-        #
-        # Заменить строку с сообщением
-        # 'Пустой запрос.' на 'Запрос пуст.'
-        # в функции process_request
-        #
-        # В таком случае всё после закрывающей кавычки
-        # является уточнением и не должно попадать
-        # в new_text.
-        # -------------------------------------------------
 
         patterns = [
-            # -------------------------------------------------
-            # Сообщение с кавычечными значениями.
-            # -------------------------------------------------
-
             r"""
             ^\s*
             (?:измени|изменить|замени|заменить)
@@ -477,11 +591,6 @@ class Agent:
             (?P<new_quote>["'])(?P<new>.*?)(?P=new_quote)
             (?:\s+.*)?$
             """,
-
-            # -------------------------------------------------
-            # Текстом с кавычечными значениями.
-            # -------------------------------------------------
-
             r"""
             ^\s*
             (?:измени|изменить|замени|заменить)
@@ -496,11 +605,6 @@ class Agent:
             (?P<new_quote>["'])(?P<new>.*?)(?P=new_quote)
             (?:\s+.*)?$
             """,
-
-            # -------------------------------------------------
-            # "строку с текстом X на Y"
-            # -------------------------------------------------
-
             r"""
             ^\s*
             (?:измени|изменить|замени|заменить)
@@ -518,11 +622,6 @@ class Agent:
             (?P<new_quote>["'])(?P<new>.*?)(?P=new_quote)
             (?:\s+.*)?$
             """,
-
-            # -------------------------------------------------
-            # "текст X на Y" с кавычками.
-            # -------------------------------------------------
-
             r"""
             ^\s*
             (?:измени|изменить|замени|заменить)
@@ -536,12 +635,6 @@ class Agent:
             (?P<new_quote>["'])(?P<new>.*?)(?P=new_quote)
             (?:\s+.*)?$
             """,
-
-            # -------------------------------------------------
-            # Универсальный вариант "сообщением X на Y"
-            # без обязательных кавычек.
-            # -------------------------------------------------
-
             r"""
             ^\s*
             (?:измени|изменить|замени|заменить)
@@ -558,11 +651,6 @@ class Agent:
             (?P<new>.+?)
             \s*$
             """,
-
-            # -------------------------------------------------
-            # "текстом X на текст Y"
-            # -------------------------------------------------
-
             r"""
             ^\s*
             (?:измени|изменить|замени|заменить)
@@ -579,11 +667,6 @@ class Agent:
             (?P<new>.+?)
             \s*$
             """,
-
-            # -------------------------------------------------
-            # "строку с текстом X на Y"
-            # -------------------------------------------------
-
             r"""
             ^\s*
             (?:измени|изменить|замени|заменить)
@@ -601,11 +684,6 @@ class Agent:
             (?P<new>.+?)
             \s*$
             """,
-
-            # -------------------------------------------------
-            # "текст X на Y"
-            # -------------------------------------------------
-
             r"""
             ^\s*
             (?:измени|изменить|замени|заменить)
@@ -619,11 +697,6 @@ class Agent:
             (?P<new>.+?)
             \s*$
             """,
-
-            # -------------------------------------------------
-            # Старый универсальный вариант.
-            # -------------------------------------------------
-
             r"""
             ^\s*
             (?:измени|изменить|замени|заменить)
@@ -667,13 +740,6 @@ class Agent:
 
         # -------------------------------------------------
         # Определяем семантический приоритет.
-        #
-        # Например:
-        #
-        # "строку с сообщением X"
-        #
-        # означает, что предпочтителен ключ
-        # "message", а не "answer".
         # -------------------------------------------------
 
         preferred_key = None
@@ -731,7 +797,6 @@ class Agent:
         candidates = []
 
         for index, line in enumerate(lines):
-
             if old_text not in line:
                 continue
 
@@ -828,24 +893,10 @@ class Agent:
         """
         Оценивает вероятность того, что строка является
         реальным Python-кодом, а не текстом prompt/docstring.
-
-        Чем выше score, тем вероятнее, что это нужный
-        участок программы.
-
-        preferred_key позволяет учитывать семантику
-        пользовательского запроса.
-
-        Например, если пользователь говорит
-        "строку с сообщением", ключ "message"
-        получает дополнительный приоритет.
         """
 
         score = 0
         stripped = line.strip()
-
-        # -------------------------------------------------
-        # Признаки реального Python-кода
-        # -------------------------------------------------
 
         if ":" in stripped:
             score += 2
@@ -866,21 +917,11 @@ class Agent:
         if "{" in stripped or "}" in stripped:
             score += 2
 
-        # -------------------------------------------------
-        # Словарь Python:
-        #
-        # "answer": "Пустой запрос."
-        # -------------------------------------------------
-
         if re.search(
             r"""["'][^"']+["']\s*:\s*["']""",
             stripped
         ):
             score += 6
-
-        # -------------------------------------------------
-        # Семантический приоритет ключа.
-        # -------------------------------------------------
 
         if preferred_key:
             key_pattern = (
@@ -894,10 +935,6 @@ class Agent:
             ):
                 score += 8
 
-        # -------------------------------------------------
-        # Функциональный код.
-        # -------------------------------------------------
-
         if re.search(
             r"\breturn\b",
             stripped
@@ -910,16 +947,8 @@ class Agent:
         ):
             score += 3
 
-        # -------------------------------------------------
-        # Комментарии явно понижаем.
-        # -------------------------------------------------
-
         if stripped.startswith("#"):
             score -= 8
-
-        # -------------------------------------------------
-        # Prompt/docstring.
-        # -------------------------------------------------
 
         if stripped.startswith(
             (
@@ -939,18 +968,8 @@ class Agent:
         ):
             score -= 5
 
-        # -------------------------------------------------
-        # Строки с явным оформлением обычного текста
-        # внутри тройных кавычек считаем менее вероятными.
-        # -------------------------------------------------
-
         if '"""' in stripped or "'''" in stripped:
             score -= 6
-
-        # -------------------------------------------------
-        # Если рядом находится строковый prompt,
-        # это дополнительный признак текста инструкции.
-        # -------------------------------------------------
 
         start = max(0, index - 5)
         end = min(len(lines), index + 6)
@@ -971,10 +990,6 @@ class Agent:
         for marker in prompt_markers:
             if marker in nearby:
                 score -= 2
-
-        # -------------------------------------------------
-        # Сам факт присутствия old_text в строке.
-        # -------------------------------------------------
 
         if old_text in stripped:
             score += 1
@@ -1614,33 +1629,180 @@ REJECT
         # Обычный инструмент
         # =================================================
 
+        # =================================================
+        # ?????????????? ?????? Planner ??? ??????? ????????????????? ????????
+        # =================================================
+
+        research_patterns = [
+            "\u043f\u0440\u043e\u0430\u043d\u0430\u043b\u0438\u0437\u0438\u0440\u0443\u0439 \u0441\u0442\u0440\u0443\u043a\u0442\u0443\u0440\u0443 \u043f\u0440\u043e\u0435\u043a\u0442\u0430",
+            "\u0430\u043d\u0430\u043b\u0438\u0437 \u0441\u0442\u0440\u0443\u043a\u0442\u0443\u0440\u044b \u043f\u0440\u043e\u0435\u043a\u0442\u0430",
+            "\u0438\u0441\u0441\u043b\u0435\u0434\u0443\u0439 \u0441\u0442\u0440\u0443\u043a\u0442\u0443\u0440\u0443 \u043f\u0440\u043e\u0435\u043a\u0442\u0430",
+            "\u0438\u0437\u0443\u0447\u0438 \u0441\u0442\u0440\u0443\u043a\u0442\u0443\u0440\u0443 \u043f\u0440\u043e\u0435\u043a\u0442\u0430",
+        ]
+
+        if any(
+            phrase in user_input.lower()
+            for phrase in research_patterns
+        ):
+            plan_result = self.create_plan(user_input)
+
+            if not plan_result.get("success"):
+                return {
+                    "type": "plan_execution",
+                    "tool": "execute_plan",
+                    "result": plan_result
+                }
+
+            execution_result = self.execute_plan(
+                plan_result.get("plan")
+            )
+
+            return {
+                "type": "plan_execution",
+                "tool": "execute_plan",
+                "result": execution_result
+            }
+
         tool_selection = self.choose_tool(
             user_input
         )
 
-        tool_name = tool_selection.get("tool")
+        tool_name = tool_selection.get("tool") if tool_selection else None
 
-        arguments = tool_selection.get(
-            "arguments",
-            {}
-        )
+        if tool_name and str(tool_name).strip().lower() not in {"null", "none"}:
+            arguments = tool_selection.get(
+                "arguments",
+                {}
+            )
 
-        if not tool_name:
+            result = self.execute_tool(
+                tool_name,
+                arguments
+            )
+
             return {
-                "type": "chat",
-                "answer": (
-                    "Не удалось определить "
-                    "необходимый инструмент."
-                )
+                "type": "tool",
+                "tool": tool_name,
+                "result": result
             }
 
-        result = self.execute_tool(
-            tool_name,
-            arguments
+        # =================================================
+        # Native Tool Calling (Ollama)
+        # =================================================
+
+        MAX_TOOL_ROUNDS = 5
+        turn_messages = [
+            {
+                "role": "user",
+                "content": user_input
+            }
+        ]
+
+        response = self.ai.ask(
+            user_input,
+            add_to_history=True,
+            tools=get_tools_schema()
         )
 
+        if isinstance(response, dict):
+            tool_calls = response.get("tool_calls", [])
+            content = response.get("content", "")
+            assistant_msg = response.get("message") or {
+                "role": "assistant",
+                "content": content,
+                "tool_calls": tool_calls
+            }
+        else:
+            tool_calls = []
+            content = str(response)
+            assistant_msg = {
+                "role": "assistant",
+                "content": content
+            }
+
+        if not tool_calls:
+            return {
+                "type": "chat",
+                "answer": content
+            }
+
+        for round_idx in range(MAX_TOOL_ROUNDS):
+            turn_messages.append(assistant_msg)
+
+            for call in tool_calls:
+                function_data = call.get("function", {})
+                tool_name = function_data.get("name")
+                arguments = function_data.get("arguments", {})
+
+                if isinstance(arguments, str):
+                    try:
+                        arguments = json.loads(arguments)
+                    except Exception:
+                        pass
+
+                result = self.execute_tool(
+                    tool_name,
+                    arguments
+                )
+
+                # Если выполнение инструмента вернуло ошибку или отменено пользователем:
+                # 1. Немедленно прерываем цепочку
+                # 2. Не отправляем повторные запросы в Ollama
+                # 3. Не фиксируем незавершённый ход в истории сообщений
+                # 4. Возвращаем результат ошибки/отмены пользователю
+                if isinstance(result, dict) and not result.get("success", True):
+                    return {
+                        "type": "tool",
+                        "tool": tool_name,
+                        "result": result
+                    }
+
+                tool_content = self.serialize_tool_result(result)
+                tool_message = {
+                    "role": "tool",
+                    "content": tool_content
+                }
+                if call.get("id"):
+                    tool_message["tool_call_id"] = call["id"]
+
+                turn_messages.append(tool_message)
+
+                # После успешного изменения или создания файла (edit_file / write_file) автоматически запускаем проверку проекта
+                if tool_name in ("edit_file", "write_file"):
+                    validation_result = self.execute_tool(
+                        "validate_project",
+                        {}
+                    )
+                    validation_content = self.serialize_tool_result(
+                        validation_result
+                    )
+                    turn_messages.append({
+                        "role": "tool",
+                        "content": validation_content
+                    })
+
+            next_response = self.ai.send_tool_step(
+                turn_messages,
+                tools=get_tools_schema()
+            )
+
+            tool_calls = next_response.get("tool_calls", [])
+            content = next_response.get("content", "")
+            assistant_msg = next_response.get("message") or {
+                "role": "assistant",
+                "content": content,
+                "tool_calls": tool_calls
+            }
+
+            if not tool_calls:
+                turn_messages.append(assistant_msg)
+                self.ai.commit_turn(turn_messages)
+                return {
+                    "type": "chat",
+                    "answer": content if (isinstance(content, str) and content.strip()) else "Действие успешно выполнено."
+                }
+
         return {
-            "type": "tool",
-            "tool": tool_name,
-            "result": result
+            "type": "chat",
+            "answer": "Достигнут максимальный лимит шагов инструментов (5). Выполнение остановлено."
         }

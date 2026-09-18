@@ -2,7 +2,7 @@ from pathlib import Path
 import subprocess
 
 
-PROJECT_PATH = Path(r"C:\Akakiy agent")
+from config import PROJECT_PATH
 
 
 def validate_project():

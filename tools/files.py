@@ -2,7 +2,44 @@ from pathlib import Path
 import re
 import subprocess
 
-PROJECT_PATH = Path(r"C:\Akakiy agent")
+from config import PROJECT_PATH
+
+
+def resolve_safe_path(filename):
+    """
+    Проверяет и возвращает безопасный Path внутри PROJECT_PATH.
+    Защищает от Path Traversal, выхода за пределы проекта через '..'
+    или абсолютные пути вне проекта.
+    Возвращает кортеж (resolved_path, error_dict_or_None).
+    """
+    if not filename or not str(filename).strip():
+        return None, {
+            "success": False,
+            "error": "Имя файла не может быть пустым."
+        }
+
+    try:
+        project_resolved = PROJECT_PATH.resolve()
+        raw_path = Path(str(filename).strip())
+
+        if raw_path.is_absolute():
+            resolved = raw_path.resolve()
+        else:
+            resolved = (project_resolved / raw_path).resolve()
+
+        if not resolved.is_relative_to(project_resolved):
+            return None, {
+                "success": False,
+                "error": f"Доступ запрещён: путь выходит за пределы проекта ({filename})."
+            }
+
+        return resolved, None
+
+    except Exception as error:
+        return None, {
+            "success": False,
+            "error": f"Некорректный путь к файлу '{filename}': {error}"
+        }
 
 
 def list_files():
@@ -18,6 +55,9 @@ def list_files():
         if "__pycache__" in file_path.parts:
             continue
 
+        if ".git" in file_path.parts:
+            continue
+
         files.append(str(file_path.relative_to(PROJECT_PATH)))
 
     return {
@@ -27,8 +67,52 @@ def list_files():
     }
 
 
+def find_file(filename):
+    filename = filename.strip()
+
+    if not filename:
+        return {
+            "success": False,
+            "error": "Имя файла пустое."
+        }
+
+    normalized_filename = filename.replace("\\", "/").strip("/")
+
+    matches = []
+
+    for file_path in PROJECT_PATH.rglob("*"):
+        if not file_path.is_file():
+            continue
+
+        if ".venv" in file_path.parts:
+            continue
+
+        if "__pycache__" in file_path.parts:
+            continue
+
+        relative_path = str(
+            file_path.relative_to(PROJECT_PATH)
+        ).replace("\\", "/")
+
+        if (
+            relative_path == normalized_filename
+            or file_path.name == normalized_filename
+        ):
+            matches.append(relative_path)
+
+    return {
+        "success": True,
+        "filename": filename,
+        "matches": matches,
+        "count": len(matches)
+    }
+
+
 def read_file(filename):
-    file_path = PROJECT_PATH / filename
+    file_path, error = resolve_safe_path(filename)
+
+    if error:
+        return error
 
     if not file_path.exists():
         return {
@@ -61,7 +145,10 @@ def read_file(filename):
 
 
 def write_file(filename, content):
-    file_path = PROJECT_PATH / filename
+    file_path, error = resolve_safe_path(filename)
+
+    if error:
+        return error
 
     try:
         file_path.parent.mkdir(
@@ -122,7 +209,10 @@ def validate_python_file(file_path):
 
 
 def edit_file(filename, old_text, new_text):
-    file_path = PROJECT_PATH / filename
+    file_path, error = resolve_safe_path(filename)
+
+    if error:
+        return error
 
     if not file_path.exists():
         return {
@@ -174,19 +264,9 @@ def edit_file(filename, old_text, new_text):
         )
     )
 
-    print("\n--- Предлагаемые изменения ---")
+    print("\n--- Применяемые изменения ---")
     print(diff)
     print("--- Конец изменений ---")
-
-    confirmation = input(
-        "Применить изменения? (да/нет): "
-    ).strip().lower()
-
-    if confirmation not in ["да", "д", "yes", "y"]:
-        return {
-            "success": False,
-            "error": "Пользователь отменил изменение."
-        }
 
     backup_path = file_path.with_suffix(
         file_path.suffix + ".bak"

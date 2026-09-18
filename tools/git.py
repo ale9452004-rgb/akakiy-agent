@@ -1,7 +1,8 @@
+from pathlib import Path
 import subprocess
 
 
-PROJECT_PATH = r"C:\Akakiy agent"
+from config import PROJECT_PATH
 
 
 def run_git_command(arguments):
@@ -145,6 +146,37 @@ def git_commit(message):
         f"{number:03d}: {message.strip()}"
     )
 
+    # Проверка на конфиденциальные файлы перед индексацией
+    sensitive_keywords = [
+        ".env", ".key", ".pem", ".pfx", "id_rsa", "id_ed25519", "credentials", "secret", "token"
+    ]
+
+    files_to_stage = []
+    for line in status["stdout"].splitlines():
+        if not line.strip():
+            continue
+        file_path_str = line[3:].strip()
+        file_name_lower = Path(file_path_str).name.lower()
+        if any(kw in file_name_lower for kw in sensitive_keywords):
+            return {
+                "success": False,
+                "error": (
+                    f"Коммит отклонён из соображений безопасности: обнаружен "
+                    f"потенциально конфиденциальный файл '{file_path_str}'. "
+                    f"Добавьте его в .gitignore перед коммитом."
+                )
+            }
+        files_to_stage.append(file_path_str)
+
+    if not files_to_stage:
+        return {
+            "success": False,
+            "error": "Нет файлов для коммита."
+        }
+
+    print("\n--- Файлы для commit (git status) ---")
+    print(status["stdout"].strip())
+
     print("\n--- Изменения перед commit ---")
 
     if diff["stdout"].strip():
@@ -158,25 +190,20 @@ def git_commit(message):
         f"\nПредлагаемый commit: {commit_message}"
     )
 
-    confirmation = input(
-        "\nСоздать этот commit? (да/нет): "
-    ).strip().lower()
-
-    if confirmation not in ["да", "д", "yes", "y"]:
-        return {
-            "success": False,
-            "message": "Создание commit отменено пользователем."
-        }
-
+    # Индексируем проверенные файлы
     result = run_git_command(
         [
             "add",
-            "."
+            "--",
+            *files_to_stage
         ]
     )
 
     if not result["success"]:
-        return result
+        return {
+            "success": False,
+            "error": result.get("stderr") or "Ошибка выполнения git add."
+        }
 
     result = run_git_command(
         [
@@ -187,7 +214,10 @@ def git_commit(message):
     )
 
     if not result["success"]:
-        return result
+        return {
+            "success": False,
+            "error": result.get("stderr") or "Ошибка выполнения git commit."
+        }
 
     return {
         "success": True,
@@ -293,16 +323,6 @@ def git_push():
     print("Удалённый репозиторий:")
     print(remote_result["stdout"])
 
-    confirmation = input(
-        "\nОтправить изменения в удалённый репозиторий? (да/нет): "
-    ).strip().lower()
-
-    if confirmation not in ["да", "д", "yes", "y"]:
-        return {
-            "success": False,
-            "message": "Push отменён пользователем."
-        }
-
     push_result = run_git_command(
         [
             "push",
@@ -312,7 +332,10 @@ def git_push():
     )
 
     if not push_result["success"]:
-        return push_result
+        return {
+            "success": False,
+            "error": push_result.get("stderr") or "Ошибка выполнения git push."
+        }
 
     return {
     "success": True,

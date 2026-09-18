@@ -1,6 +1,6 @@
 import subprocess
 
-PROJECT_PATH = r"C:\Akakiy agent"
+from config import PROJECT_PATH
 
 
 def run_command(command):

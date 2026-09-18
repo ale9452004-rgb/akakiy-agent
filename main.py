@@ -1,7 +1,5 @@
+from commands import show_help, show_status
 from tools.agent import Agent
-
-
-agent = Agent()
 
 
 def print_step_result(step_result):
@@ -639,144 +637,162 @@ def print_tool_result(tool_name, tool_result):
     )
 
 
-print("Акакий запущен.")
-print(
-    "Я могу общаться, работать с файлами проекта "
-    "и выполнять команды."
-)
-print("Для завершения напиши: выход")
+def main():
+    agent = Agent()
 
+    print("Акакий запущен.")
+    print(
+        "Я могу общаться, работать с файлами проекта "
+        "и выполнять команды."
+    )
+    print(
+        "Команды: 'помощь' — список команд, "
+        "'статус' — состояние Акакия, "
+        "'выход' — завершить работу."
+    )
 
-while True:
+    while True:
 
-    user_input = input(
-        "\nТы: "
-    ).strip()
+        user_input = input(
+            "\nТы: "
+        ).strip()
 
-    if not user_input:
-        continue
+        if not user_input:
+            continue
 
-    if user_input.lower() == "выход":
-
-        print(
-            "Акакий завершает работу."
-        )
-
-        break
-
-    try:
-
-        result = agent.process(
-            user_input
-        )
-
-        # =============================================
-        # Обычный чат
-        # =============================================
-
-        if result["type"] == "chat":
+        if user_input.lower() == "выход":
 
             print(
-                f"\nАкакий:\n"
-                f"{result['answer']}"
+                "Акакий завершает работу."
             )
 
-        # =============================================
-        # Выполнение плана
-        # =============================================
+            break
 
-        elif result["type"] == "plan_execution":
+        if user_input.lower() == "статус":
+            show_status()
+            continue
 
-            execution_result = result.get(
-                "result"
+        if user_input.lower() in ("помощь", "help"):
+            show_help()
+            continue
+
+        try:
+
+            result = agent.process(
+                user_input
             )
 
-            print("\nАкакий:")
+            # =============================================
+            # Обычный чат
+            # =============================================
 
-            if not isinstance(
-                execution_result,
-                dict
-            ):
+            if result["type"] == "chat":
 
                 print(
-                    execution_result
+                    f"\nАкакий:\n"
+                    f"{result['answer']}"
                 )
 
-                continue
+            # =============================================
+            # Выполнение плана
+            # =============================================
 
-            results = execution_result.get(
-                "results",
-                []
-            )
+            elif result["type"] == "plan_execution":
 
-            if not execution_result.get(
-                "success"
-            ):
-
-                print(
-                    f"Ошибка: "
-                    f"{execution_result.get('message')}"
+                execution_result = result.get(
+                    "result"
                 )
 
-                if results:
+                print("\nАкакий:")
+
+                if not isinstance(
+                    execution_result,
+                    dict
+                ):
 
                     print(
-                        "\nВыполненные шаги:"
+                        execution_result
                     )
 
-                    for step_result in results:
-                        print_step_result(
-                            step_result
+                    continue
+
+                results = execution_result.get(
+                    "results",
+                    []
+                )
+
+                if not execution_result.get(
+                    "success"
+                ):
+
+                    print(
+                        f"Ошибка: "
+                        f"{execution_result.get('message')}"
+                    )
+
+                    if results:
+
+                        print(
+                            "\nВыполненные шаги:"
                         )
+
+                        for step_result in results:
+                            print_step_result(
+                                step_result
+                            )
+
+                    continue
+
+                print(
+                    "✓ План выполнен."
+                )
+
+                print(
+                    f"\nВыполнено шагов: "
+                    f"{len(results)}"
+                )
+
+                for step_result in results:
+
+                    print_step_result(
+                        step_result
+                    )
 
                 continue
 
-            print(
-                "✓ План выполнен."
-            )
+            # =============================================
+            # План
+            # =============================================
 
-            print(
-                f"\nВыполнено шагов: "
-                f"{len(results)}"
-            )
+            elif result["type"] == "plan":
 
-            for step_result in results:
-
-                print_step_result(
-                    step_result
+                print_plan(
+                    result.get("result"),
+                    result.get("tool")
                 )
 
-            continue
+                continue
 
-        # =============================================
-        # План
-        # =============================================
+            # =============================================
+            # Обычный инструмент
+            # =============================================
 
-        elif result["type"] == "plan":
+            elif result["type"] == "tool":
 
-            print_plan(
-                result.get("result"),
-                result.get("tool")
+                print_tool_result(
+                    result["tool"],
+                    result["result"]
+                )
+
+                continue
+
+        except Exception as error:
+
+            print(
+                f"\nОшибка Акакия: "
+                f"{error}"
             )
 
-            continue
 
-        # =============================================
-        # Обычный инструмент
-        # =============================================
-
-        elif result["type"] == "tool":
-
-            print_tool_result(
-                result["tool"],
-                result["result"]
-            )
-
-            continue
-
-    except Exception as error:
-
-        print(
-            f"\nОшибка Акакия: "
-            f"{error}"
-        )
+if __name__ == "__main__":
+    main()

@@ -1,5 +1,6 @@
 from tools.files import (
     list_files,
+    find_file,
     read_file,
     write_file,
     edit_file,
@@ -25,6 +26,12 @@ TOOLS = {
         "requires_confirmation": False
     },
 
+    "find_file": {
+        "function": find_file,
+        "description": "Ищет файл по имени или относительному пути в проекте.",
+        "requires_confirmation": False
+    },
+
     "read_file": {
         "function": read_file,
         "description": "Читает содержимое указанного файла.",
@@ -40,7 +47,7 @@ TOOLS = {
     "edit_file": {
         "function": edit_file,
         "description": "Точечно изменяет существующий файл.",
-        "requires_confirmation": False
+        "requires_confirmation": True
     },
 
     "search_files": {
@@ -82,7 +89,7 @@ TOOLS = {
     "git_commit": {
         "function": git_commit,
         "description": "Создаёт Git-коммит после показа изменений и подтверждения.",
-        "requires_confirmation": False
+        "requires_confirmation": True
     },
 
     "git_log": {
@@ -94,7 +101,7 @@ TOOLS = {
     "git_push": {
         "function": git_push,
         "description": "Отправляет текущую ветку Git в удалённый репозиторий.",
-        "requires_confirmation": False
+        "requires_confirmation": True
     }
 }
 
@@ -112,3 +119,152 @@ def get_tools_description():
         )
 
     return "\n".join(descriptions)
+
+
+TOOL_PARAMETERS = {
+    "list_files": {
+        "properties": {},
+        "required": []
+    },
+    "find_file": {
+        "properties": {
+            "filename": {
+                "type": "string",
+                "description": "Имя или относительный путь к файлу в проекте"
+            }
+        },
+        "required": ["filename"]
+    },
+    "read_file": {
+        "properties": {
+            "filename": {
+                "type": "string",
+                "description": "Имя или путь к файлу для чтения"
+            }
+        },
+        "required": ["filename"]
+    },
+    "write_file": {
+        "properties": {
+            "filename": {
+                "type": "string",
+                "description": "Имя или путь к создаваемому/перезаписываемому файлу"
+            },
+            "content": {
+                "type": "string",
+                "description": "Полное текстовое содержимое файла"
+            }
+        },
+        "required": ["filename", "content"]
+    },
+    "edit_file": {
+        "properties": {
+            "filename": {
+                "type": "string",
+                "description": "Имя или путь к редактируемому файлу"
+            },
+            "old_text": {
+                "type": "string",
+                "description": "Точный фрагмент существующего текста для замены"
+            },
+            "new_text": {
+                "type": "string",
+                "description": "Новый текст, который должен заменить old_text"
+            }
+        },
+        "required": ["filename", "old_text", "new_text"]
+    },
+    "search_files": {
+        "properties": {
+            "query": {
+                "type": "string",
+                "description": "Текст, имя функции или фрагмент для поиска во всех файлах проекта"
+            }
+        },
+        "required": ["query"]
+    },
+    "run_command": {
+        "properties": {
+            "command": {
+                "type": "string",
+                "description": "Команда PowerShell для выполнения в проекте"
+            }
+        },
+        "required": ["command"]
+    },
+    "analyze_file": {
+        "properties": {
+            "filename": {
+                "type": "string",
+                "description": "Имя файла для анализа структуры и кода"
+            },
+            "task": {
+                "type": "string",
+                "description": "Дополнительное описание задачи или вопроса по анализу (опционально)"
+            }
+        },
+        "required": ["filename"]
+    },
+    "validate_project": {
+        "properties": {},
+        "required": []
+    },
+    "git_status": {
+        "properties": {},
+        "required": []
+    },
+    "git_diff": {
+        "properties": {},
+        "required": []
+    },
+    "git_commit": {
+        "properties": {
+            "message": {
+                "type": "string",
+                "description": "Сообщение для Git-коммита"
+            }
+        },
+        "required": ["message"]
+    },
+    "git_log": {
+        "properties": {
+            "limit": {
+                "type": "integer",
+                "description": "Количество последних коммитов (по умолчанию 10)"
+            }
+        },
+        "required": []
+    },
+    "git_push": {
+        "properties": {},
+        "required": []
+    }
+}
+
+
+def get_tools_schema():
+    """
+    Преобразует реестр TOOLS в спецификацию tools для Ollama /api/chat.
+    """
+    schemas = []
+
+    for name, tool in TOOLS.items():
+        params = TOOL_PARAMETERS.get(
+            name,
+            {"properties": {}, "required": []}
+        )
+
+        schemas.append({
+            "type": "function",
+            "function": {
+                "name": name,
+                "description": tool["description"],
+                "parameters": {
+                    "type": "object",
+                    "properties": params.get("properties", {}),
+                    "required": params.get("required", [])
+                }
+            }
+        })
+
+    return schemas
