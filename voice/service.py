@@ -17,10 +17,56 @@ from voice.tts import TextToSpeechEngine
 logger = logging.getLogger(__name__)
 
 
+VOICE_EXIT_COMMANDS = {
+    "стоп",
+    "хватит",
+    "отмена",
+    "выключи голос",
+    "отключи голос",
+    "выключить голос",
+    "отключить голос",
+    "выруби голос",
+    "отключись",
+    "пока",
+    "до свидания",
+    "заверши сеанс",
+    "завершить сеанс",
+    "заверши работу",
+    "завершить работу",
+    "отмена голоса",
+    "выключить голосовой режим",
+    "отключить голосовой режим",
+}
+
+
+def is_voice_exit_command(text: str) -> bool:
+    """Определяет, является ли фраза командой отключения голосового режима."""
+    import re
+    cleaned = re.sub(r"[^\w\s]", "", text.lower()).strip()
+    if cleaned in VOICE_EXIT_COMMANDS:
+        return True
+    exit_triggers = [
+        "выключи голос",
+        "отключи голос",
+        "выключить голос",
+        "отключить голос",
+        "выруби голос",
+        "заверши сеанс",
+        "завершить сеанс",
+        "выключить голосовой режим",
+        "отключить голосовой режим",
+    ]
+    for trig in exit_triggers:
+        if trig in cleaned:
+            return True
+    return False
+
+
 class VoiceService:
     """
     Высокоуровневый сервис голосового управления Акакием.
     Изолирует аудио-потоки от GUI и логики Agent.
+    Поддерживает непрерывный hands-free диалог (Continuous Conversation).
     """
 
     def __init__(
@@ -59,18 +105,23 @@ class VoiceService:
         with self._lock:
             return self._state in ("listening", "thinking", "speaking")
 
-    def start_session(self) -> bool:
+    def start_session(self, continuous: bool = True) -> bool:
         """
-        Запускает один цикл голосового диалога:
-        Слушает фразу -> распознаёт -> передаёт Агенту -> озвучивает ответ.
+        Запускает голосовой диалог:
+        continuous=True: непрерывный hands-free диалог (listening -> thinking -> speaking -> listening).
+        continuous=False: один шаг диалога (однократный запуск).
         """
         if self.is_busy():
             logger.info("Голосовой сеанс уже активен, повторный запуск пропущен.")
             return False
 
+        if self._session_thread and self._session_thread.is_alive():
+            self._session_thread.join(timeout=1.0)
+
         self._stop_event.clear()
         self._session_thread = threading.Thread(
             target=self._run_voice_pipeline,
+            args=(continuous,),
             daemon=True,
             name="Akakiy-VoiceSession-Thread"
         )
@@ -78,9 +129,12 @@ class VoiceService:
         return True
 
     def stop_session(self):
-        """Останавливает текущую запись или воспроизведение."""
+        """Останавливает текущую запись или воспроизведение и завершает сеанс."""
         self._stop_event.set()
         self.tts.stop()
+        if self._session_thread and self._session_thread.is_alive():
+            if threading.current_thread() != self._session_thread:
+                self._session_thread.join(timeout=1.5)
         self._set_state("idle")
 
     def speak_text(self, text: str, on_finish: Optional[Callable[[], None]] = None):
@@ -100,74 +154,102 @@ class VoiceService:
 
         self.tts.speak(clean, on_finish=_done)
 
-    def _run_voice_pipeline(self):
-        """Основной рабочий цикл голосового взаимодействия."""
+    def _run_voice_pipeline(self, continuous: bool = True):
+        """
+        Основной рабочий цикл голосового взаимодействия:
+        listening -> thinking -> speaking -> listening ... (при continuous=True)
+        Завершается по stop_event, голосовой команде выхода или ошибке аудиоустройства.
+        """
+        logger.info(f"Запущен рабочий цикл голосового диалога (continuous={continuous}).")
+
         try:
-            # 1. Захват речи (listening)
-            self._set_state("listening")
-            recognized_text, err = self.stt.listen_phrase(
-                timeout=8.0,
-                phrase_time_limit=14.0,
-                on_level_callback=lambda lvl: self.emit("voice_audio_level", {"level": lvl}),
-                stop_event=self._stop_event
-            )
+            while not self._stop_event.is_set():
+                # 1. Захват речи (listening)
+                self._set_state("listening")
+                recognized_text, err = self.stt.listen_phrase(
+                    timeout=None,
+                    phrase_time_limit=25.0,
+                    silence_threshold_seconds=1.0,
+                    on_level_callback=lambda lvl: self.emit("voice_audio_level", {"level": lvl}),
+                    stop_event=self._stop_event
+                )
 
-            if self._stop_event.is_set():
-                self._set_state("idle")
-                return
+                if self._stop_event.is_set():
+                    break
 
-            if err:
-                logger.error(f"Ошибка распознавания: {err}")
-                self.emit("voice_error", {"message": err})
-                self._set_state("error")
-                time.sleep(1.0)
-                self._set_state("idle")
-                return
+                if err:
+                    logger.error(f"Ошибка распознавания: {err}")
+                    self.emit("voice_error", {"message": err})
+                    self._set_state("error")
+                    self.emit("voice_mode_toggle", {"enabled": False})
+                    time.sleep(1.0)
+                    break
 
-            recognized_text = recognized_text.strip()
-            if not recognized_text:
-                logger.info("Речь не обнаружена (тишина или таймаут).")
-                self._set_state("idle")
-                return
+                recognized_text = recognized_text.strip()
+                if not recognized_text:
+                    # Фоновый шум, тишина или кашель без распознанных слов — продолжаем слушать
+                    continue
 
-            # 2. Передача распознанного текста в GUI и Agent
-            self.emit("voice_recognized", {"text": recognized_text})
+                # 2. Проверка голосовых команд завершения
+                if is_voice_exit_command(recognized_text):
+                    logger.info(f"Получена команда завершения голосового режима: '{recognized_text}'")
+                    self.emit("voice_recognized", {"text": recognized_text})
+                    self._set_state("speaking")
+                    self.emit("voice_mode_toggle", {"enabled": False})
 
-            # 3. Интеллектуальная обработка (thinking)
-            self._set_state("thinking")
+                    speech_done = threading.Event()
+                    self.tts.speak("Голосовой режим отключён.", on_finish=speech_done.set)
+                    while not speech_done.is_set() and not self._stop_event.is_set():
+                        time.sleep(0.05)
+                    break
 
-            if self.agent:
-                result_payload = self.agent.process(recognized_text)
-            else:
-                result_payload = {
-                    "type": "chat",
-                    "answer": f"Распознано: {recognized_text}"
-                }
+                # 3. Передача распознанного текста в GUI и Agent
+                self.emit("voice_recognized", {"text": recognized_text})
 
-            if self._stop_event.is_set():
-                self._set_state("idle")
-                return
+                # 4. Интеллектуальная обработка (thinking)
+                self._set_state("thinking")
 
-            # Передаем итоговый результат в GUI для отображения
-            self.emit("voice_agent_result", {"payload": result_payload, "query": recognized_text})
+                if self.agent:
+                    try:
+                        result_payload = self.agent.process(recognized_text)
+                    except Exception as ag_ex:
+                        logger.error(f"Ошибка агента при обработке голосового запроса: {ag_ex}", exc_info=True)
+                        result_payload = {"type": "error", "error": f"Ошибка агента: {ag_ex}"}
+                else:
+                    result_payload = {
+                        "type": "chat",
+                        "answer": f"Распознано: {recognized_text}"
+                    }
 
-            # 4. Извлечение текста для озвучки
-            raw_answer = self._extract_speech_text(result_payload)
-            clean_speech = clean_for_speech(raw_answer)
+                if self._stop_event.is_set():
+                    break
 
-            # 5. Озвучивание (speaking)
-            if clean_speech and not self._stop_event.is_set():
-                self._set_state("speaking")
-                speech_done = threading.Event()
+                # Передаем итоговый результат в GUI для отображения
+                self.emit("voice_agent_result", {"payload": result_payload, "query": recognized_text})
 
-                def _finish_tts():
-                    speech_done.set()
+                # 5. Извлечение текста для озвучки
+                raw_answer = self._extract_speech_text(result_payload)
+                clean_speech = clean_for_speech(raw_answer)
 
-                self.tts.speak(clean_speech, on_finish=_finish_tts)
+                # 6. Озвучивание (speaking)
+                if clean_speech and not self._stop_event.is_set():
+                    self._set_state("speaking")
+                    speech_done = threading.Event()
 
-                # Ожидаем завершения речи или сигнала прерывания
-                while not speech_done.is_set() and not self._stop_event.is_set():
-                    time.sleep(0.05)
+                    self.tts.speak(clean_speech, on_finish=speech_done.set)
+
+                    # Ожидаем завершения речи или сигнала прерывания
+                    while not speech_done.is_set() and not self._stop_event.is_set():
+                        time.sleep(0.05)
+
+                if self._stop_event.is_set():
+                    break
+
+                # 7. Небольшая акустическая пауза (0.35 с) для затухания реверберации колонок в комнате
+                time.sleep(0.35)
+
+                if not continuous:
+                    break
 
         except Exception as ex:
             logger.error(f"Непредвиденная ошибка в голосовом конвейере: {ex}", exc_info=True)
@@ -177,6 +259,7 @@ class VoiceService:
 
         finally:
             self._set_state("idle")
+            logger.info("Рабочий цикл непрерывного голосового диалога завершён.")
 
     def _extract_speech_text(self, payload: Any) -> str:
         """Извлекает ключевой голосовой ответ из контракта Agent."""
@@ -187,8 +270,11 @@ class VoiceService:
         if p_type == "chat":
             return payload.get("answer", "")
 
-        elif p_type == "plan":
+        elif p_type in ("plan", "plan_execution"):
             # Для планов возвращаем summary или message
+            res = payload.get("result")
+            if isinstance(res, dict):
+                return res.get("summary") or res.get("message") or "План успешно выполнен."
             return payload.get("summary") or payload.get("message") or "План успешно выполнен."
 
         elif p_type == "tool":

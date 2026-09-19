@@ -503,6 +503,13 @@ class AkakiyGUI:
             self.send_btn.config(state="disabled")
             if hasattr(self, "voice_btn"):
                 self.voice_btn.config(text="⏹ Стоп", fg="#f85149", bg="#30363d", state="normal", cursor="hand2")
+        elif state_name == "думает":
+            self.status_badge.config(text=" ДУМАЕТ ", bg="#bc8cff", fg="#0d1117")
+            self.cloud.set_state("thinking")
+            self.is_busy = True
+            self.send_btn.config(state="disabled")
+            if hasattr(self, "voice_btn"):
+                self.voice_btn.config(text="⏹ Стоп", fg="#f85149", bg="#30363d", state="normal", cursor="hand2")
         elif state_name == "ответ":
             self.status_badge.config(text=" ОТВЕТ ", bg="#3fb950", fg="#0d1117")
             self.cloud.set_state("speaking")
@@ -632,20 +639,20 @@ class AkakiyGUI:
                 self.voice_chip.config(text="ГОЛОС: ВЫКЛ", fg="#8b949e")
 
             # 1. Остановить активный сеанс и TTS
-            was_voice_busy = False
             if hasattr(self, "voice") and self.voice:
                 try:
-                    was_voice_busy = self.voice.is_busy()
                     self.voice.stop_session()
+                except Exception:
+                    pass
+                try:
                     self.voice.tts.stop()
                 except Exception:
                     pass
 
-            # 2. Если выполнялся голосовой сеанс — вернуть ядро в idle и статус в готов
-            if was_voice_busy:
-                self.cloud.set_state("idle")
-                self.cloud.set_audio_level(0.0)
-                self.set_gui_state("готов")
+            # 2. Вернуть ядро в idle и статус в готов
+            self.cloud.set_state("idle")
+            self.cloud.set_audio_level(0.0)
+            self.set_gui_state("готов")
 
             # 3. Деактивировать кнопку ввода
             if hasattr(self, "voice_btn"):
@@ -666,6 +673,7 @@ class AkakiyGUI:
             self._log_process("Голосовой режим включён (Голос: ВКЛ). Нажмите '🎙 Запись' для ввода.")
 
     def _on_voice_toggle(self):
+        """Кнопка '🎙 Запись' / '⏹ Стоп'."""
         if not hasattr(self, "voice") or self.voice is None:
             self._log_process("Голосовой модуль недоступен.")
             return
@@ -689,7 +697,7 @@ class AkakiyGUI:
 
     def _on_voice_event(self, event_type: str, data: dict):
         """Пересылает события от VoiceService в очередь GUI."""
-        if not getattr(self, "voice_enabled", False):
+        if not getattr(self, "voice_enabled", False) and event_type != "voice_mode_toggle":
             return
         self.queue.put((event_type, data))
 
@@ -803,13 +811,18 @@ class AkakiyGUI:
                         if v_state == "listening":
                             self.set_gui_state("слушает")
                         elif v_state == "thinking":
-                            self.set_gui_state("работает")
+                            self.set_gui_state("думает")
                         elif v_state == "speaking":
                             self.set_gui_state("ответ")
                         elif v_state == "idle":
                             self.set_gui_state("готов")
                         elif v_state == "error":
                             self.set_gui_state("ошибка")
+
+                    elif msg_type == "voice_mode_toggle":
+                        enabled = payload.get("enabled", False) if isinstance(payload, dict) else bool(payload)
+                        if getattr(self, "voice_enabled", False) != enabled:
+                            self._on_toggle_voice_mode()
 
                     elif msg_type == "voice_recognized":
                         text = payload.get("text", "") if isinstance(payload, dict) else str(payload)

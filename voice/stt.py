@@ -9,12 +9,47 @@ import math
 import os
 from pathlib import Path
 import queue
+import re
 import struct
 import threading
 import time
 from typing import Callable, Optional, Tuple
 
 logger = logging.getLogger(__name__)
+
+COMMON_ACOUSTIC_REPLACEMENTS = [
+    (r"\b(а как и|а как ей|акаки)\b", "акакий"),
+    (r"\b(дик|гид|гит)\s+статус\b", "git status"),
+    (r"\b(гид|гип|гит)\s+(пуш|уж)\b", "git push"),
+    (r"\b(гид|гит)\s+(дифф|диф)\b", "git diff"),
+    (r"\b(гид|гит)\s+коммит\b", "git commit"),
+    (r"\b(гид|гит)\s+лог\b", "git log"),
+    (r"\bтест\s+свит\b", "test suite"),
+    (r"\bпулл\s+реквест\b", "pull request"),
+    (r"\bмейн\s+(пай|пу)\b", "main.py"),
+    (r"\bмейн\s+точка\s+пай\b", "main.py"),
+    (r"\b([a-zA-Zа-яА-Я0-9_]+)\s+пай\b", r"\1.py"),
+    (r"\b(очисть|очистить)\b", "очисти"),
+]
+
+
+def correct_recognized_text(text: str) -> str:
+    """
+    Пост-обработка распознанного текста Vosk:
+    - исправляет частые фонетические искажения модели на технических терминах;
+    - отсекает обращение 'акакий' / 'слушай акакий' в начале команды для более точной маршрутизации.
+    """
+    if not text or not isinstance(text, str):
+        return ""
+    res = text.strip()
+    for pat, repl in COMMON_ACOUSTIC_REPLACEMENTS:
+        res = re.sub(pat, repl, res, flags=re.IGNORECASE)
+
+    # Если фраза начинается с обращения (например, 'акакий', 'слушай акакий') и далее следует команда, убираем префикс
+    wake_match = re.match(r"^(?:слушай\s+)?(?:акакий|акакий,)\s+(.+)$", res, flags=re.IGNORECASE)
+    if wake_match:
+        res = wake_match.group(1).strip()
+    return res
 
 
 class SpeechToTextEngine:
@@ -73,14 +108,15 @@ class SpeechToTextEngine:
 
     def listen_phrase(
         self,
-        timeout: float = 8.0,
-        phrase_time_limit: float = 14.0,
-        silence_threshold_seconds: float = 1.6,
+        timeout: Optional[float] = 8.0,
+        phrase_time_limit: float = 16.0,
+        silence_threshold_seconds: float = 1.0,
         on_level_callback: Optional[Callable[[float], None]] = None,
         stop_event: Optional[threading.Event] = None
     ) -> Tuple[str, Optional[str]]:
         """
         Слушает микрофон до завершения произнесения фразы или таймаута.
+        Накапливает все фрагменты фразы без преждевременного обрыва на AcceptWaveform.
 
         Возвращает:
             (recognized_text, error_message)
@@ -107,13 +143,13 @@ class SpeechToTextEngine:
         start_time = time.time()
         speech_started_time = None
         last_speech_time = None
-        recognized_text = ""
+        accumulated_parts = []
 
         try:
-            # Захват моно, 16кГц, int16, блоками по ~250 мс (4000 сэмплов)
+            # Захват моно, 16кГц, int16, блоками по 100 мс (1600 сэмплов)
             with sd.RawInputStream(
                 samplerate=self.samplerate,
-                blocksize=4000,
+                blocksize=1600,
                 dtype="int16",
                 channels=1,
                 callback=audio_callback
@@ -124,8 +160,8 @@ class SpeechToTextEngine:
 
                     now = time.time()
 
-                    # Проверка общего таймаута ожидания речи
-                    if speech_started_time is None and (now - start_time) > timeout:
+                    # Проверка таймаута ожидания первого слова (если задан)
+                    if timeout is not None and speech_started_time is None and (now - start_time) > timeout:
                         break
 
                     # Проверка максимальной длины фразы
@@ -133,7 +169,7 @@ class SpeechToTextEngine:
                         break
 
                     try:
-                        data = audio_queue.get(timeout=0.1)
+                        data = audio_queue.get(timeout=0.08)
                     except queue.Empty:
                         continue
 
@@ -143,7 +179,6 @@ class SpeechToTextEngine:
                         shorts = struct.unpack(f"<{count}h", data)
                         sum_sq = sum(s * s for s in shorts)
                         rms = math.sqrt(sum_sq / count) / 32768.0
-                        # Масштабируем до 0.0-1.0
                         norm_level = min(1.0, rms * 5.0)
 
                         if on_level_callback:
@@ -152,8 +187,8 @@ class SpeechToTextEngine:
                             except Exception:
                                 pass
 
-                        # Детекция активности голоса
-                        if norm_level > 0.05:
+                        # Детекция активности голоса по энергии
+                        if norm_level > 0.035:
                             if speech_started_time is None:
                                 speech_started_time = now
                             last_speech_time = now
@@ -163,8 +198,10 @@ class SpeechToTextEngine:
                         res = json.loads(recognizer.Result())
                         text = res.get("text", "").strip()
                         if text:
-                            recognized_text = text
-                            break
+                            accumulated_parts.append(text)
+                            if speech_started_time is None:
+                                speech_started_time = now
+                            last_speech_time = now
                     else:
                         partial_res = json.loads(recognizer.PartialResult())
                         partial_text = partial_res.get("partial", "").strip()
@@ -173,16 +210,16 @@ class SpeechToTextEngine:
                                 speech_started_time = now
                             last_speech_time = now
 
-                    # Детекция паузы после начала речи
+                    # Детекция паузы после начала речи: завершаем фразу, если тишина > silence_threshold_seconds
                     if speech_started_time and last_speech_time:
                         if (now - last_speech_time) > silence_threshold_seconds:
-                            # Долгая пауза после речи -> завершаем фразу
                             break
 
-            # Финализируем распознавание
-            if not recognized_text:
-                final_res = json.loads(recognizer.FinalResult())
-                recognized_text = final_res.get("text", "").strip()
+            # Финализируем распознавание через FinalResult
+            final_res = json.loads(recognizer.FinalResult())
+            final_text = final_res.get("text", "").strip()
+            if final_text:
+                accumulated_parts.append(final_text)
 
             # Сбрасываем уровень аудио
             if on_level_callback:
@@ -190,6 +227,9 @@ class SpeechToTextEngine:
                     on_level_callback(0.0)
                 except Exception:
                     pass
+
+            raw_recognized = " ".join(accumulated_parts).strip()
+            recognized_text = correct_recognized_text(raw_recognized)
 
             return recognized_text, None
 
