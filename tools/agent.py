@@ -12,6 +12,8 @@ from tools.planner import Planner
 
 from tools.plan_executor import PlanExecutor
 
+from tools.teamwork import TeamworkCoordinator
+
 from tools.registry import TOOLS, get_tools_schema
 
 
@@ -30,27 +32,26 @@ class Agent:
         self.ai = OllamaClient()
         self.planner = Planner()
         self.executor = PlanExecutor(self)
+        self.teamwork = TeamworkCoordinator(self)
 
     def choose_tool(self, user_input):
         """
-        Определяет, какой инструмент необходимо использовать.
+        Определяет, какой инструмент необходимо использовать для детерминированных CLI-команд.
+        Любые запросы на естественном языке не перехватываются и передаются в Native Tool Calling.
         """
 
-        normalized_input = user_input.strip().lower()
+        normalized_input = user_input.strip().lower().rstrip(".,!?;:")
 
         # =================================================
-        # Поиск конкретного файла
+        # Поиск конкретного файла (строгая CLI-команда)
         # =================================================
 
         file_search_patterns = [
-            r"^найди\s+файл\s+([^\s,!?;:]+)",
-            r"^найти\s+файл\s+([^\s,!?;:]+)",
-            r"^найди\s+в\s+проекте\s+файл\s+([^\s,!?;:]+)",
-            r"^найти\s+в\s+проекте\s+файл\s+([^\s,!?;:]+)",
+            r"^(?:найди|найти)(?:\s+в\s+проекте)?\s+файл\s+([^\s,!?;:]+)$",
         ]
 
         for pattern in file_search_patterns:
-            match = re.search(
+            match = re.match(
                 pattern,
                 normalized_input,
                 flags=re.IGNORECASE
@@ -68,10 +69,10 @@ class Agent:
                 }
 
         # =================================================
-        # Просмотр списка файлов проекта
+        # Просмотр списка файлов проекта (строгая CLI-команда)
         # =================================================
 
-        list_files_patterns = [
+        list_files_exact = {
             "покажи список файлов проекта",
             "покажи файлы проекта",
             "список файлов проекта",
@@ -80,65 +81,42 @@ class Agent:
             "покажи файлы",
             "список файлов",
             "перечисли файлы",
-        ]
+            "файлы проекта",
+        }
 
-        if any(
-            phrase in normalized_input
-            for phrase in list_files_patterns
-        ):
+        if normalized_input in list_files_exact:
             return {
                 "tool": "list_files",
                 "arguments": {}
             }
 
         # =================================================
-        # Анализ структуры проекта
+        # Анализ структуры проекта (строгая CLI-команда)
         # =================================================
 
-        structure_patterns = [
-            "проанализируй структуру проекта",
-            "анализ структуры проекта",
+        structure_exact = {
             "покажи структуру проекта",
             "покажи структуру проекта акакия",
             "структура проекта",
-        ]
+        }
 
-        if any(
-            phrase in normalized_input
-            for phrase in structure_patterns
-        ):
+        if normalized_input in structure_exact:
             return {
                 "tool": "list_files",
                 "arguments": {}
             }
 
-
-
         # =================================================
-        # Поиск функции
+        # Поиск функции (строгая CLI-команда)
         # =================================================
 
-        if (
-            "найди функцию" in normalized_input
-            or "найти функцию" in normalized_input
-        ):
-            search_query = normalized_input
-
-            search_query = search_query.replace(
-                "найди функцию",
-                "",
-                1
-            )
-
-            search_query = search_query.replace(
-                "найти функцию",
-                "",
-                1
-            )
-
-            search_query = search_query.strip()
-            search_query = f"def {search_query}"
-
+        func_match = re.match(
+            r"^(?:найди|найти)\s+функцию\s+([a-zA-Z_0-9]+)$",
+            normalized_input,
+            flags=re.IGNORECASE
+        )
+        if func_match:
+            search_query = f"def {func_match.group(1).strip()}"
             return {
                 "tool": "search_files",
                 "arguments": {
@@ -147,36 +125,16 @@ class Agent:
             }
 
         # =================================================
-        # Поиск по проекту
+        # Поиск по проекту (строгая CLI-команда)
         # =================================================
 
-        if (
-            "поиск по проекту" in normalized_input
-            or "найди в проекте" in normalized_input
-            or "найти в проекте" in normalized_input
-        ):
-            search_query = normalized_input
-
-            search_query = search_query.replace(
-                "поиск по проекту",
-                "",
-                1
-            )
-
-            search_query = search_query.replace(
-                "найди в проекте",
-                "",
-                1
-            )
-
-            search_query = search_query.replace(
-                "найти в проекте",
-                "",
-                1
-            )
-
-            search_query = search_query.strip()
-
+        search_match = re.match(
+            r"^(?:поиск\s+по\s+проекту|(?:найди|найти)\s+в\s+проекте\s+текст)\s+(.+)$",
+            normalized_input,
+            flags=re.IGNORECASE
+        )
+        if search_match:
+            search_query = search_match.group(1).strip()
             return {
                 "tool": "search_files",
                 "arguments": {
@@ -1503,14 +1461,169 @@ REJECT
             "success": True
         }
 
-    def create_plan(self, user_request):
+    def create_plan(self, user_request, research_context=None):
         """
         Создаёт план выполнения задачи.
         """
 
         return self.planner.create_plan(
-            user_request
+            user_request,
+            research_context=research_context
         )
+
+    def format_task_summary(self, plan_data, exec_result, research_info=None):
+        """
+        Формирует агрегированный отчёт о выполнении комплексной задачи:
+        ## Исследование
+        ## План
+        ## Изменения
+        ## Проверка
+        ## Результат
+        """
+        lines = []
+
+        # 1. Исследование
+        lines.append("## Исследование")
+        res_lines = []
+        if research_info:
+            if isinstance(research_info, str):
+                for item in research_info.splitlines():
+                    if item.strip():
+                        res_lines.append(f"- {item}")
+            else:
+                for item in research_info:
+                    res_lines.append(f"- {item}")
+
+        step_results = exec_result.get("results", []) if isinstance(exec_result, dict) else []
+        for r in step_results:
+            action = r.get("action")
+            if action in ("search", "read", "analyze"):
+                target = r.get("target") or r.get("query") or ""
+                desc = r.get("details") or f"Действие {action}"
+                status = "успешно" if r.get("success") else "не выполнено"
+                res_lines.append(f"- {action} ({target}): {desc} — {status}")
+
+        if res_lines:
+            lines.extend(res_lines)
+        else:
+            lines.append("- Предварительное исследование не требовалось.")
+        lines.append("")
+
+        # 2. План
+        lines.append("## План")
+        steps = plan_data.get("steps", []) if isinstance(plan_data, dict) else []
+        if steps:
+            for s in steps:
+                s_id = s.get("id")
+                s_desc = s.get("description") or s.get("details", "")
+                lines.append(f"{s_id}. {s_desc}")
+        else:
+            lines.append("План не содержит отдельных шагов.")
+        lines.append("")
+
+        # 3. Изменения
+        lines.append("## Изменения")
+        edits_found = False
+        for r in step_results:
+            action = r.get("action")
+            if action in ("edit", "write"):
+                edits_found = True
+                target = r.get("target", "")
+                if r.get("success"):
+                    lines.append(f"- Изменён файл: {target}")
+                else:
+                    err = r.get("result", {}).get("error", "действие отменено или не выполнено")
+                    lines.append(f"- Изменение файла {target} НЕ выполнено ({err})")
+        if not edits_found:
+            lines.append("- Изменения файлов не производились.")
+        lines.append("")
+
+        # 4. Проверка
+        lines.append("## Проверка")
+        val_steps = [r for r in step_results if r.get("action") == "validate"]
+        if val_steps:
+            for v in val_steps:
+                if v.get("success"):
+                    healing_info = ""
+                    if v.get("self_healing", {}).get("success"):
+                        healing_info = " (исправлено через self-healing)"
+                    lines.append(f"- validate_project: проверка пройдена, ошибок синтаксиса: 0{healing_info}")
+                else:
+                    lines.append("- validate_project: обнаружены синтаксические ошибки")
+        else:
+            lines.append("- Проверка проекта не запускалась.")
+        lines.append("")
+
+        # 5. Результат
+        lines.append("## Результат")
+        if exec_result.get("success"):
+            lines.append(exec_result.get("message", "Задача выполнена успешно."))
+        else:
+            lines.append(exec_result.get("message", "Выполнение задачи остановлено."))
+
+        return "\n".join(lines)
+
+    def run_single_correction(self, errors):
+        """
+        Выполняет строго одну попытку self-healing при синтаксических ошибках.
+        Разрешён только точечный инструмент 'edit_file'. 'write_file' запрещён.
+        Требует обязательного подтверждения пользователя.
+        """
+        if not errors:
+            return {"success": False, "error": "Нет ошибок для исправления."}
+
+        prompt = (
+            "В проекте обнаружены синтаксические ошибки после изменений:\n"
+            f"{json.dumps(errors, ensure_ascii=False, indent=2)}\n\n"
+            "Вызови инструмент 'edit_file', чтобы точечно исправить ошибку. "
+            "Инструмент 'write_file' запрещён для автоматического исправления."
+        )
+
+        resp = self.ai.send_chat(
+            [
+                {"role": "user", "content": prompt}
+            ],
+            tools=get_tools_schema()
+        )
+
+        tool_calls = resp.get("tool_calls", [])
+        if not tool_calls:
+            return {
+                "success": False,
+                "error": "Модель не предложила инструмент для исправления ошибок."
+            }
+
+        first_call = tool_calls[0]
+        fn_data = first_call.get("function", {})
+        fn_name = fn_data.get("name")
+        args = fn_data.get("arguments", {})
+        if isinstance(args, str):
+            try:
+                args = json.loads(args)
+            except Exception:
+                pass
+
+        if fn_name != "edit_file":
+            return {
+                "success": False,
+                "error": f"Инструмент '{fn_name}' не разрешён для автоматического исправления. Разрешён только 'edit_file'."
+            }
+
+        exec_res = self.execute_tool("edit_file", args)
+        if not exec_res.get("success", True):
+            return {
+                "success": False,
+                "error": exec_res.get("error", "Исправление отменено пользователем или завершилось ошибкой.")
+            }
+
+        val_res = self.execute_tool("validate_project", {})
+        val_success = val_res.get("success", True) and not val_res.get("errors")
+
+        return {
+            "success": val_success,
+            "edit_result": exec_res,
+            "validation_result": val_res
+        }
 
     def execute_plan(self, plan=None):
         """
@@ -1528,7 +1641,13 @@ REJECT
 
             plan = current.get("plan")
 
-        return self.executor.execute(plan)
+        execution_result = self.executor.execute(plan)
+
+        # Формируем и прикрепляем агрегированную сводку
+        summary = self.format_task_summary(plan, execution_result)
+        execution_result["summary"] = summary
+
+        return execution_result
 
     def process(self, user_input):
         """
@@ -1630,33 +1749,10 @@ REJECT
         # =================================================
 
         # =================================================
-        # ?????????????? ?????? Planner ??? ??????? ????????????????? ????????
+        # Teamwork Preview для сложных многошаговых задач
         # =================================================
-
-        research_patterns = [
-            "\u043f\u0440\u043e\u0430\u043d\u0430\u043b\u0438\u0437\u0438\u0440\u0443\u0439 \u0441\u0442\u0440\u0443\u043a\u0442\u0443\u0440\u0443 \u043f\u0440\u043e\u0435\u043a\u0442\u0430",
-            "\u0430\u043d\u0430\u043b\u0438\u0437 \u0441\u0442\u0440\u0443\u043a\u0442\u0443\u0440\u044b \u043f\u0440\u043e\u0435\u043a\u0442\u0430",
-            "\u0438\u0441\u0441\u043b\u0435\u0434\u0443\u0439 \u0441\u0442\u0440\u0443\u043a\u0442\u0443\u0440\u0443 \u043f\u0440\u043e\u0435\u043a\u0442\u0430",
-            "\u0438\u0437\u0443\u0447\u0438 \u0441\u0442\u0440\u0443\u043a\u0442\u0443\u0440\u0443 \u043f\u0440\u043e\u0435\u043a\u0442\u0430",
-        ]
-
-        if any(
-            phrase in user_input.lower()
-            for phrase in research_patterns
-        ):
-            plan_result = self.create_plan(user_input)
-
-            if not plan_result.get("success"):
-                return {
-                    "type": "plan_execution",
-                    "tool": "execute_plan",
-                    "result": plan_result
-                }
-
-            execution_result = self.execute_plan(
-                plan_result.get("plan")
-            )
-
+        if self.teamwork.is_complex_task(user_input):
+            execution_result = self.teamwork.run(user_input)
             return {
                 "type": "plan_execution",
                 "tool": "execute_plan",
@@ -1691,6 +1787,10 @@ REJECT
         # =================================================
 
         MAX_TOOL_ROUNDS = 5
+        MAX_CORRECTION_ATTEMPTS = 1
+        correction_attempts = 0
+        has_validation_errors = False
+
         turn_messages = [
             {
                 "role": "user",
@@ -1727,7 +1827,44 @@ REJECT
             }
 
         for round_idx in range(MAX_TOOL_ROUNDS):
+            # Проверяем, не пытается ли модель превысить лимит попыток исправления
+            blocked_by_limit = False
+            for call in tool_calls:
+                fn_data = call.get("function", {})
+                fn_name = fn_data.get("name")
+                if has_validation_errors and fn_name == "edit_file":
+                    if correction_attempts >= MAX_CORRECTION_ATTEMPTS:
+                        blocked_by_limit = True
+                        break
+
+            if blocked_by_limit:
+                # Превышен лимит попыток исправления. Не выполняем повторный corrective edit.
+                # Получаем финальный текстовый ответ без инструментов.
+                if not content or not (isinstance(content, str) and content.strip()):
+                    final_resp = self.ai.send_tool_step(
+                        turn_messages,
+                        tools=None
+                    )
+                    content = final_resp.get("content", "")
+                    assistant_msg = final_resp.get("message") or {
+                        "role": "assistant",
+                        "content": content
+                    }
+                else:
+                    assistant_msg = {
+                        "role": "assistant",
+                        "content": content
+                    }
+                turn_messages.append(assistant_msg)
+                self.ai.commit_turn(turn_messages)
+                return {
+                    "type": "chat",
+                    "answer": content if (isinstance(content, str) and content.strip()) else "Достигнут лимит попыток исправления. В проекте сохраняются синтаксические ошибки."
+                }
+
             turn_messages.append(assistant_msg)
+
+            mutations_in_round = False
 
             for call in tool_calls:
                 function_data = call.get("function", {})
@@ -1740,6 +1877,25 @@ REJECT
                     except Exception:
                         pass
 
+                # Запрет write_file как корректирующей операции
+                if has_validation_errors and tool_name == "write_file":
+                    return {
+                        "type": "tool",
+                        "tool": tool_name,
+                        "result": {
+                            "success": False,
+                            "error": (
+                                "Инструмент 'write_file' не разрешён для "
+                                "автоматического исправления ошибок валидации. "
+                                "Исправление должно быть точечным через 'edit_file'."
+                            )
+                        }
+                    }
+
+                # Если это исправление после обнаружения ошибки валидации, учитываем попытку
+                if has_validation_errors and tool_name == "edit_file":
+                    correction_attempts += 1
+
                 result = self.execute_tool(
                     tool_name,
                     arguments
@@ -1751,6 +1907,13 @@ REJECT
                 # 3. Не фиксируем незавершённый ход в истории сообщений
                 # 4. Возвращаем результат ошибки/отмены пользователю
                 if isinstance(result, dict) and not result.get("success", True):
+                    # Если до этой отмены/ошибки в текущем раунде уже были применены реальные мутации файлов,
+                    # запускаем валидацию только по фактически выполненным изменениям
+                    if mutations_in_round:
+                        self.execute_tool(
+                            "validate_project",
+                            {}
+                        )
                     return {
                         "type": "tool",
                         "tool": tool_name,
@@ -1767,19 +1930,24 @@ REJECT
 
                 turn_messages.append(tool_message)
 
-                # После успешного изменения или создания файла (edit_file / write_file) автоматически запускаем проверку проекта
                 if tool_name in ("edit_file", "write_file"):
-                    validation_result = self.execute_tool(
-                        "validate_project",
-                        {}
-                    )
-                    validation_content = self.serialize_tool_result(
-                        validation_result
-                    )
-                    turn_messages.append({
-                        "role": "tool",
-                        "content": validation_content
-                    })
+                    mutations_in_round = True
+
+            # Если в данном раунде выполнялись изменения файлов, запускаем проверку проекта один раз в конце раунда
+            if mutations_in_round:
+                validation_result = self.execute_tool(
+                    "validate_project",
+                    {}
+                )
+                validation_content = self.serialize_tool_result(
+                    validation_result
+                )
+                turn_messages.append({
+                    "role": "tool",
+                    "content": validation_content
+                })
+                validation_failed = not validation_result.get("success", True) or bool(validation_result.get("errors"))
+                has_validation_errors = validation_failed
 
             next_response = self.ai.send_tool_step(
                 turn_messages,
@@ -1802,7 +1970,14 @@ REJECT
                     "answer": content if (isinstance(content, str) and content.strip()) else "Действие успешно выполнено."
                 }
 
+        # При достижении лимита раундов запрашиваем финальный ответ без инструментов (tools=None)
+        final_resp = self.ai.send_tool_step(
+            turn_messages,
+            tools=None
+        )
+        final_content = final_resp.get("content", "").strip() if isinstance(final_resp, dict) else ""
+        final_answer = final_content or "Достигнут максимальный лимит шагов инструментов (5). Выполнение остановлено."
         return {
             "type": "chat",
-            "answer": "Достигнут максимальный лимит шагов инструментов (5). Выполнение остановлено."
+            "answer": final_answer
         }

@@ -25,14 +25,26 @@ class Planner:
 
         self.current_plan = None
         self.current_request = None
+        self.current_research_context = None
         self.current_status = None
         self.current_step = 0
 
-    def create_plan(self, user_request):
+    def create_plan(self, user_request, research_context=None):
         """
         Создаёт новый структурированный план
         и сохраняет его как текущий.
+        При наличии research_context использует результаты предварительного исследования.
         """
+
+        context_block = ""
+        if research_context:
+            context_block = f"""
+РЕЗУЛЬТАТЫ ПРЕДВАРИТЕЛЬНОГО ИССЛЕДОВАНИЯ:
+{research_context}
+
+ПРАВИЛО ИСПОЛЬЗОВАНИЯ ИССЛЕДОВАНИЯ:
+Если результаты предварительного исследования уже содержат целевой файл и найденную проблему, используй эти данные напрямую (указывай найденный файл в target) и не дублируй поиск заново.
+"""
 
         prompt = f"""
 Ты — планировщик локального ИИ-ассистента Акакия.
@@ -43,7 +55,7 @@ class Planner:
 Запрос пользователя:
 
 {user_request}
-
+{context_block}
 Ты НЕ выполняешь задачу.
 Ты только составляешь план.
 
@@ -383,6 +395,7 @@ class Planner:
 
         self.current_request = user_request
         self.current_plan = plan
+        self.current_research_context = research_context
         self.current_status = "created"
         self.current_step = 0
 
@@ -662,6 +675,7 @@ class Planner:
 
         self.current_plan = None
         self.current_request = None
+        self.current_research_context = None
         self.current_status = None
         self.current_step = 0
 

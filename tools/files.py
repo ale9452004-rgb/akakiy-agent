@@ -283,22 +283,6 @@ def edit_file(filename, old_text, new_text):
             encoding="utf-8"
         )
 
-        if file_path.suffix.lower() == ".py":
-            validation = validate_python_file(file_path)
-
-            if not validation["success"]:
-                file_path.write_text(
-                    content,
-                    encoding="utf-8"
-                )
-
-                return {
-                    "success": False,
-                    "error": (
-                        "Изменение откатено: "
-                        f"{validation.get('error', 'ошибка синтаксиса')}"
-                    )
-                }
 
         return {
             "success": True,

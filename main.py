@@ -638,6 +638,12 @@ def print_tool_result(tool_name, tool_result):
 
 
 def main():
+    import sys
+    if len(sys.argv) > 1 and sys.argv[1].lower() in ("--gui", "-g", "gui"):
+        from gui import main as gui_main
+        gui_main()
+        return
+
     agent = Agent()
 
     print("Акакий запущен.")
@@ -714,6 +720,11 @@ def main():
                         execution_result
                     )
 
+                    continue
+
+                summary = execution_result.get("summary")
+                if summary:
+                    print(f"\n{summary}")
                     continue
 
                 results = execution_result.get(

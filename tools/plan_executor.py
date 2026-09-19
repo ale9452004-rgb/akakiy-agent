@@ -1,4 +1,4 @@
-﻿from tools.dispatcher import dispatch
+from tools.dispatcher import dispatch
 
 
 class PlanExecutor:
@@ -32,6 +32,7 @@ class PlanExecutor:
             }
 
         results = []
+        mutations_executed = []
 
         for step in steps:
 
@@ -43,15 +44,37 @@ class PlanExecutor:
             results.append(result)
 
             if not result.get("success"):
-                return {
-                    "success": False,
-                    "message": (
+                # Если в этом плане уже были выполнены мутации до сбоя/отмены,
+                # запускаем валидацию только для реально выполненных изменений
+                if mutations_executed:
+                    dispatch("validate_project")
+
+                is_cancelled = (
+                    "отменил" in str(result.get("result", {}).get("error", ""))
+                    or "отменил" in str(result.get("message", ""))
+                )
+
+                if is_cancelled:
+                    msg = (
+                        f"План остановлен. "
+                        f"Действие {step.get('id')} отменено пользователем. "
+                        f"Последующие действия не выполнены."
+                    )
+                else:
+                    msg = (
                         f"Выполнение остановлено "
                         f"на шаге {step.get('id')}."
-                    ),
+                    )
+
+                return {
+                    "success": False,
+                    "message": msg,
                     "step": step,
                     "results": results
                 }
+
+            if step.get("action") in ("edit", "write"):
+                mutations_executed.append(step.get("target"))
 
         return {
             "success": True,
@@ -367,14 +390,53 @@ class PlanExecutor:
     ):
         """
         Выполняет полную проверку Python-проекта.
+        При обнаружении синтаксических ошибок использует механизм self-healing агента.
         """
 
         result = dispatch(
             "validate_project"
         )
 
+        val_success = result.get("success", False)
+        tool_res = result.get("result", {}) if isinstance(result, dict) else {}
+        errors = []
+        if isinstance(tool_res, dict) and "errors" in tool_res:
+            errors = tool_res.get("errors", [])
+        elif isinstance(result, dict) and "errors" in result:
+            errors = result.get("errors", [])
+
+        # Если валидация выявила ошибки синтаксиса и у нас есть ссылка на agent
+        if (not val_success or errors) and self.agent is not None and hasattr(self.agent, "run_single_correction"):
+            heal_result = self.agent.run_single_correction(errors or [result])
+            if heal_result.get("success"):
+                return {
+                    "success": True,
+                    "action": "validate",
+                    "details": details,
+                    "result": heal_result.get("validation_result", result),
+                    "context": context,
+                    "self_healing": {
+                        "attempted": True,
+                        "success": True,
+                        "edit_result": heal_result.get("edit_result")
+                    }
+                }
+            else:
+                return {
+                    "success": False,
+                    "action": "validate",
+                    "details": details,
+                    "result": result,
+                    "context": context,
+                    "self_healing": {
+                        "attempted": True,
+                        "success": False,
+                        "error": heal_result.get("error")
+                    }
+                }
+
         return {
-            "success": result.get("success", False),
+            "success": val_success and not errors,
             "action": "validate",
             "details": details,
             "result": result,

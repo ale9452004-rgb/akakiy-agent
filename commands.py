@@ -56,7 +56,13 @@ def show_help():
     print("----------------------------------")
 
 
+# =====================================================================
+# Устаревшие функции быстрого доступа (Legacy CLI Wrappers)
+# Оставлены для обратной совместимости; основной источник истины — tools.files
+# =====================================================================
+
 def show_files():
+    """Устаревшая функция вывода файлов; используйте tools.files.list_files."""
     from tools.files import list_files
 
     print("\n--- Файлы проекта ---")
@@ -68,12 +74,13 @@ def show_files():
 
 
 def read_file(filename):
+    """Устаревшая функция чтения файла; используйте tools.files.read_file."""
     from tools.files import read_file as tool_read_file
 
-    content, error = tool_read_file(filename)
+    result = tool_read_file(filename)
 
-    if error:
-        print(f"\n{error}")
+    if not result.get("success", False):
+        print(f"\n{result.get('error', 'Ошибка чтения файла')}")
         return None
 
-    return content
+    return result.get("content")
