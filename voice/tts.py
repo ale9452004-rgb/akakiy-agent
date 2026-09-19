@@ -7,6 +7,7 @@ import threading
 from typing import Callable, Optional
 
 from voice.cleaner import clean_for_speech
+from voice.normalizer import normalize_text_for_speech
 
 logger = logging.getLogger(__name__)
 
@@ -80,7 +81,17 @@ def split_text_into_speech_chunks(
     if current_chunk:
         chunks.append(current_chunk)
 
-    return chunks
+    # 4. Проверка и нормализация граничной пунктуации каждого фрагмента
+    final_chunks = []
+    for i, ch in enumerate(chunks):
+        ch = ch.strip()
+        if not ch:
+            continue
+        if ch[-1] not in ".!?:;,-":
+            ch += "." if i == len(chunks) - 1 else ","
+        final_chunks.append(ch)
+
+    return final_chunks
 
 
 class TextToSpeechEngine:
@@ -239,6 +250,8 @@ class TextToSpeechEngine:
         sample_rate = 24000
         speaker = self.voice_name_hint if hasattr(self._silero_model, "speakers") and self.voice_name_hint in self._silero_model.speakers else "eugene"
 
+        # Нормализация чисел, латиницы и технических символов перед синтезом Silero
+        text = normalize_text_for_speech(text)
         chunks = split_text_into_speech_chunks(text)
         if not chunks:
             return
@@ -250,7 +263,8 @@ class TextToSpeechEngine:
 
         try:
             stream.start()
-            for chunk in chunks:
+            total_chunks = len(chunks)
+            for idx, chunk in enumerate(chunks):
                 if self._current_stop_event.is_set() or self._stop_event.is_set():
                     break
 
@@ -274,10 +288,29 @@ class TextToSpeechEngine:
                             pass
 
                 audio_np = audio_tensor.numpy()
+
+                # К последнему фрагменту добавляем хвост тишины (~150 мс),
+                # чтобы акустический спад последнего слога не срезался драйвером звуковой карты
+                is_last_chunk = (idx == total_chunks - 1)
+                if is_last_chunk:
+                    import numpy as np
+                    tail_silence = np.zeros(int(sample_rate * 0.15), dtype="float32")
+                    audio_np = np.concatenate([audio_np, tail_silence])
+
                 for i in range(0, len(audio_np), chunk_size):
                     if self._current_stop_event.is_set() or self._stop_event.is_set():
                         break
                     stream.write(audio_np[i : i + chunk_size])
+
+                # Небольшая естественная пауза между чанками (~50 мс)
+                if not is_last_chunk and not self._current_stop_event.is_set() and not self._stop_event.is_set():
+                    import numpy as np
+                    inter_chunk = np.zeros(int(sample_rate * 0.05), dtype="float32")
+                    stream.write(inter_chunk)
+
+            # Дожидаемся полного завершения воспроизведения всех буферов в динамики
+            if not self._current_stop_event.is_set() and not self._stop_event.is_set():
+                stream.stop()
 
         except Exception:
             if not self._current_stop_event.is_set() and not self._stop_event.is_set():
@@ -356,10 +389,12 @@ class TextToSpeechEngine:
                     if hasattr(self._engine, "runAndWait"):
                         self._engine.runAndWait()
                 elif self._backend == "silero" and self._silero_model:
-                    has_cyrillic = any("\u0400" <= c <= "\u04ff" for c in clean_text)
+                    # Нормализуем текст (числа в слова, латиницу и технические токены в русскую фонетику)
+                    norm_text = normalize_text_for_speech(clean_text)
+                    has_cyrillic = any("\u0400" <= c <= "\u04ff" for c in norm_text)
                     if has_cyrillic:
                         try:
-                            self._speak_silero(clean_text, on_start=on_start)
+                            self._speak_silero(norm_text, on_start=on_start)
                         except Exception as ex:
                             if not self._current_stop_event.is_set() and not self._stop_event.is_set():
                                 logger.warning(f"Ошибка Silero ({ex}), fallback на SAPI для: {clean_text[:40]}")

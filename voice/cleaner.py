@@ -7,6 +7,8 @@
 import re
 from typing import Optional
 
+from voice.normalizer import normalize_text_for_speech
+
 # Регулярное выражение для всех диапазонов emoji, пиктограмм и декоративных символов
 EMOJI_AND_DECORATIVE_PATTERN = re.compile(
     r"["
@@ -34,7 +36,11 @@ EMOJI_AND_DECORATIVE_PATTERN = re.compile(
 )
 
 
-def clean_for_speech(text: str, max_chars: Optional[int] = None) -> str:
+def clean_for_speech(
+    text: str,
+    max_chars: Optional[int] = None,
+    normalize: bool = False
+) -> str:
     """
     Преобразует текстовый ответ Акакия в естественную фразу для озвучивания:
     - убирает markdown-заголовки, списки, ссылки, жирный шрифт, таблицы;
@@ -42,7 +48,8 @@ def clean_for_speech(text: str, max_chars: Optional[int] = None) -> str:
     - полностью удаляет emoji и декоративные символы (🎙, ✅, ⚠️, 📁, ● и т.п.);
     - формирует естественные речевые паузы по знакам препинания;
     - если ответ содержит структурированную сводку (## Результат), берёт ключевой результат;
-    - при необходимости обрезает сообщение до max_chars, если параметр задан явно.
+    - при необходимости обрезает сообщение до max_chars, если параметр задан явно;
+    - при normalize=True выполняет полную вербализацию чисел и латиницы для TTS.
     """
     if not text or not isinstance(text, str):
         return ""
@@ -97,7 +104,11 @@ def clean_for_speech(text: str, max_chars: Optional[int] = None) -> str:
     # 12. Полное удаление emoji и декоративных знаков
     raw = EMOJI_AND_DECORATIVE_PATTERN.sub("", raw)
 
-    # 13. Формирование естественных пауз: между строками добавляем точку, если её нет
+    # 13. Нормализация чисел, латиницы, путей и технических терминов (при normalize=True)
+    if normalize:
+        raw = normalize_text_for_speech(raw)
+
+    # 14. Формирование естественных пауз: между строками добавляем точку, если её нет
     lines = [line.strip() for line in raw.splitlines() if line.strip()]
     processed_lines = []
     for i, s in enumerate(lines):
@@ -107,7 +118,7 @@ def clean_for_speech(text: str, max_chars: Optional[int] = None) -> str:
 
     cleaned = " ".join(processed_lines)
 
-    # 14. Схлопываем множественные знаки препинания и пробелы
+    # 15. Схлопываем множественные знаки препинания и пробелы
     cleaned = re.sub(r"\s+([,.:;!?])", r"\1", cleaned)
     cleaned = re.sub(r"\.{2,}", ".", cleaned)
     cleaned = re.sub(r",\s*,+", ",", cleaned)
