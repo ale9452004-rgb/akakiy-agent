@@ -2,6 +2,7 @@ import html
 import logging
 from pathlib import Path
 import queue
+import re
 import threading
 from typing import Callable, Optional
 
@@ -12,6 +13,74 @@ logger = logging.getLogger(__name__)
 # Путь к локальной модели Silero по умолчанию
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_SILERO_MODEL_PATH = PROJECT_ROOT / "models" / "silero" / "v4_ru.pt"
+
+
+def split_text_into_speech_chunks(
+    text: str,
+    target_chunk_chars: int = 350,
+    max_chunk_chars: int = 500
+) -> list[str]:
+    """
+    Разбивает длинный текст на безопасные и естественные для синтезатора Silero фрагменты:
+    1. Сначала делит по границам предложений (. ! ? \n).
+    2. Если отдельное предложение превышает max_chunk_chars, дробит его по пунктуации (, ; : —) или пробелам.
+    3. Объединяет предложения в оптимальные порции размером ~250-400 символов.
+    """
+    text = text.strip()
+    if not text:
+        return []
+
+    # 1. Разбиение по границам предложений
+    raw_sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+|\n+", text) if s.strip()]
+    if not raw_sentences:
+        raw_sentences = [text]
+
+    # 2. Если предложение длиннее max_chunk_chars, делим по пунктуации внутри него
+    refined_sentences = []
+    for s in raw_sentences:
+        if len(s) <= max_chunk_chars:
+            refined_sentences.append(s)
+        else:
+            clauses = [c.strip() for c in re.split(r"(?<=[,;:—])\s+", s) if c.strip()]
+            cur_clause = ""
+            for c in clauses:
+                if len(c) > max_chunk_chars:
+                    words = c.split()
+                    sub = ""
+                    for w in words:
+                        if len(sub) + len(w) + 1 <= max_chunk_chars:
+                            sub = (sub + " " + w).strip()
+                        else:
+                            if sub:
+                                refined_sentences.append(sub)
+                            sub = w
+                    if sub:
+                        refined_sentences.append(sub)
+                else:
+                    if len(cur_clause) + len(c) + 1 <= target_chunk_chars:
+                        cur_clause = (cur_clause + " " + c).strip()
+                    else:
+                        if cur_clause:
+                            refined_sentences.append(cur_clause)
+                        cur_clause = c
+            if cur_clause:
+                refined_sentences.append(cur_clause)
+
+    # 3. Группировка предложений в сбалансированные блоки
+    chunks = []
+    current_chunk = ""
+    for s in refined_sentences:
+        if not current_chunk:
+            current_chunk = s
+        elif len(current_chunk) + len(s) + 1 <= target_chunk_chars:
+            current_chunk += " " + s
+        else:
+            chunks.append(current_chunk)
+            current_chunk = s
+    if current_chunk:
+        chunks.append(current_chunk)
+
+    return chunks
 
 
 class TextToSpeechEngine:
@@ -162,38 +231,54 @@ class TextToSpeechEngine:
             return False
 
     def _speak_silero(self, text: str, on_start: Optional[Callable[[], None]] = None):
-        """Синтезирует речь через Silero на CPU и выводит PCM аудио порциями через sounddevice."""
+        """
+        Синтезирует речь через Silero на CPU с безопасным разбиением на фрагменты
+        и непрерывным потоковым выводом в sounddevice.OutputStream.
+        """
         import sounddevice as sd
         sample_rate = 24000
         speaker = self.voice_name_hint if hasattr(self._silero_model, "speakers") and self.voice_name_hint in self._silero_model.speakers else "eugene"
 
-        audio_tensor = self._silero_model.apply_tts(
-            text=text,
-            speaker=speaker,
-            sample_rate=sample_rate,
-            put_accent=True,
-            put_yo=True
-        )
-
-        if self._current_stop_event.is_set() or self._stop_event.is_set():
+        chunks = split_text_into_speech_chunks(text)
+        if not chunks:
             return
-
-        audio_np = audio_tensor.numpy()
-        chunk_size = 1200  # 50 мс порции при частоте 24 кГц
 
         stream = sd.OutputStream(samplerate=sample_rate, channels=1, dtype="float32")
         self._current_stream = stream
+        chunk_size = 1200  # 50 мс порции при частоте 24 кГц
+        first_chunk = True
+
         try:
             stream.start()
-            if on_start and callable(on_start):
-                try:
-                    on_start()
-                except Exception:
-                    pass
-            for i in range(0, len(audio_np), chunk_size):
+            for chunk in chunks:
                 if self._current_stop_event.is_set() or self._stop_event.is_set():
                     break
-                stream.write(audio_np[i : i + chunk_size])
+
+                audio_tensor = self._silero_model.apply_tts(
+                    text=chunk,
+                    speaker=speaker,
+                    sample_rate=sample_rate,
+                    put_accent=True,
+                    put_yo=True
+                )
+
+                if self._current_stop_event.is_set() or self._stop_event.is_set():
+                    break
+
+                if first_chunk:
+                    first_chunk = False
+                    if on_start and callable(on_start):
+                        try:
+                            on_start()
+                        except Exception:
+                            pass
+
+                audio_np = audio_tensor.numpy()
+                for i in range(0, len(audio_np), chunk_size):
+                    if self._current_stop_event.is_set() or self._stop_event.is_set():
+                        break
+                    stream.write(audio_np[i : i + chunk_size])
+
         except Exception:
             if not self._current_stop_event.is_set() and not self._stop_event.is_set():
                 raise

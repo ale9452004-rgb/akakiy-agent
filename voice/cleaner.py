@@ -5,6 +5,7 @@
 """
 
 import re
+from typing import Optional
 
 # Регулярное выражение для всех диапазонов emoji, пиктограмм и декоративных символов
 EMOJI_AND_DECORATIVE_PATTERN = re.compile(
@@ -33,7 +34,7 @@ EMOJI_AND_DECORATIVE_PATTERN = re.compile(
 )
 
 
-def clean_for_speech(text: str, max_chars: int = 400) -> str:
+def clean_for_speech(text: str, max_chars: Optional[int] = None) -> str:
     """
     Преобразует текстовый ответ Акакия в естественную фразу для озвучивания:
     - убирает markdown-заголовки, списки, ссылки, жирный шрифт, таблицы;
@@ -41,7 +42,7 @@ def clean_for_speech(text: str, max_chars: int = 400) -> str:
     - полностью удаляет emoji и декоративные символы (🎙, ✅, ⚠️, 📁, ● и т.п.);
     - формирует естественные речевые паузы по знакам препинания;
     - если ответ содержит структурированную сводку (## Результат), берёт ключевой результат;
-    - обрезает слишком длинные сообщения до комфортной для слуха длины.
+    - при необходимости обрезает сообщение до max_chars, если параметр задан явно.
     """
     if not text or not isinstance(text, str):
         return ""
@@ -112,8 +113,8 @@ def clean_for_speech(text: str, max_chars: int = 400) -> str:
     cleaned = re.sub(r",\s*,+", ",", cleaned)
     cleaned = re.sub(r"\s+", " ", cleaned).strip()
 
-    # 15. Ограничение длины: если фраза слишком длинная, обрезаем по предложению
-    if len(cleaned) > max_chars:
+    # 15. Ограничение длины: обрезаем только если параметр max_chars явно передан
+    if max_chars is not None and len(cleaned) > max_chars:
         truncated = cleaned[:max_chars]
         last_punct = max(truncated.rfind("."), truncated.rfind("!"), truncated.rfind("?"))
         if last_punct > 100:
