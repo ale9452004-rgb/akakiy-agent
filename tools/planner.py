@@ -20,8 +20,9 @@ class Planner:
         "git",
     }
 
-    def __init__(self):
-        self.ai = OllamaClient()
+    def __init__(self, context_manager=None, ai_client=None):
+        self.ai = ai_client or OllamaClient()
+        self.context_manager = context_manager
 
         self.current_plan = None
         self.current_request = None
@@ -29,16 +30,27 @@ class Planner:
         self.current_status = None
         self.current_step = 0
 
-    def create_plan(self, user_request, research_context=None):
+    def create_plan(self, user_request, research_context=None, planning_context=None):
         """
         Создаёт новый структурированный план
         и сохраняет его как текущий.
         При наличии research_context использует результаты предварительного исследования.
+        При наличии context_manager или planning_context учитывает контекст диалога и факты пользователя.
         """
 
+        dialogue_context = planning_context
+        if dialogue_context is None and self.context_manager is not None:
+            dialogue_context = self.context_manager.get_planning_context(user_request)
+
         context_block = ""
+        if dialogue_context:
+            context_block += f"""
+КОНТЕКСТ ДИАЛОГА И ДАННЫЕ ПОЛЬЗОВАТЕЛЯ:
+{dialogue_context}
+"""
+
         if research_context:
-            context_block = f"""
+            context_block += f"""
 РЕЗУЛЬТАТЫ ПРЕДВАРИТЕЛЬНОГО ИССЛЕДОВАНИЯ:
 {research_context}
 

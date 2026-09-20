@@ -16,6 +16,7 @@ from tools.teamwork import TeamworkCoordinator
 
 from tools.registry import TOOLS, get_tools_schema
 from tools.memory import get_memory_manager
+from tools.context import ContextManager, get_context_manager
 
 from tools.edit_preparer import EditPreparer
 from tools.summary import format_task_summary
@@ -29,61 +30,46 @@ class Agent:
     - выбор инструмента;
     - создание и выполнение планов;
     - подготовку изменений файлов;
-    - управление краткосрочной и долговременной памятью.
+    - координацию единого контекста диалога и памяти.
     """
 
-    def __init__(self, memory_manager=None):
-        self.ai = OllamaClient()
-        self.memory = memory_manager or get_memory_manager()
+    def __init__(self, memory_manager=None, context_manager=None, ai_client=None):
+        mem = memory_manager or get_memory_manager()
+        self.context_manager = context_manager or ContextManager(memory_manager=mem)
+        self.ai = ai_client or OllamaClient()
         self.edit_preparer = EditPreparer(self.ai)
-        self.planner = Planner()
+        self.planner = Planner(context_manager=self.context_manager, ai_client=self.ai)
         self.executor = PlanExecutor(self)
         self.teamwork = TeamworkCoordinator(self)
         self._sync_memory_to_system_prompt()
 
+    @property
+    def memory(self):
+        return self.context_manager.memory_manager
+
+    @memory.setter
+    def memory(self, val):
+        self.context_manager.memory_manager = val
+
     def _sync_memory_to_system_prompt(self):
-        """Синхронизирует факты долговременной памяти с системным промптом модели."""
-        facts = self.memory.format_for_system_prompt()
-        base = "Ты Акакий — локальный ИИ-ассистент пользователя. Отвечай на русском языке."
-        if facts:
-            full_prompt = f"{base}\n\n{facts}"
-        else:
-            full_prompt = base
-        self.ai.set_system_prompt(full_prompt)
+        """
+        Устанавливает чистый системный промпт без инъекций пользовательских данных.
+        Пользовательские данные передаются модели исключительно как справочные данные.
+        """
+        self.ai.set_system_prompt(self.context_manager.get_system_prompt())
 
     def _record_interaction(self, user_input, response_payload_or_text, tool_name=None, is_native_chat=False):
-        """Фиксирует ход диалога в краткосрочной памяти и контексте OllamaClient."""
+        """Фиксирует ход диалога в едином ContextManager."""
         if not user_input or not str(user_input).strip():
             return
 
-        if isinstance(response_payload_or_text, dict):
-            p_type = response_payload_or_text.get("type")
-            if p_type == "chat":
-                text = response_payload_or_text.get("answer", "")
-            elif p_type in ("plan", "plan_execution"):
-                res = response_payload_or_text.get("result")
-                if isinstance(res, dict):
-                    text = res.get("summary") or res.get("message") or "План выполнен."
-                else:
-                    text = str(res or "План выполнен.")
-            elif p_type == "tool":
-                tool = response_payload_or_text.get("tool", tool_name or "")
-                res = response_payload_or_text.get("result")
-                if isinstance(res, dict):
-                    text = res.get("message") or f"Инструмент {tool} выполнен."
-                else:
-                    text = f"Инструмент {tool} выполнен: {res}"
-            else:
-                text = str(response_payload_or_text.get("answer") or response_payload_or_text.get("message") or response_payload_or_text)
-        else:
-            text = str(response_payload_or_text)
-
-        # 1. Записываем в краткосрочную память MemoryManager
-        self.memory.add_turn(user_input, text, tool_name=tool_name)
-
-        # 2. Синхронизируем контекст с OllamaClient для не-ask вызовов
+        self.context_manager.record_interaction(
+            user_input,
+            response_payload_or_text,
+            tool_name=tool_name
+        )
         if not is_native_chat:
-            self.ai.add_interaction(user_input, text)
+            self.ai.messages = self.context_manager.build_messages_for_llm("")[:-1]
 
     def choose_tool(self, user_input):
         """
@@ -702,18 +688,22 @@ class Agent:
         correction_attempts = 0
         has_validation_errors = False
 
-        turn_messages = [
-            {
-                "role": "user",
-                "content": user_input
-            }
-        ]
+        # Формируем сообщения с учётом единого ContextManager и релевантной памяти
+        llm_messages = self.context_manager.build_messages_for_llm(user_input, include_memory=True)
+        current_user_msg = llm_messages[-1]
+        turn_messages = [current_user_msg]
 
-        response = self.ai.ask(
-            user_input,
-            add_to_history=True,
-            tools=get_tools_schema()
-        )
+        if hasattr(self.ai, "send_chat") and callable(self.ai.send_chat):
+            response = self.ai.send_chat(
+                llm_messages,
+                tools=get_tools_schema()
+            )
+        else:
+            response = self.ai.ask(
+                user_input,
+                add_to_history=False,
+                tools=get_tools_schema()
+            )
 
         if isinstance(response, dict):
             tool_calls = response.get("tool_calls", [])
@@ -732,12 +722,14 @@ class Agent:
             }
 
         if not tool_calls:
-            resp = {
+            turn_messages.append(assistant_msg)
+            self.context_manager.commit_turn_messages(turn_messages, clean_user_input=user_input)
+            if hasattr(self.ai, "messages"):
+                self.ai.messages = self.context_manager.build_messages_for_llm("")[:-1]
+            return {
                 "type": "chat",
                 "answer": content
             }
-            self._record_interaction(user_input, resp, is_native_chat=True)
-            return resp
 
         for round_idx in range(MAX_TOOL_ROUNDS):
             # Проверяем, не пытается ли модель превысить лимит попыток исправления
@@ -754,12 +746,13 @@ class Agent:
                 # Превышен лимит попыток исправления. Не выполняем повторный corrective edit.
                 # Получаем финальный текстовый ответ без инструментов.
                 if not content or not (isinstance(content, str) and content.strip()):
-                    final_resp = self.ai.send_tool_step(
-                        turn_messages,
-                        tools=None
-                    )
-                    content = final_resp.get("content", "")
-                    assistant_msg = final_resp.get("message") or {
+                    step_msgs = llm_messages[:-1] + turn_messages
+                    if hasattr(self.ai, "send_chat") and callable(self.ai.send_chat):
+                        final_resp = self.ai.send_chat(step_msgs, tools=None)
+                    else:
+                        final_resp = self.ai.send_tool_step(turn_messages, tools=None)
+                    content = final_resp.get("content", "") if isinstance(final_resp, dict) else str(final_resp)
+                    assistant_msg = (final_resp.get("message") if isinstance(final_resp, dict) else None) or {
                         "role": "assistant",
                         "content": content
                     }
@@ -769,14 +762,14 @@ class Agent:
                         "content": content
                     }
                 turn_messages.append(assistant_msg)
-                self.ai.commit_turn(turn_messages)
+                self.context_manager.commit_turn_messages(turn_messages, clean_user_input=user_input)
+                if hasattr(self.ai, "messages"):
+                    self.ai.messages = self.context_manager.build_messages_for_llm("")[:-1]
                 ans = content if (isinstance(content, str) and content.strip()) else "Достигнут лимит попыток исправления. В проекте сохраняются синтаксические ошибки."
-                resp = {
+                return {
                     "type": "chat",
                     "answer": ans
                 }
-                self._record_interaction(user_input, resp, is_native_chat=True)
-                return resp
 
             turn_messages.append(assistant_msg)
 
@@ -871,10 +864,17 @@ class Agent:
                 validation_failed = not validation_result.get("success", True) or bool(validation_result.get("errors"))
                 has_validation_errors = validation_failed
 
-            next_response = self.ai.send_tool_step(
-                turn_messages,
-                tools=get_tools_schema()
-            )
+            step_messages = llm_messages[:-1] + turn_messages
+            if hasattr(self.ai, "send_chat") and callable(self.ai.send_chat):
+                next_response = self.ai.send_chat(
+                    step_messages,
+                    tools=get_tools_schema()
+                )
+            else:
+                next_response = self.ai.send_tool_step(
+                    turn_messages,
+                    tools=get_tools_schema()
+                )
 
             tool_calls = next_response.get("tool_calls", [])
             content = next_response.get("content", "")
@@ -886,25 +886,34 @@ class Agent:
 
             if not tool_calls:
                 turn_messages.append(assistant_msg)
-                self.ai.commit_turn(turn_messages)
+                self.context_manager.commit_turn_messages(turn_messages, clean_user_input=user_input)
+                if hasattr(self.ai, "messages"):
+                    self.ai.messages = self.context_manager.build_messages_for_llm("")[:-1]
                 ans = content if (isinstance(content, str) and content.strip()) else "Действие успешно выполнено."
-                resp = {
+                return {
                     "type": "chat",
                     "answer": ans
                 }
-                self._record_interaction(user_input, resp, is_native_chat=True)
-                return resp
 
         # При достижении лимита раундов запрашиваем финальный ответ без инструментов (tools=None)
-        final_resp = self.ai.send_tool_step(
-            turn_messages,
-            tools=None
-        )
+        step_messages = llm_messages[:-1] + turn_messages
+        if hasattr(self.ai, "send_chat") and callable(self.ai.send_chat):
+            final_resp = self.ai.send_chat(
+                step_messages,
+                tools=None
+            )
+        else:
+            final_resp = self.ai.send_tool_step(
+                turn_messages,
+                tools=None
+            )
         final_content = final_resp.get("content", "").strip() if isinstance(final_resp, dict) else ""
         final_answer = final_content or "Достигнут максимальный лимит шагов инструментов (5). Выполнение остановлено."
-        resp = {
+        turn_messages.append({"role": "assistant", "content": final_answer})
+        self.context_manager.commit_turn_messages(turn_messages, clean_user_input=user_input)
+        if hasattr(self.ai, "messages"):
+            self.ai.messages = self.context_manager.build_messages_for_llm("")[:-1]
+        return {
             "type": "chat",
             "answer": final_answer
         }
-        self._record_interaction(user_input, resp, is_native_chat=True)
-        return resp

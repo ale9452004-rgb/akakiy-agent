@@ -39,7 +39,13 @@ class TeamworkResearcher:
         findings = []
         files_examined = []
 
-        # 1. Поиск упоминаний конкретных файлов в запросе
+        # 1. Поиск упоминаний конкретных файлов в запросе и контексте памяти
+        search_scope = user_request
+        if hasattr(self.agent, "context_manager") and self.agent.context_manager:
+            relevant_mems = self.agent.context_manager.retrieve_relevant_memories(user_request, limit=2)
+            for rm in relevant_mems:
+                search_scope += " " + rm.get("text", "")
+
         file_patterns = [
             r"([a-zA-Z0-9_\-\./\\]+\.py)",
             r"([a-zA-Z0-9_\-\./\\]+\.json)",
@@ -47,7 +53,7 @@ class TeamworkResearcher:
         ]
         mentioned_files = []
         for p in file_patterns:
-            matches = re.findall(p, user_request)
+            matches = re.findall(p, search_scope)
             for m in matches:
                 clean_path = m.strip().replace("\\", "/")
                 if clean_path not in mentioned_files:

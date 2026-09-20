@@ -308,10 +308,10 @@ class TestAgentMemoryIntegration(unittest.TestCase):
         self.assertIn("Запомнил", res["answer"])
         self.assertEqual(len(self.mem.recall()), 1)
 
-        # Проверяем, что системный промпт обновился
-        self.mock_ai.set_system_prompt.assert_called()
-        last_prompt = self.mock_ai.set_system_prompt.call_args[0][0]
-        self.assertIn("Рабочий порт 9090", last_prompt)
+        # Проверяем, что факт доступен в релевантной выборке контекста
+        relevant = self.agent.context_manager.retrieve_relevant_memories("какой рабочий порт?")
+        self.assertEqual(len(relevant), 1)
+        self.assertIn("9090", relevant[0]["text"])
 
     def test_command_what_do_you_remember(self):
         self.mem.remember("Имя кота Барсик")
