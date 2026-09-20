@@ -328,7 +328,11 @@ class AkakiyGUI:
             d_name = days[now.weekday()]
             m_name = months[now.month - 1]
             self.lbl_date.config(text=f"{d_name}, {now.day} {m_name} {now.year}")
-            self.root.after(1000, update)
+            if not getattr(self, "_is_closing", False):
+                try:
+                    self.root.after(1000, update)
+                except Exception:
+                    pass
         update()
 
     # =========================================================================
@@ -770,12 +774,13 @@ class AkakiyGUI:
             return
         t_str = time.strftime("%H:%M:%S")
         self.chat_text.insert(tk.END, "\n")
-        if author == "Вы":
-            self.chat_text.insert(tk.END, "● ВЫ  ", "user_title")
+        author_upper = author.upper()
+        if "ВЫ" in author_upper:
+            self.chat_text.insert(tk.END, f"● {author_upper}  ", "user_title")
             self.chat_text.insert(tk.END, f"[{t_str}]\n", "time")
             self.chat_text.insert(tk.END, f"{message}\n", "user_body")
         else:
-            self.chat_text.insert(tk.END, "● АКАКИЙ  ", "akakiy_title")
+            self.chat_text.insert(tk.END, f"● {author_upper}  ", "akakiy_title")
             self.chat_text.insert(tk.END, f"[{t_str}]\n", "time")
             self.chat_text.insert(tk.END, f"{message}\n", "akakiy_body")
         self.chat_text.insert(tk.END, "─" * 48 + "\n", "div")
@@ -1395,7 +1400,11 @@ class AkakiyGUI:
         self.queue.put(("voice_event", (event_type, data)))
 
     def _on_toggle_voice(self):
-        if self.voice_enabled:
+        if not hasattr(self, "voice") or self.voice is None:
+            self._append_log("VOICE", "Голосовой модуль недоступен.")
+            return
+
+        if self.voice_enabled or self.voice.is_busy():
             self.voice_enabled = False
             self.btn_mic.config(text="🎙 Голос", bg="#21262d", fg=self.FG_WHITE)
             self.chip_voice.config(text="ГОЛОС: ВЫКЛ", fg=self.FG_MUTED)
@@ -1403,12 +1412,19 @@ class AkakiyGUI:
             self._set_state("idle")
             self._append_log("VOICE", "Голосовой режим отключён.")
         else:
-            self.voice_enabled = True
-            self.btn_mic.config(text="⏹ Стоп", bg=self.ACCENT_RED, fg=self.FG_WHITE)
-            self.chip_voice.config(text="ГОЛОС: ВКЛ", fg=self.ACCENT_GREEN)
-            self._set_state("listening")
-            self._append_log("VOICE", "Голосовой режим активирован. Слушаю...")
-            self.voice.start_continuous_session()
+            if self.is_busy:
+                self._append_log("VOICE", "Акакий занят выполнением другой задачи.")
+                return
+
+            started = self.voice.start_session(continuous=True)
+            if started:
+                self.voice_enabled = True
+                self.btn_mic.config(text="⏹ Стоп", bg=self.ACCENT_RED, fg=self.FG_WHITE)
+                self.chip_voice.config(text="ГОЛОС: ВКЛ", fg=self.ACCENT_GREEN)
+                self._set_state("listening")
+                self._append_log("VOICE", "Голосовой сеанс начат. Слушаю...")
+            else:
+                self._append_log("VOICE", "Не удалось запустить голосовой сеанс.")
 
     def _set_state(self, state_name: str):
         states_map = {
@@ -1464,19 +1480,42 @@ class AkakiyGUI:
 
                 elif msg_type == "voice_event":
                     ev_type, payload = data
-                    if ev_type == "state_changed":
+                    if ev_type == "voice_state":
                         st = payload.get("state", "idle")
                         self._set_state(st)
-                    elif ev_type == "user_speech":
-                        txt = payload.get("text", "")
-                        self._append_chat("Вы (Голос)", txt)
-                    elif ev_type == "agent_speech":
-                        txt = payload.get("text", "")
-                        self._append_chat("Акакий (Голос)", txt)
-                    elif ev_type == "audio_level":
+                    elif ev_type == "voice_audio_level":
                         lvl = payload.get("level", 0.0)
                         if hasattr(self, "neural_core") and self.neural_core:
                             self.neural_core.set_audio_level(lvl)
+                    elif ev_type == "voice_recognized":
+                        txt = payload.get("text", "")
+                        if txt:
+                            self._append_chat("Вы (Голос)", txt)
+                            self._append_log("VOICE", f"Распознано: {txt}")
+                    elif ev_type == "voice_agent_result":
+                        res_payload = payload.get("payload", {})
+                        ans = ""
+                        if isinstance(res_payload, dict):
+                            ans = res_payload.get("answer") or ""
+                            if not ans:
+                                ans = res_payload.get("result", {}).get("message") or str(res_payload.get("result", ""))
+                        elif isinstance(res_payload, str):
+                            ans = res_payload
+                        if ans:
+                            self._append_chat("Акакий (Голос)", ans)
+                            self._append_log("DONE", "Голосовой ответ сформирован.")
+                    elif ev_type == "voice_mode_toggle":
+                        enabled = payload.get("enabled", False) if isinstance(payload, dict) else bool(payload)
+                        if not enabled and self.voice_enabled:
+                            self.voice_enabled = False
+                            self.btn_mic.config(text="🎙 Голос", bg="#21262d", fg=self.FG_WHITE)
+                            self.chip_voice.config(text="ГОЛОС: ВЫКЛ", fg=self.FG_MUTED)
+                            self._set_state("idle")
+                            self._append_log("VOICE", "Голосовой режим отключён командой.")
+                    elif ev_type == "voice_error":
+                        err_msg = payload.get("message", "Сбой голосового сеанса") if isinstance(payload, dict) else str(payload)
+                        self._set_state("error")
+                        self._append_log("ERR", f"Голосовой сбой: {err_msg}")
 
                 elif msg_type == "request_confirmation":
                     tool_name, kwargs = data
@@ -1488,7 +1527,11 @@ class AkakiyGUI:
         except queue.Empty:
             pass
 
-        self.root.after(40, self._poll_queue)
+        if not getattr(self, "_is_closing", False):
+            try:
+                self.root.after(40, self._poll_queue)
+            except Exception:
+                pass
 
 
 def main():
