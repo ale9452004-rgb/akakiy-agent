@@ -17,6 +17,11 @@ from tools.git import (
     git_log,
     git_push
 )
+from tools.memory import (
+    remember,
+    recall_memory,
+    forget_memory
+)
 
 
 TOOLS = {
@@ -102,6 +107,24 @@ TOOLS = {
         "function": git_push,
         "description": "Отправляет текущую ветку Git в удалённый репозиторий.",
         "requires_confirmation": True
+    },
+
+    "remember": {
+        "function": remember,
+        "description": "Сохраняет важный факт, предпочтение или заметку в долговременную память.",
+        "requires_confirmation": False
+    },
+
+    "recall_memory": {
+        "function": recall_memory,
+        "description": "Ищет или возвращает список фактов из долговременной памяти.",
+        "requires_confirmation": False
+    },
+
+    "forget_memory": {
+        "function": forget_memory,
+        "description": "Удаляет запись из долговременной памяти по номеру (ID) или тексту.",
+        "requires_confirmation": False
     }
 }
 
@@ -238,6 +261,33 @@ TOOL_PARAMETERS = {
     "git_push": {
         "properties": {},
         "required": []
+    },
+    "remember": {
+        "properties": {
+            "text": {
+                "type": "string",
+                "description": "Факт, знание или предпочтение для сохранения в память"
+            }
+        },
+        "required": ["text"]
+    },
+    "recall_memory": {
+        "properties": {
+            "query": {
+                "type": "string",
+                "description": "Поисковый запрос по памяти (если пустой — вернёт все сохранённые записи)"
+            }
+        },
+        "required": []
+    },
+    "forget_memory": {
+        "properties": {
+            "target": {
+                "type": "string",
+                "description": "Номер записи (например, '1' или '#1') или фрагмент текста для удаления"
+            }
+        },
+        "required": ["target"]
     }
 }
 

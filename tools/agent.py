@@ -15,6 +15,7 @@ from tools.plan_executor import PlanExecutor
 from tools.teamwork import TeamworkCoordinator
 
 from tools.registry import TOOLS, get_tools_schema
+from tools.memory import get_memory_manager
 
 from tools.edit_preparer import EditPreparer
 from tools.summary import format_task_summary
@@ -27,15 +28,62 @@ class Agent:
     - понимание запроса пользователя;
     - выбор инструмента;
     - создание и выполнение планов;
-    - подготовку изменений файлов.
+    - подготовку изменений файлов;
+    - управление краткосрочной и долговременной памятью.
     """
 
-    def __init__(self):
+    def __init__(self, memory_manager=None):
         self.ai = OllamaClient()
+        self.memory = memory_manager or get_memory_manager()
         self.edit_preparer = EditPreparer(self.ai)
         self.planner = Planner()
         self.executor = PlanExecutor(self)
         self.teamwork = TeamworkCoordinator(self)
+        self._sync_memory_to_system_prompt()
+
+    def _sync_memory_to_system_prompt(self):
+        """Синхронизирует факты долговременной памяти с системным промптом модели."""
+        facts = self.memory.format_for_system_prompt()
+        base = "Ты Акакий — локальный ИИ-ассистент пользователя. Отвечай на русском языке."
+        if facts:
+            full_prompt = f"{base}\n\n{facts}"
+        else:
+            full_prompt = base
+        self.ai.set_system_prompt(full_prompt)
+
+    def _record_interaction(self, user_input, response_payload_or_text, tool_name=None, is_native_chat=False):
+        """Фиксирует ход диалога в краткосрочной памяти и контексте OllamaClient."""
+        if not user_input or not str(user_input).strip():
+            return
+
+        if isinstance(response_payload_or_text, dict):
+            p_type = response_payload_or_text.get("type")
+            if p_type == "chat":
+                text = response_payload_or_text.get("answer", "")
+            elif p_type in ("plan", "plan_execution"):
+                res = response_payload_or_text.get("result")
+                if isinstance(res, dict):
+                    text = res.get("summary") or res.get("message") or "План выполнен."
+                else:
+                    text = str(res or "План выполнен.")
+            elif p_type == "tool":
+                tool = response_payload_or_text.get("tool", tool_name or "")
+                res = response_payload_or_text.get("result")
+                if isinstance(res, dict):
+                    text = res.get("message") or f"Инструмент {tool} выполнен."
+                else:
+                    text = f"Инструмент {tool} выполнен: {res}"
+            else:
+                text = str(response_payload_or_text.get("answer") or response_payload_or_text.get("message") or response_payload_or_text)
+        else:
+            text = str(response_payload_or_text)
+
+        # 1. Записываем в краткосрочную память MemoryManager
+        self.memory.add_turn(user_input, text, tool_name=tool_name)
+
+        # 2. Синхронизируем контекст с OllamaClient для не-ask вызовов
+        if not is_native_chat:
+            self.ai.add_interaction(user_input, text)
 
     def choose_tool(self, user_input):
         """
@@ -427,6 +475,98 @@ class Agent:
             }
 
         # =================================================
+        # Команды долговременной памяти (Memory Commands)
+        # =================================================
+
+        # 1. Запомнить факт
+        remember_match = re.match(
+            r"^(?:запомни|сохрани\s+в\s+память)[:\s]+(.+)$",
+            user_input,
+            flags=re.IGNORECASE
+        )
+        if remember_match:
+            fact_text = remember_match.group(1).strip()
+            success, msg, _ = self.memory.remember(fact_text)
+            if success:
+                self._sync_memory_to_system_prompt()
+            self._record_interaction(user_input, msg)
+            return {
+                "type": "chat",
+                "answer": msg
+            }
+
+        # 2. Что ты помнишь / покажи память
+        normalized_mem = user_input.strip().lower().rstrip(".,!?;:")
+        if normalized_mem in {
+            "что ты помнишь",
+            "что помнишь",
+            "покажи память",
+            "список памяти",
+            "что в памяти",
+            "память",
+            "показать память",
+        }:
+            summary = self.memory.format_memories_summary()
+            self._record_interaction(user_input, summary)
+            return {
+                "type": "chat",
+                "answer": summary
+            }
+
+        # 3. Забудь
+        forget_match = re.match(
+            r"^(?:забудь|удали\s+из\s+памяти)[:\s]+(.+)$",
+            user_input,
+            flags=re.IGNORECASE
+        )
+        if forget_match:
+            target = forget_match.group(1).strip()
+            success, msg = self.memory.forget(target)
+            if success:
+                self._sync_memory_to_system_prompt()
+            self._record_interaction(user_input, msg)
+            return {
+                "type": "chat",
+                "answer": msg
+            }
+
+        # 4. Поиск в памяти
+        search_mem_match = re.match(
+            r"^(?:найди\s+в\s+памяти|вспомни)[:\s]+(.+)$",
+            user_input,
+            flags=re.IGNORECASE
+        )
+        if search_mem_match:
+            query = search_mem_match.group(1).strip()
+            results = self.memory.search(query)
+            if results:
+                summary = self.memory.format_memories_summary(results)
+            else:
+                summary = f"В памяти ничего не найдено по запросу \"{query}\"."
+            self._record_interaction(user_input, summary)
+            return {
+                "type": "chat",
+                "answer": summary
+            }
+
+        # 5. Очистка всей памяти
+        if normalized_mem in {
+            "очисти память",
+            "очистить память",
+            "забудь всё",
+            "забудь все",
+            "сбрось память",
+            "сбросить память",
+        }:
+            _, msg = self.memory.clear_long_term()
+            self._sync_memory_to_system_prompt()
+            self._record_interaction(user_input, msg)
+            return {
+                "type": "chat",
+                "answer": msg
+            }
+
+        # =================================================
         # Создание плана
         # =================================================
 
@@ -447,12 +587,13 @@ class Agent:
                 }
 
             result = self.create_plan(request)
-
-            return {
+            plan_res = {
                 "type": "plan",
                 "tool": "plan",
                 "result": result
             }
+            self._record_interaction(user_input, plan_res)
+            return plan_res
 
         # =================================================
         # Выполнение плана
@@ -464,12 +605,13 @@ class Agent:
             "запусти план",
         }:
             result = self.execute_plan()
-
-            return {
+            exec_res = {
                 "type": "plan_execution",
                 "tool": "execute_plan",
                 "result": result
             }
+            self._record_interaction(user_input, exec_res)
+            return exec_res
 
         # =================================================
         # Просмотр текущего плана
@@ -481,12 +623,13 @@ class Agent:
             "показать план",
         }:
             result = self.planner.get_current_plan()
-
-            return {
+            resp = {
                 "type": "plan",
                 "tool": "get_current_plan",
                 "result": result
             }
+            self._record_interaction(user_input, resp)
+            return resp
 
         # =================================================
         # Очистка плана
@@ -498,12 +641,13 @@ class Agent:
             "сбрось план",
         }:
             result = self.planner.clear_plan()
-
-            return {
+            resp = {
                 "type": "tool",
                 "tool": "clear_plan",
                 "result": result
             }
+            self._record_interaction(user_input, resp)
+            return resp
 
         # =================================================
         # Обычный инструмент
@@ -514,11 +658,13 @@ class Agent:
         # =================================================
         if self.teamwork.is_complex_task(user_input):
             execution_result = self.teamwork.run(user_input)
-            return {
+            resp = {
                 "type": "plan_execution",
                 "tool": "execute_plan",
                 "result": execution_result
             }
+            self._record_interaction(user_input, resp)
+            return resp
 
         tool_selection = self.choose_tool(
             user_input
@@ -536,12 +682,16 @@ class Agent:
                 tool_name,
                 arguments
             )
+            if tool_name in ("remember", "forget_memory"):
+                self._sync_memory_to_system_prompt()
 
-            return {
+            resp = {
                 "type": "tool",
                 "tool": tool_name,
                 "result": result
             }
+            self._record_interaction(user_input, resp, tool_name=tool_name)
+            return resp
 
         # =================================================
         # Native Tool Calling (Ollama)
@@ -582,10 +732,12 @@ class Agent:
             }
 
         if not tool_calls:
-            return {
+            resp = {
                 "type": "chat",
                 "answer": content
             }
+            self._record_interaction(user_input, resp, is_native_chat=True)
+            return resp
 
         for round_idx in range(MAX_TOOL_ROUNDS):
             # Проверяем, не пытается ли модель превысить лимит попыток исправления
@@ -618,10 +770,13 @@ class Agent:
                     }
                 turn_messages.append(assistant_msg)
                 self.ai.commit_turn(turn_messages)
-                return {
+                ans = content if (isinstance(content, str) and content.strip()) else "Достигнут лимит попыток исправления. В проекте сохраняются синтаксические ошибки."
+                resp = {
                     "type": "chat",
-                    "answer": content if (isinstance(content, str) and content.strip()) else "Достигнут лимит попыток исправления. В проекте сохраняются синтаксические ошибки."
+                    "answer": ans
                 }
+                self._record_interaction(user_input, resp, is_native_chat=True)
+                return resp
 
             turn_messages.append(assistant_msg)
 
@@ -640,7 +795,7 @@ class Agent:
 
                 # Запрет write_file как корректирующей операции
                 if has_validation_errors and tool_name == "write_file":
-                    return {
+                    resp = {
                         "type": "tool",
                         "tool": tool_name,
                         "result": {
@@ -652,6 +807,8 @@ class Agent:
                             )
                         }
                     }
+                    self._record_interaction(user_input, resp, tool_name=tool_name, is_native_chat=False)
+                    return resp
 
                 # Если это исправление после обнаружения ошибки валидации, учитываем попытку
                 if has_validation_errors and tool_name == "edit_file":
@@ -661,6 +818,8 @@ class Agent:
                     tool_name,
                     arguments
                 )
+                if tool_name in ("remember", "forget_memory"):
+                    self._sync_memory_to_system_prompt()
 
                 # Если выполнение инструмента вернуло ошибку или отменено пользователем:
                 # 1. Немедленно прерываем цепочку
@@ -675,11 +834,13 @@ class Agent:
                             "validate_project",
                             {}
                         )
-                    return {
+                    resp = {
                         "type": "tool",
                         "tool": tool_name,
                         "result": result
                     }
+                    self._record_interaction(user_input, resp, tool_name=tool_name, is_native_chat=False)
+                    return resp
 
                 tool_content = self.serialize_tool_result(result)
                 tool_message = {
@@ -726,10 +887,13 @@ class Agent:
             if not tool_calls:
                 turn_messages.append(assistant_msg)
                 self.ai.commit_turn(turn_messages)
-                return {
+                ans = content if (isinstance(content, str) and content.strip()) else "Действие успешно выполнено."
+                resp = {
                     "type": "chat",
-                    "answer": content if (isinstance(content, str) and content.strip()) else "Действие успешно выполнено."
+                    "answer": ans
                 }
+                self._record_interaction(user_input, resp, is_native_chat=True)
+                return resp
 
         # При достижении лимита раундов запрашиваем финальный ответ без инструментов (tools=None)
         final_resp = self.ai.send_tool_step(
@@ -738,7 +902,9 @@ class Agent:
         )
         final_content = final_resp.get("content", "").strip() if isinstance(final_resp, dict) else ""
         final_answer = final_content or "Достигнут максимальный лимит шагов инструментов (5). Выполнение остановлено."
-        return {
+        resp = {
             "type": "chat",
             "answer": final_answer
         }
+        self._record_interaction(user_input, resp, is_native_chat=True)
+        return resp
