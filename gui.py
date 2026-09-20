@@ -42,7 +42,14 @@ from ui.cloud import AkakiyCloud
 from voice import VoiceService
 
 
-from ui.views.base import BaseView, _bind_hover
+from ui.views import (
+    BaseView,
+    _bind_hover,
+    TasksView,
+    RemindersView,
+    NotesView,
+    ListsView
+)
 
 
 class AkakiyGUI:
@@ -97,6 +104,23 @@ class AkakiyGUI:
         self.current_section = "home"
         self.current_selected_list = ""
         self.current_state = "idle"
+        self.tasks_view = None
+        self.reminders_view = None
+        self.notes_view = None
+        self.lists_view = None
+        self.entry_task = None
+        self.entry_rem_text = None
+        self.entry_rem_time = None
+        self.entry_note_search = None
+        self.entry_note_title = None
+        self.entry_note_content = None
+        self.entry_new_list = None
+        self._entry_item_text = None
+        self.tasks_list_frame = None
+        self.rems_list_frame = None
+        self.notes_list_frame = None
+        self.list_names_box = None
+        self.list_items_box = None
         self.chat_messages: List[Tuple[str, str, str]] = []  # [(author, message, time_str)]
         self.log_messages: List[Tuple[str, str, str]] = []   # [(prefix, text, time_str)]
         self._is_closing = False
@@ -817,437 +841,141 @@ class AkakiyGUI:
     # =========================================================================
 
     def _render_tasks_view(self):
-        header_row = tk.Frame(self.workspace, bg=self.BG_MAIN)
-        header_row.pack(fill="x", pady=(0, 16))
-
-        tk.Label(
-            header_row, text="УПРАВЛЕНИЕ ЗАДАЧАМИ (TASKS)",
-            font=("Segoe UI", 14, "bold"), fg=self.FG_WHITE, bg=self.BG_MAIN
-        ).pack(side="left")
-
-        # Форма добавления задачи
-        add_box = tk.Frame(self.workspace, bg=self.BG_CARD, bd=1, relief="solid")
-        add_box.pack(fill="x", pady=(0, 16), ipady=4)
-
-        tk.Label(add_box, text="Новая задача:", font=("Segoe UI", 10, "bold"), fg=self.FG_WHITE, bg=self.BG_CARD).pack(side="left", padx=16)
-
-        self.entry_task = tk.Entry(add_box, font=("Segoe UI", 11), bg="#13171f", fg=self.FG_WHITE, bd=1, relief="solid")
-        self.entry_task.pack(side="left", fill="x", expand=True, padx=8, pady=8)
-        self.entry_task.bind("<Return>", lambda e: self._ui_create_task())
-
-        btn_add = tk.Button(
-            add_box, text="Добавить", font=("Segoe UI", 9, "bold"), bg=self.ACCENT_CYAN, fg="#0d1117", bd=0, padx=16, pady=6, cursor="hand2",
-            command=self._ui_create_task
-        )
-        btn_add.pack(side="left", padx=16)
-
-        # Контейнер списка задач
-        self.tasks_list_frame = tk.Frame(self.workspace, bg=self.BG_CARD, bd=1, relief="solid")
-        self.tasks_list_frame.pack(fill="both", expand=True)
-
-        self._refresh_tasks_list()
+        self.tasks_view = TasksView(self.workspace, shell=self)
+        self.tasks_view.pack(fill="both", expand=True)
+        self.entry_task = self.tasks_view.entry_task
+        self.tasks_list_frame = self.tasks_view.tasks_list_frame
 
     def _ui_create_task(self):
-        txt = self.entry_task.get().strip()
-        if txt:
-            self.household.create_task(txt)
-            self.entry_task.delete(0, tk.END)
-            self._refresh_tasks_list()
-
-    def _refresh_tasks_list(self):
-        for w in self.tasks_list_frame.winfo_children():
-            w.destroy()
-
-        tasks = self.household.list_tasks(status="all")["tasks"]
-        if not tasks:
-            tk.Label(self.tasks_list_frame, text="Задач пока нет.", font=("Segoe UI", 11), fg=self.FG_MUTED, bg=self.BG_CARD).pack(pady=40)
-            return
-
-        for t in reversed(tasks):
-            row = tk.Frame(self.tasks_list_frame, bg="#13171f", bd=1, relief="solid")
-            row.pack(fill="x", padx=16, pady=4)
-
-            # Чекбокс
-            is_done = t.get("completed", False)
-            btn_txt = "☑" if is_done else "☐"
-            btn_color = self.ACCENT_GREEN if is_done else self.FG_MUTED
-
-            chk = tk.Button(
-                row, text=btn_txt, font=("Segoe UI", 12), fg=btn_color, bg="#13171f", bd=0, cursor="hand2",
-                command=lambda tid=t["id"]: self._ui_toggle_task(tid)
-            )
-            chk.pack(side="left", padx=12, pady=8)
-
-            t_fg = self.FG_MUTED if is_done else self.FG_WHITE
-            tk.Label(row, text=f"#{t['id']} {t['title']}", font=("Segoe UI", 10), fg=t_fg, bg="#13171f").pack(side="left", padx=4)
-
-            # Дата
-            tk.Label(row, text=t.get("created_at", ""), font=("Consolas", 8), fg=self.FG_DIM, bg="#13171f").pack(side="right", padx=12)
-
-            # Кнопка удаления
-            btn_del = tk.Button(
-                row, text="✕", font=("Segoe UI", 9), fg=self.ACCENT_RED, bg="#13171f", bd=0, cursor="hand2",
-                command=lambda tid=t["id"]: self._ui_delete_task(tid)
-            )
-            btn_del.pack(side="right", padx=8)
+        if hasattr(self, "tasks_view") and self.tasks_view:
+            return self.tasks_view.ui_create_task()
 
     def _ui_toggle_task(self, task_id):
-        self.household.complete_task(task_id)
-        self._refresh_tasks_list()
+        if hasattr(self, "tasks_view") and self.tasks_view:
+            return self.tasks_view.ui_toggle_task(task_id)
 
     def _ui_delete_task(self, task_id):
-        if messagebox.askyesno("Подтверждение", f"Удалить задачу #{task_id}?"):
-            self.household.delete_task(task_id)
-            self._refresh_tasks_list()
+        if hasattr(self, "tasks_view") and self.tasks_view:
+            return self.tasks_view.ui_delete_task(task_id)
+
+    def _refresh_tasks_list(self):
+        if hasattr(self, "tasks_view") and self.tasks_view:
+            return self.tasks_view.refresh()
 
     # =========================================================================
     # ЭКРАН 4: НАПОМИНАНИЯ (REMINDERS)
     # =========================================================================
 
     def _render_reminders_view(self):
-        header_row = tk.Frame(self.workspace, bg=self.BG_MAIN)
-        header_row.pack(fill="x", pady=(0, 16))
-
-        tk.Label(
-            header_row, text="НАПОМИНАНИЯ (REMINDERS)",
-            font=("Segoe UI", 14, "bold"), fg=self.FG_WHITE, bg=self.BG_MAIN
-        ).pack(side="left")
-
-        btn_check = tk.Button(
-            header_row, text="🔔 Проверить наступившие", font=("Segoe UI", 9, "bold"),
-            bg=self.ACCENT_PURPLE, fg=self.FG_WHITE, bd=0, padx=12, pady=4, cursor="hand2",
-            command=self._ui_check_reminders
-        )
-        btn_check.pack(side="right")
-
-        # Форма добавления
-        add_box = tk.Frame(self.workspace, bg=self.BG_CARD, bd=1, relief="solid")
-        add_box.pack(fill="x", pady=(0, 16), ipady=4)
-
-        tk.Label(add_box, text="О чём напомнить:", font=("Segoe UI", 9, "bold"), fg=self.FG_WHITE, bg=self.BG_CARD).pack(side="left", padx=12)
-        self.entry_rem_text = tk.Entry(add_box, font=("Segoe UI", 10), bg="#13171f", fg=self.FG_WHITE, bd=1, relief="solid")
-        self.entry_rem_text.pack(side="left", fill="x", expand=True, padx=6, pady=8)
-
-        tk.Label(add_box, text="Время (19:00 / завтра в 10:00):", font=("Segoe UI", 9, "bold"), fg=self.FG_WHITE, bg=self.BG_CARD).pack(side="left", padx=12)
-        self.entry_rem_time = tk.Entry(add_box, font=("Segoe UI", 10), bg="#13171f", fg=self.FG_WHITE, bd=1, relief="solid", width=18)
-        self.entry_rem_time.pack(side="left", padx=6, pady=8)
-
-        btn_add = tk.Button(
-            add_box, text="Установить", font=("Segoe UI", 9, "bold"), bg=self.ACCENT_PURPLE, fg=self.FG_WHITE, bd=0, padx=14, pady=6, cursor="hand2",
-            command=self._ui_create_reminder
-        )
-        btn_add.pack(side="left", padx=12)
-
-        # Контейнер списка
-        self.rems_list_frame = tk.Frame(self.workspace, bg=self.BG_CARD, bd=1, relief="solid")
-        self.rems_list_frame.pack(fill="both", expand=True)
-
-        self._refresh_reminders_list()
+        self.reminders_view = RemindersView(self.workspace, shell=self)
+        self.reminders_view.pack(fill="both", expand=True)
+        self.entry_rem_text = self.reminders_view.entry_rem_text
+        self.entry_rem_time = self.reminders_view.entry_rem_time
+        self.rems_list_frame = self.reminders_view.rems_list_frame
 
     def _ui_create_reminder(self):
-        txt = self.entry_rem_text.get().strip()
-        tm = self.entry_rem_time.get().strip()
-        if txt and tm:
-            self.household.create_reminder(txt, tm)
-            self.entry_rem_text.delete(0, tk.END)
-            self.entry_rem_time.delete(0, tk.END)
-            self._refresh_reminders_list()
+        if hasattr(self, "reminders_view") and self.reminders_view:
+            return self.reminders_view.ui_create_reminder()
 
     def _ui_check_reminders(self):
-        res = self.household.check_due_reminders()
-        messagebox.showinfo("Напоминания", res["message"])
-        self._refresh_reminders_list()
-
-    def _refresh_reminders_list(self):
-        for w in self.rems_list_frame.winfo_children():
-            w.destroy()
-
-        rems = self.household.list_reminders(include_triggered=True)["reminders"]
-        if not rems:
-            tk.Label(self.rems_list_frame, text="Напоминаний нет.", font=("Segoe UI", 11), fg=self.FG_MUTED, bg=self.BG_CARD).pack(pady=40)
-            return
-
-        for r in reversed(rems):
-            row = tk.Frame(self.rems_list_frame, bg="#13171f", bd=1, relief="solid")
-            row.pack(fill="x", padx=16, pady=4)
-
-            icon = "🔔" if not r.get("triggered") else "✔"
-            tk.Label(row, text=icon, font=("Segoe UI", 11), fg=self.ACCENT_PURPLE, bg="#13171f").pack(side="left", padx=12, pady=8)
-            tk.Label(row, text=f"#{r['id']} {r['text']}", font=("Segoe UI", 10), fg=self.FG_WHITE, bg="#13171f").pack(side="left", padx=4)
-
-            tk.Label(row, text=f"Время: {r['remind_at']}", font=("Consolas", 9), fg=self.ACCENT_CYAN, bg="#13171f").pack(side="right", padx=16)
-
-            btn_del = tk.Button(
-                row, text="✕", font=("Segoe UI", 9), fg=self.ACCENT_RED, bg="#13171f", bd=0, cursor="hand2",
-                command=lambda rid=r["id"]: self._ui_delete_reminder(rid)
-            )
-            btn_del.pack(side="right", padx=8)
+        if hasattr(self, "reminders_view") and self.reminders_view:
+            return self.reminders_view.ui_check_reminders()
 
     def _ui_delete_reminder(self, reminder_id):
-        if messagebox.askyesno("Подтверждение", f"Удалить напоминание #{reminder_id}?"):
-            self.household.delete_reminder(reminder_id)
-            self._refresh_reminders_list()
+        if hasattr(self, "reminders_view") and self.reminders_view:
+            return self.reminders_view.ui_delete_reminder(reminder_id)
+
+    def _refresh_reminders_list(self):
+        if hasattr(self, "reminders_view") and self.reminders_view:
+            return self.reminders_view.refresh()
 
     # =========================================================================
     # ЭКРАН 5: ЗАМЕТКИ (NOTES)
     # =========================================================================
 
     def _render_notes_view(self):
-        header_row = tk.Frame(self.workspace, bg=self.BG_MAIN)
-        header_row.pack(fill="x", pady=(0, 16))
-
-        tk.Label(
-            header_row, text="ЗАМЕТКИ (NOTES)",
-            font=("Segoe UI", 14, "bold"), fg=self.FG_WHITE, bg=self.BG_MAIN
-        ).pack(side="left")
-
-        # Поиск заметок
-        search_box = tk.Frame(header_row, bg=self.BG_MAIN)
-        search_box.pack(side="right")
-        tk.Label(search_box, text="Поиск:", font=("Segoe UI", 9), fg=self.FG_MUTED, bg=self.BG_MAIN).pack(side="left", padx=4)
-        self.entry_note_search = tk.Entry(search_box, font=("Segoe UI", 10), bg=self.BG_CARD, fg=self.FG_WHITE, width=20, bd=1, relief="solid")
-        self.entry_note_search.pack(side="left", padx=4)
-        self.entry_note_search.bind("<KeyRelease>", lambda e: self._refresh_notes_list())
-
-        # Форма создания
-        create_box = tk.Frame(self.workspace, bg=self.BG_CARD, bd=1, relief="solid")
-        create_box.pack(fill="x", pady=(0, 16), padx=0)
-
-        tk.Label(create_box, text="Заголовок:", font=("Segoe UI", 9, "bold"), fg=self.FG_WHITE, bg=self.BG_CARD).pack(anchor="w", padx=16, pady=(10, 2))
-        self.entry_note_title = tk.Entry(create_box, font=("Segoe UI", 10), bg="#13171f", fg=self.FG_WHITE, bd=1, relief="solid")
-        self.entry_note_title.pack(fill="x", padx=16, pady=(0, 6))
-
-        tk.Label(create_box, text="Текст заметки:", font=("Segoe UI", 9, "bold"), fg=self.FG_WHITE, bg=self.BG_CARD).pack(anchor="w", padx=16, pady=(4, 2))
-        self.entry_note_content = tk.Entry(create_box, font=("Segoe UI", 10), bg="#13171f", fg=self.FG_WHITE, bd=1, relief="solid")
-        self.entry_note_content.pack(fill="x", padx=16, pady=(0, 10))
-
-        btn_save = tk.Button(
-            create_box, text="Сохранить заметку", font=("Segoe UI", 9, "bold"), bg=self.ACCENT_CYAN, fg="#0d1117", bd=0, padx=14, pady=6, cursor="hand2",
-            command=self._ui_create_note
-        )
-        btn_save.pack(anchor="e", padx=16, pady=(0, 12))
-
-        # Контейнер плиток
-        self.notes_list_frame = tk.Frame(self.workspace, bg=self.BG_MAIN)
-        self.notes_list_frame.pack(fill="both", expand=True)
-
-        self._refresh_notes_list()
+        self.notes_view = NotesView(self.workspace, shell=self)
+        self.notes_view.pack(fill="both", expand=True)
+        self.entry_note_search = self.notes_view.entry_note_search
+        self.entry_note_title = self.notes_view.entry_note_title
+        self.entry_note_content = self.notes_view.entry_note_content
+        self.notes_list_frame = self.notes_view.notes_list_frame
 
     def _ui_create_note(self):
-        title = self.entry_note_title.get().strip()
-        content = self.entry_note_content.get().strip()
-        if title or content:
-            self.household.create_note(title, content)
-            self.entry_note_title.delete(0, tk.END)
-            self.entry_note_content.delete(0, tk.END)
-            self._refresh_notes_list()
-
-    def _refresh_notes_list(self):
-        for w in self.notes_list_frame.winfo_children():
-            w.destroy()
-
-        q = getattr(self, "entry_note_search", None)
-        query = q.get().strip() if q else ""
-        if query:
-            notes = self.household.search_notes(query)["notes"]
-        else:
-            notes = self.household.list_notes()["notes"]
-
-        if not notes:
-            tk.Label(self.notes_list_frame, text="Заметок не найдено.", font=("Segoe UI", 11), fg=self.FG_MUTED, bg=self.BG_MAIN).pack(pady=30)
-            return
-
-        for n in reversed(notes):
-            card = tk.Frame(self.notes_list_frame, bg=self.BG_CARD, bd=1, relief="solid")
-            card.pack(fill="x", pady=4)
-
-            top_line = tk.Frame(card, bg=self.BG_CARD)
-            top_line.pack(fill="x", padx=14, pady=(10, 4))
-
-            tk.Label(top_line, text=f"#{n['id']} {n['title']}", font=("Segoe UI", 10, "bold"), fg=self.FG_WHITE, bg=self.BG_CARD).pack(side="left")
-            tk.Label(top_line, text=n.get("created_at", ""), font=("Consolas", 8), fg=self.FG_DIM, bg=self.BG_CARD).pack(side="right", padx=8)
-
-            btn_del = tk.Button(
-                top_line, text="✕", font=("Segoe UI", 9), fg=self.ACCENT_RED, bg=self.BG_CARD, bd=0, cursor="hand2",
-                command=lambda nid=n["id"]: self._ui_delete_note(nid)
-            )
-            btn_del.pack(side="right")
-
-            tk.Label(
-                card, text=n.get("content", ""), font=("Segoe UI", 9), fg=self.FG_MAIN, bg=self.BG_CARD, justify="left", wraplength=800
-            ).pack(anchor="w", padx=14, pady=(0, 12))
+        if hasattr(self, "notes_view") and self.notes_view:
+            return self.notes_view.ui_create_note()
 
     def _ui_delete_note(self, note_id):
-        if messagebox.askyesno("Подтверждение", f"Удалить заметку #{note_id}?"):
-            self.household.delete_note(note_id)
-            self._refresh_notes_list()
+        if hasattr(self, "notes_view") and self.notes_view:
+            return self.notes_view.ui_delete_note(note_id)
+
+    def _refresh_notes_list(self):
+        if hasattr(self, "notes_view") and self.notes_view:
+            return self.notes_view.refresh()
 
     # =========================================================================
     # ЭКРАН 6: СПИСКИ (LISTS)
     # =========================================================================
 
     def _render_lists_view(self):
-        header_row = tk.Frame(self.workspace, bg=self.BG_MAIN)
-        header_row.pack(fill="x", pady=(0, 16))
+        self.lists_view = ListsView(self.workspace, shell=self)
+        self.lists_view.pack(fill="both", expand=True)
+        self.entry_new_list = self.lists_view.entry_new_list
+        self.list_names_box = self.lists_view.list_names_box
+        self.list_items_box = self.lists_view.list_items_box
+        self.current_selected_list = self.lists_view.current_selected_list
 
-        tk.Label(
-            header_row, text="СПИСКИ (LISTS)",
-            font=("Segoe UI", 14, "bold"), fg=self.FG_WHITE, bg=self.BG_MAIN
-        ).pack(side="left")
+    @property
+    def entry_item_text(self):
+        if hasattr(self, "lists_view") and self.lists_view and hasattr(self.lists_view, "entry_item_text"):
+            return self.lists_view.entry_item_text
+        return getattr(self, "_entry_item_text", None)
 
-        body_split = tk.Frame(self.workspace, bg=self.BG_MAIN)
-        body_split.pack(fill="both", expand=True)
-
-        # Левая часть: перечень списков + добавление списка
-        left_pane = tk.Frame(body_split, bg=self.BG_CARD, bd=1, relief="solid", width=300)
-        left_pane.pack(side="left", fill="y", padx=(0, 14))
-        left_pane.pack_propagate(False)
-
-        tk.Label(left_pane, text="ВАШИ СПИСКИ", font=("Segoe UI", 10, "bold"), fg=self.FG_WHITE, bg=self.BG_CARD).pack(anchor="w", padx=14, pady=12)
-
-        new_l_box = tk.Frame(left_pane, bg=self.BG_CARD)
-        new_l_box.pack(fill="x", padx=14, pady=(0, 10))
-        self.entry_new_list = tk.Entry(new_l_box, font=("Segoe UI", 9), bg="#13171f", fg=self.FG_WHITE, bd=1, relief="solid")
-        self.entry_new_list.pack(side="left", fill="x", expand=True, padx=(0, 4))
-        btn_create_l = tk.Button(
-            new_l_box, text="+", font=("Segoe UI", 9, "bold"), bg=self.ACCENT_GREEN, fg="#0d1117", bd=0, padx=8, cursor="hand2",
-            command=self._ui_create_list
-        )
-        btn_create_l.pack(side="left")
-
-        self.list_names_box = tk.Frame(left_pane, bg=self.BG_CARD)
-        self.list_names_box.pack(fill="both", expand=True, padx=8, pady=4)
-
-        # Правая часть: элементы выбранного списка
-        self.right_items_pane = tk.Frame(body_split, bg=self.BG_CARD, bd=1, relief="solid")
-        self.right_items_pane.pack(side="left", fill="both", expand=True)
-
-        self._refresh_lists_menu()
-
-    def _ui_create_list(self):
-        name = self.entry_new_list.get().strip().lower()
-        if name:
-            self.household.create_list(name)
-            self.entry_new_list.delete(0, tk.END)
-            self.current_selected_list = name
-            self._refresh_lists_menu()
+    @entry_item_text.setter
+    def entry_item_text(self, val):
+        self._entry_item_text = val
+        if hasattr(self, "lists_view") and self.lists_view:
+            self.lists_view.entry_item_text = val
 
     def _refresh_lists_menu(self):
-        for w in self.list_names_box.winfo_children():
-            w.destroy()
-
-        lists = list(self.household.lists.keys())
-        if not lists:
-            tk.Label(self.list_names_box, text="Нет списков.", font=("Segoe UI", 9), fg=self.FG_MUTED, bg=self.BG_CARD).pack(pady=10)
-            self._render_selected_list_items("")
-            return
-
-        if not self.current_selected_list or self.current_selected_list not in lists:
-            self.current_selected_list = lists[0]
-
-        for l_name in lists:
-            cnt = len(self.household.lists[l_name])
-            is_active = (l_name == self.current_selected_list)
-            btn_bg = self.BG_ACTIVE if is_active else "#13171f"
-            btn_fg = self.ACCENT_CYAN if is_active else self.FG_MAIN
-
-            b = tk.Button(
-                self.list_names_box,
-                text=f"• {l_name} ({cnt})",
-                font=("Segoe UI", 9, "bold" if is_active else "normal"),
-                fg=btn_fg, bg=btn_bg, bd=0, anchor="w", padx=10, pady=6, cursor="hand2",
-                command=lambda name=l_name: self._select_list(name)
-            )
-            b.pack(fill="x", pady=2)
-            _bind_hover(b, btn_bg, self.BG_HOVER)
-
-        self._render_selected_list_items(self.current_selected_list)
+        if hasattr(self, "lists_view") and self.lists_view:
+            return self.lists_view.refresh()
 
     def _select_list(self, name: str):
-        self.current_selected_list = name
-        self._refresh_lists_menu()
+        if hasattr(self, "lists_view") and self.lists_view:
+            res = self.lists_view.select_list(name)
+            self.current_selected_list = self.lists_view.current_selected_list
+            return res
 
     def _render_selected_list_items(self, list_name: str):
-        for w in self.right_items_pane.winfo_children():
-            w.destroy()
+        if hasattr(self, "lists_view") and self.lists_view:
+            res = self.lists_view.render_selected_list_items(list_name)
+            self.current_selected_list = self.lists_view.current_selected_list
+            return res
 
-        if not list_name or list_name not in self.household.lists:
-            tk.Label(self.right_items_pane, text="Выберите или создайте список слева.", font=("Segoe UI", 11), fg=self.FG_MUTED, bg=self.BG_CARD).pack(pady=40)
-            return
-
-        header = tk.Frame(self.right_items_pane, bg=self.BG_CARD)
-        header.pack(fill="x", padx=16, pady=12)
-
-        tk.Label(header, text=f"СПИСОК: {list_name.upper()}", font=("Segoe UI", 12, "bold"), fg=self.ACCENT_GREEN, bg=self.BG_CARD).pack(side="left")
-
-        btn_del_list = tk.Button(
-            header, text="Удалить список целиком", font=("Segoe UI", 8), fg=self.ACCENT_RED, bg="#21262d", bd=0, padx=8, pady=4, cursor="hand2",
-            command=lambda: self._ui_delete_entire_list(list_name)
-        )
-        btn_del_list.pack(side="right")
-
-        # Форма добавления пункта
-        add_item_box = tk.Frame(self.right_items_pane, bg=self.BG_CARD)
-        add_item_box.pack(fill="x", padx=16, pady=(0, 12))
-
-        self.entry_item_text = tk.Entry(add_item_box, font=("Segoe UI", 10), bg="#13171f", fg=self.FG_WHITE, bd=1, relief="solid")
-        self.entry_item_text.pack(side="left", fill="x", expand=True, padx=(0, 8))
-        self.entry_item_text.bind("<Return>", lambda e: self._ui_add_item(list_name))
-
-        btn_add_item = tk.Button(
-            add_item_box, text="Добавить пункт", font=("Segoe UI", 9, "bold"), bg=self.ACCENT_GREEN, fg="#0d1117", bd=0, padx=12, pady=5, cursor="hand2",
-            command=lambda: self._ui_add_item(list_name)
-        )
-        btn_add_item.pack(side="left")
-
-        # Пункты списка
-        items = self.household.lists[list_name]
-        items_scroll = tk.Frame(self.right_items_pane, bg=self.BG_CARD)
-        items_scroll.pack(fill="both", expand=True, padx=16, pady=(0, 12))
-
-        if not items:
-            tk.Label(items_scroll, text="Список пуст.", font=("Segoe UI", 10), fg=self.FG_MUTED, bg=self.BG_CARD).pack(anchor="w", pady=10)
-        else:
-            for it in items:
-                row = tk.Frame(items_scroll, bg="#13171f", bd=1, relief="solid")
-                row.pack(fill="x", pady=2)
-
-                is_done = it.get("completed", False)
-                btn_txt = "☑" if is_done else "☐"
-                chk = tk.Button(
-                    row, text=btn_txt, font=("Segoe UI", 11), fg=self.ACCENT_GREEN if is_done else self.FG_MUTED,
-                    bg="#13171f", bd=0, cursor="hand2",
-                    command=lambda iid=it["id"]: self._ui_toggle_item(list_name, iid)
-                )
-                chk.pack(side="left", padx=8, pady=4)
-
-                tk.Label(row, text=it["text"], font=("Segoe UI", 9), fg=self.FG_MUTED if is_done else self.FG_WHITE, bg="#13171f").pack(side="left", padx=4)
-
-                btn_del = tk.Button(
-                    row, text="✕", font=("Segoe UI", 8), fg=self.ACCENT_RED, bg="#13171f", bd=0, cursor="hand2",
-                    command=lambda iid=it["id"]: self._ui_delete_item(list_name, iid)
-                )
-                btn_del.pack(side="right", padx=8)
+    def _ui_create_list(self):
+        if hasattr(self, "lists_view") and self.lists_view:
+            res = self.lists_view.ui_create_list()
+            self.current_selected_list = self.lists_view.current_selected_list
+            return res
 
     def _ui_add_item(self, list_name: str):
-        txt = self.entry_item_text.get().strip()
-        if txt:
-            self.household.add_list_item(list_name, txt)
-            self._render_selected_list_items(list_name)
+        if hasattr(self, "lists_view") and self.lists_view:
+            return self.lists_view.ui_add_item(list_name)
 
     def _ui_toggle_item(self, list_name: str, item_id: int):
-        self.household.complete_list_item(list_name, item_id)
-        self._render_selected_list_items(list_name)
+        if hasattr(self, "lists_view") and self.lists_view:
+            return self.lists_view.ui_toggle_item(list_name, item_id)
 
     def _ui_delete_item(self, list_name: str, item_id: int):
-        self.household.delete_list_item(list_name, item_id)
-        self._render_selected_list_items(list_name)
+        if hasattr(self, "lists_view") and self.lists_view:
+            return self.lists_view.ui_delete_item(list_name, item_id)
 
     def _ui_delete_entire_list(self, list_name: str):
-        if messagebox.askyesno("Подтверждение", f"Удалить весь список '{list_name}'?"):
-            self.household.delete_list(list_name)
-            self.current_selected_list = ""
-            self._refresh_lists_menu()
+        if hasattr(self, "lists_view") and self.lists_view:
+            res = self.lists_view.ui_delete_entire_list(list_name)
+            self.current_selected_list = self.lists_view.current_selected_list
+            return res
 
     # =========================================================================
     # ЭКРАН 7: ПАМЯТЬ (MEMORY)
@@ -1454,19 +1182,27 @@ class AkakiyGUI:
         if sec == "home":
             self._switch_section("home")
         elif sec == "tasks":
-            if hasattr(self, "tasks_list_frame") and self.tasks_list_frame.winfo_exists():
+            if hasattr(self, "tasks_view") and self.tasks_view and self.tasks_view.winfo_exists():
+                self.tasks_view.refresh()
+            elif hasattr(self, "tasks_list_frame") and self.tasks_list_frame and self.tasks_list_frame.winfo_exists():
                 self._refresh_tasks_list()
         elif sec == "reminders":
-            if hasattr(self, "rems_list_frame") and self.rems_list_frame.winfo_exists():
+            if hasattr(self, "reminders_view") and self.reminders_view and self.reminders_view.winfo_exists():
+                self.reminders_view.refresh()
+            elif hasattr(self, "rems_list_frame") and self.rems_list_frame and self.rems_list_frame.winfo_exists():
                 self._refresh_reminders_list()
         elif sec == "notes":
-            if hasattr(self, "notes_list_frame") and self.notes_list_frame.winfo_exists():
+            if hasattr(self, "notes_view") and self.notes_view and self.notes_view.winfo_exists():
+                self.notes_view.refresh()
+            elif hasattr(self, "notes_list_frame") and self.notes_list_frame and self.notes_list_frame.winfo_exists():
                 self._refresh_notes_list()
         elif sec == "lists":
-            if hasattr(self, "list_names_box") and self.list_names_box.winfo_exists():
+            if hasattr(self, "lists_view") and self.lists_view and self.lists_view.winfo_exists():
+                self.lists_view.refresh()
+            elif hasattr(self, "list_names_box") and self.list_names_box and self.list_names_box.winfo_exists():
                 self._refresh_lists_menu()
         elif sec == "memory":
-            if hasattr(self, "mem_list_frame") and self.mem_list_frame.winfo_exists():
+            if hasattr(self, "mem_list_frame") and self.mem_list_frame and self.mem_list_frame.winfo_exists():
                 self._refresh_memory_list()
 
     # =========================================================================

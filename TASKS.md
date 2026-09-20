@@ -7,8 +7,8 @@
 ## 1. Текущий статус проекта
 
 * **Текущая версия**: Акакий 2.0 (Desktop Hub + Voice UX + Household Assistant + Memory + Core Dev Tools).
-* **Состояние кодовой базы**: Стабильное, все тесты пройдены (`58` файлов валидированы, 142 теста в `tests/` успешны, 0 синтаксических ошибок).
-* **Последний этап**: Рефакторинг R3.2 — Создание базовой инфраструктуры `ui/views/base.py` (BaseView).
+* **Состояние кодовой базы**: Стабильное, все тесты пройдены (`63` файла валидированы, 146 тестов в `tests/` успешны, 0 синтаксических ошибок).
+* **Последний этап**: Рефакторинг R3.3 — Вынос бытовых экранов из `gui.py` (`TasksView`, `RemindersView`, `NotesView`, `ListsView`).
 * **Ветка**: `master`, синхронизирована с `origin/master`.
 
 ---
@@ -16,6 +16,7 @@
 ## 2. Реализованный функционал (Done)
 
 ### 2.0. Архитектурный аудит, документация и инфраструктура тестов
+- [x] **Вынос бытовых экранов из `gui.py` (Этап R3.3)**: Из монолита `gui.py` вынесены 4 бытовых экрана в независимые классы `BaseView`: `ui/views/tasks.py` (`TasksView`), `ui/views/reminders.py` (`RemindersView`), `ui/views/notes.py` (`NotesView`), `ui/views/lists.py` (`ListsView`). В `gui.py` сохранены чистые делегирующие фасады и свойства (`entry_task`, `entry_rem_*`, `entry_note_*`, `entry_new_list`, `entry_item_text`, `tasks_list_frame`, etc.) для 100% обратной совместимости. Обновлён `refresh_current_view()` для обновления через экземпляры Views. Создан тестовый набор `tests/test_household_views.py` (4 теста, 100% pass, всего 146 тестов в `tests/`).
 - [x] **Базовая инфраструктура экранов `ui/views/` (Этап R3.2)**: Создан пакет `ui/views/` с базовым классом `BaseView(tk.Frame)` (`ui/views/base.py`) и единым контрактом (`render()`, `refresh()`, доступ к `shell` и сервисам `agent`, `household`, `memory`, `voice` без дублирования, темовые константы). Общая утилита `_bind_hover` вынесена в `ui/views/base.py`. Создан набор тестов `tests/test_base_view.py` (5 тестов, 100% pass, всего 142 теста).
 - [x] **Исследование и подготовка разделения GUI (Этап R3.1)**: Проведён детальный аудит всех 51 методов `gui.py`, составлена классификация по 8 экранам и Shell, выявлены и задокументированы все cross-screen зависимости.
 - [x] **Стабилизация и регрессионная проверка `CommandRouter` (Этап R2.5)**: Проведена полная регрессионная проверка реальных вызовов через `Agent.process()` по всем 5 направлениям (Household CRUD задач и заметок; память remember/recall/search/forget/clear; проектные команды find/list/search; планирование create/get/clear с поддержкой естественных фраз «создай план ...»; свободные запросы к LLM). Тестовое покрытие расширено до 22 тестов в `test_command_router.py` (всего 137 тестов в `tests/`, 100% pass).
@@ -96,8 +97,11 @@
   * Устранить затенение команд памяти между `choose_tool()` и `process()`.
   * В `Agent.process()` выстроить прозрачный конвейер: `Router (fast-path) -> Planner -> SkillRegistry -> Ollama Native Tool Calling`.
 * [ ] **Этап R3: Модуляризация представлений `gui.py` в `ui/views/`** (Средний приоритет, Средний риск):
-  * Разбить монолит `gui.py` (1646 строк) на независимые компоненты экранов: `ui/views/home.py`, `tasks.py`, `reminders.py`, `notes.py`, `lists.py`, `memory.py`, `settings.py`.
-  * В `gui.py` оставить только базовый каркас приложения (Topbar, Sidebar, Command Bar, Queue Polling, Neural Core).
+  * [x] **R3.1**: Аудит и классификация всех 51 методов `gui.py`, карта зависимостей экранов и Shell.
+  * [x] **R3.2**: Инфраструктура `BaseView(tk.Frame)` и общие UI-хелперы в `ui/views/base.py`.
+  * [x] **R3.3**: Вынос бытовых экранов (`TasksView`, `RemindersView`, `NotesView`, `ListsView`) с сохранением фасадов и атрибутов.
+  * [ ] **R3.4**: Вынос экранов памяти и настроек (`MemoryView`, `SettingsView`).
+  * [ ] **R3.5**: Вынос экранов Главная и Чат (`HomeView`, `ChatView`), превращение `gui.py` в компактный Shell (Topbar, Sidebar, Command Bar, Polling, Neural Core).
 * [ ] **Этап R4: Вынос утилит парсинга времени из `tools/household.py`** (Низкий приоритет, Низкий риск):
   * Вынести чистую функцию `parse_reminder_time` из `tools/household.py` в `tools/datetime_utils.py`.
 
