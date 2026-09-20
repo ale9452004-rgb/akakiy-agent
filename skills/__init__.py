@@ -11,6 +11,7 @@ from skills.registry import (
 )
 from skills.project import ProjectSkill
 from skills.memory import MemorySkill
+from skills.household import HouseholdSkill
 
 __all__ = [
     "BaseSkill",
@@ -20,4 +21,5 @@ __all__ = [
     "reset_skill_registry",
     "ProjectSkill",
     "MemorySkill",
+    "HouseholdSkill",
 ]

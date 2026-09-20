@@ -137,15 +137,18 @@ def load_builtin_skills(registry: Optional[SkillRegistry] = None) -> SkillRegist
     Инициализирует и регистрирует стандартные встроенные навыки Акакия:
     - project (работа с кодовой базой и файлами проекта)
     - memory (управление долговременной памятью)
+    - household (бытовой ассистент: задачи, напоминания, заметки, списки)
     """
     reg = registry if registry is not None else SkillRegistry()
 
     # Отложенный импорт для исключения циклических зависимостей
     from skills.project import ProjectSkill
     from skills.memory import MemorySkill
+    from skills.household import HouseholdSkill
 
     reg.register(ProjectSkill())
     reg.register(MemorySkill())
+    reg.register(HouseholdSkill())
 
     return reg
 

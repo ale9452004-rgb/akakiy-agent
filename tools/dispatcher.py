@@ -81,6 +81,26 @@ def get_confirmation_details_text(tool_name, kwargs):
         lines.append(f"Ветка: {branch}")
         lines.append(f"Удалённый репозиторий:\n{remote}")
 
+    elif tool_name == "delete_task":
+        task_id = kwargs.get("task_id", "")
+        lines.append("Действие: Удаление бытовой задачи")
+        lines.append(f"Идентификатор / название задачи: {task_id}")
+
+    elif tool_name == "delete_reminder":
+        reminder_id = kwargs.get("reminder_id", "")
+        lines.append("Действие: Удаление напоминания")
+        lines.append(f"Идентификатор / текст напоминания: {reminder_id}")
+
+    elif tool_name == "delete_note":
+        note_id = kwargs.get("note_id", "")
+        lines.append("Действие: Удаление заметки")
+        lines.append(f"Идентификатор / заголовок заметки: {note_id}")
+
+    elif tool_name == "delete_list":
+        name = kwargs.get("name", "")
+        lines.append("Действие: Удаление списка целиком со всеми пунктами")
+        lines.append(f"Имя списка: {name}")
+
     return "\n".join(lines)
 
 

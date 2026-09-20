@@ -22,6 +22,26 @@ from tools.memory import (
     recall_memory,
     forget_memory
 )
+from tools.household import (
+    create_task,
+    list_tasks,
+    complete_task,
+    delete_task,
+    create_reminder,
+    list_reminders,
+    delete_reminder,
+    check_due_reminders,
+    create_note,
+    list_notes,
+    search_notes,
+    delete_note,
+    create_list,
+    show_list,
+    add_list_item,
+    complete_list_item,
+    delete_list_item,
+    delete_list
+)
 
 
 TOOLS = {
@@ -125,6 +145,97 @@ TOOLS = {
         "function": forget_memory,
         "description": "Удаляет запись из долговременной памяти по номеру (ID) или тексту.",
         "requires_confirmation": False
+    },
+
+    "create_task": {
+        "function": create_task,
+        "description": "Создаёт новую бытовую задачу.",
+        "requires_confirmation": False
+    },
+    "list_tasks": {
+        "function": list_tasks,
+        "description": "Показывает список бытовых задач (можно фильтровать: all, pending, completed).",
+        "requires_confirmation": False
+    },
+    "complete_task": {
+        "function": complete_task,
+        "description": "Отмечает задачу выполненной по её номеру (ID) или названию.",
+        "requires_confirmation": False
+    },
+    "delete_task": {
+        "function": delete_task,
+        "description": "Удаляет задачу по её номеру (ID) или названию.",
+        "requires_confirmation": True
+    },
+    "create_reminder": {
+        "function": create_reminder,
+        "description": "Создаёт напоминание на указанное время (например, '19:00', 'завтра в 10:00', 'через 15 минут').",
+        "requires_confirmation": False
+    },
+    "list_reminders": {
+        "function": list_reminders,
+        "description": "Показывает список активных или всех напоминаний.",
+        "requires_confirmation": False
+    },
+    "delete_reminder": {
+        "function": delete_reminder,
+        "description": "Удаляет напоминание по его номеру (ID) или тексту.",
+        "requires_confirmation": True
+    },
+    "check_due_reminders": {
+        "function": check_due_reminders,
+        "description": "Проверяет и возвращает наступившие напоминания.",
+        "requires_confirmation": False
+    },
+    "create_note": {
+        "function": create_note,
+        "description": "Создаёт новую текстовую заметку с заголовком и текстом.",
+        "requires_confirmation": False
+    },
+    "list_notes": {
+        "function": list_notes,
+        "description": "Показывает список всех сохранённых заметок.",
+        "requires_confirmation": False
+    },
+    "search_notes": {
+        "function": search_notes,
+        "description": "Ищет заметки по ключевым словам в заголовке или тексте.",
+        "requires_confirmation": False
+    },
+    "delete_note": {
+        "function": delete_note,
+        "description": "Удаляет заметку по её номеру (ID) или заголовку.",
+        "requires_confirmation": True
+    },
+    "create_list": {
+        "function": create_list,
+        "description": "Создаёт новый именованный список (например, 'покупки', 'фильмы').",
+        "requires_confirmation": False
+    },
+    "show_list": {
+        "function": show_list,
+        "description": "Показывает пункты конкретного списка или перечень всех имеющихся списков.",
+        "requires_confirmation": False
+    },
+    "add_list_item": {
+        "function": add_list_item,
+        "description": "Добавляет новый пункт в указанный список.",
+        "requires_confirmation": False
+    },
+    "complete_list_item": {
+        "function": complete_list_item,
+        "description": "Отмечает пункт списка выполненным по номеру (ID) или тексту.",
+        "requires_confirmation": False
+    },
+    "delete_list_item": {
+        "function": delete_list_item,
+        "description": "Удаляет пункт из указанного списка по номеру (ID) или тексту.",
+        "requires_confirmation": False
+    },
+    "delete_list": {
+        "function": delete_list,
+        "description": "Удаляет указанный список целиком со всеми пунктами.",
+        "requires_confirmation": True
     }
 }
 
@@ -288,6 +399,183 @@ TOOL_PARAMETERS = {
             }
         },
         "required": ["target"]
+    },
+    "create_task": {
+        "properties": {
+            "title": {
+                "type": "string",
+                "description": "Название или краткое описание задачи"
+            }
+        },
+        "required": ["title"]
+    },
+    "list_tasks": {
+        "properties": {
+            "status": {
+                "type": "string",
+                "description": "Фильтр статуса: 'all' (все), 'pending' (невыполненные), 'completed' (выполненные)"
+            }
+        },
+        "required": []
+    },
+    "complete_task": {
+        "properties": {
+            "task_id": {
+                "type": "string",
+                "description": "Номер (ID) или название задачи для завершения"
+            }
+        },
+        "required": ["task_id"]
+    },
+    "delete_task": {
+        "properties": {
+            "task_id": {
+                "type": "string",
+                "description": "Номер (ID) или название задачи для удаления"
+            }
+        },
+        "required": ["task_id"]
+    },
+    "create_reminder": {
+        "properties": {
+            "text": {
+                "type": "string",
+                "description": "О чём напомнить"
+            },
+            "remind_at": {
+                "type": "string",
+                "description": "Время напоминания (например, '19:00', 'завтра в 10:00', 'через 15 минут', '2026-09-20 19:00')"
+            }
+        },
+        "required": ["text", "remind_at"]
+    },
+    "list_reminders": {
+        "properties": {
+            "include_triggered": {
+                "type": "boolean",
+                "description": "Включать ли уже сработавшие напоминания (по умолчанию False)"
+            }
+        },
+        "required": []
+    },
+    "delete_reminder": {
+        "properties": {
+            "reminder_id": {
+                "type": "string",
+                "description": "Номер (ID) или текст напоминания для удаления"
+            }
+        },
+        "required": ["reminder_id"]
+    },
+    "check_due_reminders": {
+        "properties": {
+            "current_time": {
+                "type": "string",
+                "description": "Текущее время в формате ISO (опционально, по умолчанию текущий момент)"
+            }
+        },
+        "required": []
+    },
+    "create_note": {
+        "properties": {
+            "title": {
+                "type": "string",
+                "description": "Заголовок заметки"
+            },
+            "content": {
+                "type": "string",
+                "description": "Текст заметки"
+            }
+        },
+        "required": ["content"]
+    },
+    "list_notes": {
+        "properties": {},
+        "required": []
+    },
+    "search_notes": {
+        "properties": {
+            "query": {
+                "type": "string",
+                "description": "Поисковый запрос по заголовку или тексту заметок"
+            }
+        },
+        "required": ["query"]
+    },
+    "delete_note": {
+        "properties": {
+            "note_id": {
+                "type": "string",
+                "description": "Номер (ID) или заголовок заметки для удаления"
+            }
+        },
+        "required": ["note_id"]
+    },
+    "create_list": {
+        "properties": {
+            "name": {
+                "type": "string",
+                "description": "Имя нового списка (например, 'покупки', 'книги')"
+            }
+        },
+        "required": ["name"]
+    },
+    "show_list": {
+        "properties": {
+            "name": {
+                "type": "string",
+                "description": "Имя списка для отображения (если не указано, выведет перечень всех списков)"
+            }
+        },
+        "required": []
+    },
+    "add_list_item": {
+        "properties": {
+            "list_name": {
+                "type": "string",
+                "description": "Имя списка"
+            },
+            "text": {
+                "type": "string",
+                "description": "Текст нового пункта списка"
+            }
+        },
+        "required": ["list_name", "text"]
+    },
+    "complete_list_item": {
+        "properties": {
+            "list_name": {
+                "type": "string",
+                "description": "Имя списка"
+            },
+            "item_id": {
+                "type": "string",
+                "description": "Номер (ID) или текст пункта для отметки выполнения"
+            }
+        },
+        "required": ["list_name", "item_id"]
+    },
+    "delete_list_item": {
+        "properties": {
+            "list_name": {
+                "type": "string",
+                "description": "Имя списка"
+            },
+            "item_id": {
+                "type": "string",
+                "description": "Номер (ID) или текст пункта для удаления"
+            }
+        },
+        "required": ["list_name", "item_id"]
+    },
+    "delete_list": {
+        "properties": {
+            "name": {
+                "type": "string",
+                "description": "Имя списка для полного удаления"
+            }
+        },
+        "required": ["name"]
     }
 }
 
