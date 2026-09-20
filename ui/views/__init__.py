@@ -7,6 +7,8 @@ from ui.views.tasks import TasksView
 from ui.views.reminders import RemindersView
 from ui.views.notes import NotesView
 from ui.views.lists import ListsView
+from ui.views.memory import MemoryView
+from ui.views.settings import SettingsView
 
 __all__ = [
     "BaseView",
@@ -16,4 +18,6 @@ __all__ = [
     "RemindersView",
     "NotesView",
     "ListsView",
+    "MemoryView",
+    "SettingsView",
 ]

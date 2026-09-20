@@ -74,6 +74,8 @@
   * [ui/views/reminders.py](file:///c:/Akakiy%20agent/ui/views/reminders.py): Модульный экран управления напоминаниями (`RemindersView`).
   * [ui/views/notes.py](file:///c:/Akakiy%20agent/ui/views/notes.py): Модульный экран заметок с поиском (`NotesView`).
   * [ui/views/lists.py](file:///c:/Akakiy%20agent/ui/views/lists.py): Двухпанельный модульный экран списков (`ListsView`).
+  * [ui/views/memory.py](file:///c:/Akakiy%20agent/ui/views/memory.py): Модульный экран долговременной памяти (`MemoryView`).
+  * [ui/views/settings.py](file:///c:/Akakiy%20agent/ui/views/settings.py): Модульный экран настроек и валидации (`SettingsView`).
 * [commands.py](file:///c:/Akakiy%20agent/commands.py): Вспомогательные быстрые команды (`show_status`, `show_files`, `read_file`).
 
 ### 3.2. Голосовой слой (Voice UX)

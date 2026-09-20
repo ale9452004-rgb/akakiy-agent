@@ -48,7 +48,9 @@ from ui.views import (
     TasksView,
     RemindersView,
     NotesView,
-    ListsView
+    ListsView,
+    MemoryView,
+    SettingsView
 )
 
 
@@ -108,6 +110,8 @@ class AkakiyGUI:
         self.reminders_view = None
         self.notes_view = None
         self.lists_view = None
+        self.memory_view = None
+        self.settings_view = None
         self.entry_task = None
         self.entry_rem_text = None
         self.entry_rem_time = None
@@ -116,11 +120,14 @@ class AkakiyGUI:
         self.entry_note_content = None
         self.entry_new_list = None
         self._entry_item_text = None
+        self.entry_mem = None
+        self.lbl_val_res = None
         self.tasks_list_frame = None
         self.rems_list_frame = None
         self.notes_list_frame = None
         self.list_names_box = None
         self.list_items_box = None
+        self.mem_list_frame = None
         self.chat_messages: List[Tuple[str, str, str]] = []  # [(author, message, time_str)]
         self.log_messages: List[Tuple[str, str, str]] = []   # [(prefix, text, time_str)]
         self._is_closing = False
@@ -982,113 +989,37 @@ class AkakiyGUI:
     # =========================================================================
 
     def _render_memory_view(self):
-        header_row = tk.Frame(self.workspace, bg=self.BG_MAIN)
-        header_row.pack(fill="x", pady=(0, 16))
-
-        tk.Label(
-            header_row, text="ДОЛГОВРЕМЕННАЯ ПАМЯТЬ (MEMORY)",
-            font=("Segoe UI", 14, "bold"), fg=self.FG_WHITE, bg=self.BG_MAIN
-        ).pack(side="left")
-
-        # Форма добавления факта
-        add_box = tk.Frame(self.workspace, bg=self.BG_CARD, bd=1, relief="solid")
-        add_box.pack(fill="x", pady=(0, 16), ipady=4)
-
-        tk.Label(add_box, text="Запомнить факт:", font=("Segoe UI", 9, "bold"), fg=self.FG_WHITE, bg=self.BG_CARD).pack(side="left", padx=12)
-        self.entry_mem = tk.Entry(add_box, font=("Segoe UI", 10), bg="#13171f", fg=self.FG_WHITE, bd=1, relief="solid")
-        self.entry_mem.pack(side="left", fill="x", expand=True, padx=6, pady=8)
-        self.entry_mem.bind("<Return>", lambda e: self._ui_remember())
-
-        btn_add = tk.Button(
-            add_box, text="Запомнить", font=("Segoe UI", 9, "bold"), bg=self.ACCENT_CYAN, fg="#0d1117", bd=0, padx=14, pady=6, cursor="hand2",
-            command=self._ui_remember
-        )
-        btn_add.pack(side="left", padx=12)
-
-        # Контейнер списка памяти
-        self.mem_list_frame = tk.Frame(self.workspace, bg=self.BG_CARD, bd=1, relief="solid")
-        self.mem_list_frame.pack(fill="both", expand=True)
-
-        self._refresh_memory_list()
+        self.memory_view = MemoryView(self.workspace, shell=self)
+        self.memory_view.pack(fill="both", expand=True)
+        self.entry_mem = self.memory_view.entry_mem
+        self.mem_list_frame = self.memory_view.mem_list_frame
 
     def _ui_remember(self):
-        txt = self.entry_mem.get().strip()
-        if txt:
-            ok, msg, _ = self.memory.remember(txt)
-            if not ok:
-                messagebox.showwarning("Память", msg)
-            self.entry_mem.delete(0, tk.END)
-            self._refresh_memory_list()
+        if hasattr(self, "memory_view") and self.memory_view:
+            return self.memory_view.ui_remember()
 
     def _refresh_memory_list(self):
-        for w in self.mem_list_frame.winfo_children():
-            w.destroy()
-
-        memories = self.memory.get_all()
-        if not memories:
-            tk.Label(self.mem_list_frame, text="Долговременная память пуста.", font=("Segoe UI", 11), fg=self.FG_MUTED, bg=self.BG_CARD).pack(pady=40)
-            return
-
-        for m in reversed(memories):
-            row = tk.Frame(self.mem_list_frame, bg="#13171f", bd=1, relief="solid")
-            row.pack(fill="x", padx=16, pady=4)
-
-            tk.Label(row, text="🧠", font=("Segoe UI", 10), fg=self.ACCENT_CYAN, bg="#13171f").pack(side="left", padx=10, pady=8)
-            tk.Label(row, text=f"#{m['id']} {m['text']}", font=("Segoe UI", 9), fg=self.FG_WHITE, bg="#13171f").pack(side="left", padx=4)
-
-            btn_del = tk.Button(
-                row, text="✕", font=("Segoe UI", 8), fg=self.ACCENT_RED, bg="#13171f", bd=0, cursor="hand2",
-                command=lambda mid=m["id"]: self._ui_forget(mid)
-            )
-            btn_del.pack(side="right", padx=8)
-
-            tk.Label(row, text=m.get("created_at", ""), font=("Consolas", 8), fg=self.FG_DIM, bg="#13171f").pack(side="right", padx=8)
+        if hasattr(self, "memory_view") and self.memory_view:
+            return self.memory_view.refresh()
 
     def _ui_forget(self, mem_id):
-        if messagebox.askyesno("Подтверждение", f"Забыть запись #{mem_id}?"):
-            self.memory.forget(mem_id)
-            self._refresh_memory_list()
+        if hasattr(self, "memory_view") and self.memory_view:
+            return self.memory_view.ui_forget(mem_id)
 
     # =========================================================================
     # ЭКРАН 8: НАСТРОЙКИ И ДИАГНОСТИКА (SETTINGS)
     # =========================================================================
 
     def _render_settings_view(self):
-        header_row = tk.Frame(self.workspace, bg=self.BG_MAIN)
-        header_row.pack(fill="x", pady=(0, 16))
-
-        tk.Label(
-            header_row, text="НАСТРОЙКИ И ДИАГНОСТИКА СИСТЕМЫ",
-            font=("Segoe UI", 14, "bold"), fg=self.FG_WHITE, bg=self.BG_MAIN
-        ).pack(side="left")
-
-        panel = tk.Frame(self.workspace, bg=self.BG_CARD, bd=1, relief="solid")
-        panel.pack(fill="both", expand=True, padx=0, pady=0)
-
-        # 1. Секция моделей
-        tk.Label(panel, text="ИНТЕЛЛЕКТУАЛЬНЫЙ БЭКЕНД", font=("Segoe UI", 11, "bold"), fg=self.ACCENT_CYAN, bg=self.BG_CARD).pack(anchor="w", padx=20, pady=(20, 8))
-        tk.Label(panel, text="• LLM Engine: Ollama Local Server (http://localhost:11434)\n• Модель: qwen3:8b\n• Skills Registry: project, memory, household\n• Context Manager: Sliding Window + Data Injection Shield", font=("Segoe UI", 9), fg=self.FG_MAIN, bg=self.BG_CARD, justify="left").pack(anchor="w", padx=20, pady=(0, 16))
-
-        # 2. Секция валидации
-        tk.Label(panel, text="ПРОВЕРКА ЦЕЛОСТНОСТИ ПРОЕКТА", font=("Segoe UI", 11, "bold"), fg=self.ACCENT_GREEN, bg=self.BG_CARD).pack(anchor="w", padx=20, pady=(10, 8))
-        btn_val = tk.Button(
-            panel, text="Запустить validate_project()", font=("Segoe UI", 9, "bold"), bg=self.ACCENT_GREEN, fg="#0d1117", bd=0, padx=14, pady=6, cursor="hand2",
-            command=self._ui_run_validation
-        )
-        btn_val.pack(anchor="w", padx=20, pady=(0, 8))
-        self.lbl_val_res = tk.Label(panel, text="", font=("Consolas", 9), fg=self.FG_MUTED, bg=self.BG_CARD)
-        self.lbl_val_res.pack(anchor="w", padx=20, pady=(0, 16))
-
-        # 3. Секция хранилищ
-        tk.Label(panel, text="ЛОКАЛЬНЫЕ ДАННЫЕ", font=("Segoe UI", 11, "bold"), fg=self.ACCENT_PURPLE, bg=self.BG_CARD).pack(anchor="w", padx=20, pady=(10, 8))
-        tk.Label(panel, text="• Долговременная память: data/memory.json (изолировано)\n• Бытовой слой: data/household.json (Tasks, Reminders, Notes, Lists)\n• Git Protection: data/ вне репозитория (.gitignore)", font=("Segoe UI", 9), fg=self.FG_MAIN, bg=self.BG_CARD, justify="left").pack(anchor="w", padx=20, pady=(0, 20))
+        self.settings_view = SettingsView(self.workspace, shell=self)
+        self.settings_view.pack(fill="both", expand=True)
+        self.lbl_val_res = self.settings_view.lbl_val_res
 
     def _ui_run_validation(self):
-        res = validate_project()
-        if res.get("success"):
-            self.lbl_val_res.config(text=f"✓ Проект валиден: проверено {res.get('files_checked')} файлов, 0 синтаксических ошибок.", fg=self.ACCENT_GREEN)
-        else:
-            self.lbl_val_res.config(text=f"✗ Ошибки валидации: {res.get('errors')}", fg=self.ACCENT_RED)
+        if hasattr(self, "settings_view") and self.settings_view:
+            res = self.settings_view.ui_run_validation(val_func=validate_project)
+            self.lbl_val_res = self.settings_view.lbl_val_res
+            return res
 
     # =========================================================================
     # Выполнение команд (Command Bar & Worker)
@@ -1202,8 +1133,13 @@ class AkakiyGUI:
             elif hasattr(self, "list_names_box") and self.list_names_box and self.list_names_box.winfo_exists():
                 self._refresh_lists_menu()
         elif sec == "memory":
-            if hasattr(self, "mem_list_frame") and self.mem_list_frame and self.mem_list_frame.winfo_exists():
+            if hasattr(self, "memory_view") and self.memory_view and self.memory_view.winfo_exists():
+                self.memory_view.refresh()
+            elif hasattr(self, "mem_list_frame") and self.mem_list_frame and self.mem_list_frame.winfo_exists():
                 self._refresh_memory_list()
+        elif sec == "settings":
+            if hasattr(self, "settings_view") and self.settings_view and self.settings_view.winfo_exists():
+                self.settings_view.refresh()
 
     # =========================================================================
     # Опрос очереди событий (Queue Polling)
