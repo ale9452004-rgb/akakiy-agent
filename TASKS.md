@@ -7,8 +7,8 @@
 ## 1. Текущий статус проекта
 
 * **Текущая версия**: Акакий 2.0 (Desktop Hub + Voice UX + Household Assistant + Memory + Core Dev Tools).
-* **Состояние кодовой базы**: Стабильное, все тесты пройдены (`55` файлов валидированы, 134 теста в `tests/` успешны, 0 синтаксических ошибок).
-* **Последний этап**: Рефакторинг R2 — Выделение `CommandRouter` из `tools/agent.py`.
+* **Состояние кодовой базы**: Стабильное, все тесты пройдены (`55` файлов валидированы, 137 тестов в `tests/` успешны, 0 синтаксических ошибок).
+* **Последний этап**: Регрессионная стабилизация R2.5 — Верификация вызовов `Agent.process()` через `CommandRouter`.
 * **Ветка**: `master`, синхронизирована с `origin/master`.
 
 ---
@@ -16,7 +16,8 @@
 ## 2. Реализованный функционал (Done)
 
 ### 2.0. Архитектурный аудит, документация и инфраструктура тестов
-- [x] **Выделение `CommandRouter` (Этап R2)**: Создан модуль [tools/router.py](file:///c:/Akakiy%20agent/tools/router.py) с классом `CommandRouter`. Вся детерминированная маршрутизация CLI-команд проекта, бытовых сущностей (Tasks, Notes, Reminders, Lists), команд памяти и управления планами вынесена из `tools/agent.py`. `Agent.process()` трансформирован в чистый оркестратор. `Agent.choose_tool()` сохранён как фасад. Создан тестовый набор [tests/test_command_router.py](file:///c:/Akakiy%20agent/tests/test_command_router.py) (19 тестов, 100% pass).
+- [x] **Стабилизация и регрессионная проверка `CommandRouter` (Этап R2.5)**: Проведена полная регрессионная проверка реальных вызовов через `Agent.process()` по всем 5 направлениям (Household CRUD задач и заметок; память remember/recall/search/forget/clear; проектные команды find/list/search; планирование create/get/clear с поддержкой естественных фраз «создай план ...»; свободные запросы к LLM). Тестовое покрытие расширено до 22 тестов в `test_command_router.py` (всего 137 тестов в `tests/`, 100% pass).
+- [x] **Выделение `CommandRouter` (Этап R2)**: Создан модуль [tools/router.py](file:///c:/Akakiy%20agent/tools/router.py) с классом `CommandRouter`. Вся детерминированная маршрутизация CLI-команд проекта, бытовых сущностей (Tasks, Notes, Reminders, Lists), команд памяти и управления планами вынесена из `tools/agent.py`. `Agent.process()` трансформирован в чистый оркестратор. `Agent.choose_tool()` сохранён как фасад. Создан тестовый набор [tests/test_command_router.py](file:///c:/Akakiy%20agent/tests/test_command_router.py).
 - [x] **Организация каталога тестов `tests/` (Этап R1)**: Все 9 стабильных наборов тестов перенесены из `scratch/` в официальный пакет `tests/` с `__init__.py`. Запуск через `python -m unittest discover -s tests` (115 тестов, 100% pass). Вспомогательные диагностические утилиты сохранены в `scratch/`.
 - [x] **Архитектурный аудит (Task 024)**: Исследование связности `Agent → Router → Skills → Tools`, модулей `gui.py`, `tools/agent.py`, `tools/household.py`, `voice/service.py`, формирование матрицы рефакторинга («что делать / что не трогать») с оценкой рисков.
 - [x] **Актуализация проектной документации**: Созданы [ARCHITECTURE.md](file:///c:/Akakiy%20agent/ARCHITECTURE.md), [DECISIONS.md](file:///c:/Akakiy%20agent/DECISIONS.md), [TASKS.md](file:///c:/Akakiy%20agent/TASKS.md), регламент [GEMINI.md](file:///c:/Akakiy%20agent/GEMINI.md) оптимизирован.

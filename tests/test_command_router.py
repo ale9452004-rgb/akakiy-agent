@@ -216,6 +216,30 @@ class TestCommandRouterPlanning(unittest.TestCase):
         self.assertEqual(route["action"], "create")
         self.assertEqual(route["request"], "сделать рефакторинг роутера")
 
+    def test_match_plan_create_natural(self):
+        cases = [
+            ("создай план сделать рефакторинг", "сделать рефакторинг"),
+            ("создай план: сделать рефакторинг", "сделать рефакторинг"),
+            ("составь план миграции базы данных", "миграции базы данных"),
+            ("сделай план архитектуры", "архитектуры"),
+        ]
+        for cmd, exp_req in cases:
+            p = self.router.match_plan(cmd)
+            self.assertIsNotNone(p, f"Failed for {cmd}")
+            self.assertEqual(p["action"], "create")
+            self.assertEqual(p["request"], exp_req)
+
+            route = self.router.route(cmd)
+            self.assertEqual(route["type"], "plan")
+            self.assertEqual(route["action"], "create")
+            self.assertEqual(route["request"], exp_req)
+
+        # Пустой запрос на создание плана
+        p_empty = self.router.match_plan("создай план")
+        self.assertIsNotNone(p_empty)
+        self.assertEqual(p_empty["action"], "create")
+        self.assertEqual(p_empty["request"], "")
+
     def test_match_plan_actions(self):
         cases = [
             ("выполни план", "execute"),
@@ -245,9 +269,16 @@ class TestCommandRouterAgentIntegration(unittest.TestCase):
         self.mem_path = Path(self.temp_dir.name) / "test_mem.json"
         self.household_path = Path(self.temp_dir.name) / "test_household.json"
 
+        from tools.household import get_household_manager, reset_household_manager
+        from tools.dispatcher import set_confirmation_handler
+        set_confirmation_handler(lambda tool, kwargs: True)
+        reset_household_manager()
+        self.household_mgr = get_household_manager(storage_path=self.household_path)
+
         self.mem = MemoryManager(storage_path=self.mem_path)
         self.ctx = ContextManager(memory_manager=self.mem)
         self.mock_ai = MagicMock()
+        self.mock_ai.send_chat.return_value = {"content": "Ответ от LLM", "tool_calls": []}
         self.agent = Agent(
             memory_manager=self.mem,
             context_manager=self.ctx,
@@ -256,6 +287,10 @@ class TestCommandRouterAgentIntegration(unittest.TestCase):
         self.agent.router = CommandRouter()
 
     def tearDown(self):
+        from tools.household import reset_household_manager
+        from tools.dispatcher import set_confirmation_handler
+        set_confirmation_handler(None)
+        reset_household_manager()
         self.temp_dir.cleanup()
 
     def test_empty_query(self):
@@ -298,17 +333,26 @@ class TestCommandRouterAgentIntegration(unittest.TestCase):
         self.assertFalse(self.mock_ai.ask.called)
 
     def test_fastpath_plan_cycle(self):
-        # 1. План без задачи
+        # 1. План без задачи ("план:" и "создай план")
         res_empty = self.agent.process("план:")
         self.assertEqual(res_empty["type"], "plan")
         self.assertFalse(res_empty["result"]["success"])
+
+        res_empty2 = self.agent.process("создай план")
+        self.assertEqual(res_empty2["type"], "plan")
+        self.assertFalse(res_empty2["result"]["success"])
 
         # 2. План с задачей
         self.agent.create_plan = MagicMock(return_value={"success": True, "plan": {"title": "Test"}})
         res_plan = self.agent.process("план: Проверить рефакторинг")
         self.assertEqual(res_plan["type"], "plan")
         self.assertTrue(res_plan["result"]["success"])
-        self.agent.create_plan.assert_called_once_with("Проверить рефакторинг")
+        self.agent.create_plan.assert_called_with("Проверить рефакторинг")
+
+        res_plan2 = self.agent.process("создай план стабилизировать роутер")
+        self.assertEqual(res_plan2["type"], "plan")
+        self.assertTrue(res_plan2["result"]["success"])
+        self.agent.create_plan.assert_called_with("стабилизировать роутер")
 
         # 3. Показать план
         self.agent.planner.current_plan = {"title": "Test"}
@@ -321,21 +365,75 @@ class TestCommandRouterAgentIntegration(unittest.TestCase):
         self.assertEqual(res_clear["type"], "tool")
         self.assertEqual(res_clear["tool"], "clear_plan")
 
-    def test_fastpath_household_task(self):
-        # Быстрое создание задачи через fast-path
-        res = self.agent.process("создай задачу написать документацию R2")
-        self.assertEqual(res["type"], "tool")
-        self.assertEqual(res["tool"], "create_task")
-        self.assertTrue(res["result"]["success"])
+        # LLM не вызывался
+        self.assertFalse(self.mock_ai.send_chat.called)
 
-        # Быстрый список задач
-        res_list = self.agent.process("покажи задачи")
-        self.assertEqual(res_list["type"], "tool")
-        self.assertEqual(res_list["tool"], "list_tasks")
-        self.assertTrue(res_list["result"]["success"])
+    def test_fastpath_household_crud(self):
+        # 1. Задачи: создать, показать, удалить
+        res_create_t = self.agent.process("создай задачу написать документацию R2")
+        self.assertEqual(res_create_t["type"], "tool")
+        self.assertEqual(res_create_t["tool"], "create_task")
+        self.assertTrue(res_create_t["result"]["success"])
+
+        res_list_t = self.agent.process("покажи задачи")
+        self.assertEqual(res_list_t["type"], "tool")
+        self.assertEqual(res_list_t["tool"], "list_tasks")
+        self.assertTrue(res_list_t["result"]["success"])
+        self.assertEqual(len(res_list_t["result"]["result"]["tasks"]), 1)
+
+        res_del_t = self.agent.process("удали задачу 1")
+        self.assertEqual(res_del_t["type"], "tool")
+        self.assertEqual(res_del_t["tool"], "delete_task")
+        self.assertTrue(res_del_t["result"]["success"])
+
+        # 2. Заметки: создать, показать, удалить
+        res_create_n = self.agent.process("создай заметку Рецепт: Мука 200г, Сахар 100г")
+        self.assertEqual(res_create_n["type"], "tool")
+        self.assertEqual(res_create_n["tool"], "create_note")
+        self.assertTrue(res_create_n["result"]["success"])
+
+        res_list_n = self.agent.process("покажи заметки")
+        self.assertEqual(res_list_n["type"], "tool")
+        self.assertEqual(res_list_n["tool"], "list_notes")
+        self.assertTrue(res_list_n["result"]["success"])
+        self.assertEqual(len(res_list_n["result"]["result"]["notes"]), 1)
+
+        res_del_n = self.agent.process("удали заметку 1")
+        self.assertEqual(res_del_n["type"], "tool")
+        self.assertEqual(res_del_n["tool"], "delete_note")
+        self.assertTrue(res_del_n["result"]["success"])
 
         # LLM не вызывался
         self.assertFalse(self.mock_ai.send_chat.called)
+
+    def test_fastpath_project_commands(self):
+        # 1. Список файлов
+        res_list = self.agent.process("покажи список файлов")
+        self.assertEqual(res_list["type"], "tool")
+        self.assertEqual(res_list["tool"], "list_files")
+        self.assertTrue(res_list["result"]["success"])
+
+        # 2. Поиск файла
+        res_find = self.agent.process("найди файл main.py")
+        self.assertEqual(res_find["type"], "tool")
+        self.assertEqual(res_find["tool"], "find_file")
+        self.assertTrue(res_find["result"]["success"])
+
+        # 3. Поиск по проекту
+        res_search = self.agent.process("поиск по проекту CommandRouter")
+        self.assertEqual(res_search["type"], "tool")
+        self.assertEqual(res_search["tool"], "search_files")
+        self.assertTrue(res_search["result"]["success"])
+
+        # LLM не вызывался
+        self.assertFalse(self.mock_ai.send_chat.called)
+
+    def test_casual_free_query_reaches_llm(self):
+        # Обычный разговорный запрос без fast-path команд
+        res = self.agent.process("Привет, расскажи интересный исторический факт!")
+        self.assertEqual(res["type"], "chat")
+        self.assertEqual(res["answer"], "Ответ от LLM")
+        self.mock_ai.send_chat.assert_called_once()
 
     def test_latency_is_ultra_low(self):
         """Проверка латентности: fast-path должен отрабатывать < 1 мс."""

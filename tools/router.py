@@ -101,6 +101,8 @@ class CommandRouter:
         }
 
         # 7. Команды управления планами (Planning)
+        self.plan_create_p = re.compile(r"^(?:создай|составь|сделай)\s+план(?:\s*:\s*|\s+)(.+)$", re.IGNORECASE)
+        self.plan_create_exact = {"создай план", "создать план", "составь план", "составить план"}
         self.plan_execute_exact = {"выполни план", "выполнить план", "запусти план"}
         self.plan_get_exact = {"покажи план", "текущий план", "показать план"}
         self.plan_clear_exact = {"очисти план", "удали план", "сбрось план"}
@@ -165,7 +167,20 @@ class CommandRouter:
                 "request": raw_trimmed[5:].strip()
             }
 
+        create_m = self.plan_create_p.match(raw_trimmed)
+        if create_m:
+            return {
+                "action": "create",
+                "request": create_m.group(1).strip()
+            }
+
         normalized = u_lower.rstrip(".,!?;:")
+
+        if normalized in self.plan_create_exact:
+            return {
+                "action": "create",
+                "request": ""
+            }
 
         if normalized in self.plan_execute_exact:
             return {

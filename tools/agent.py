@@ -442,10 +442,7 @@ class Agent:
                         "tool": "plan",
                         "result": {
                             "success": False,
-                            "message": (
-                                "После 'план:' необходимо "
-                                "указать задачу."
-                            )
+                            "message": "Необходимо указать задачу для составления плана."
                         }
                     }
                 result = self.create_plan(request)
