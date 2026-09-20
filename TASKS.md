@@ -7,15 +7,16 @@
 ## 1. Текущий статус проекта
 
 * **Текущая версия**: Акакий 2.0 (Desktop Hub + Voice UX + Household Assistant + Memory + Core Dev Tools).
-* **Состояние кодовой базы**: Стабильное, все тесты пройдены (`52` файла валидированы, 0 синтаксических ошибок).
-* **Последний этап**: Task 024 — Architecture Refactoring Audit.
+* **Состояние кодовой базы**: Стабильное, все тесты пройдены (`53` файла валидированы, 115 тестов в `tests/` успешны, 0 синтаксических ошибок).
+* **Последний этап**: Рефакторинг R1 — Организация каталога тестов `tests/`.
 * **Ветка**: `master`, синхронизирована с `origin/master`.
 
 ---
 
 ## 2. Реализованный функционал (Done)
 
-### 2.0. Архитектурный аудит и проектная документация
+### 2.0. Архитектурный аудит, документация и инфраструктура тестов
+- [x] **Организация каталога тестов `tests/` (Этап R1)**: Все 9 стабильных наборов тестов перенесены из `scratch/` в официальный пакет `tests/` с `__init__.py`. Запуск через `python -m unittest discover -s tests` (115 тестов, 100% pass). Вспомогательные диагностические утилиты сохранены в `scratch/`.
 - [x] **Архитектурный аудит (Task 024)**: Исследование связности `Agent → Router → Skills → Tools`, модулей `gui.py`, `tools/agent.py`, `tools/household.py`, `voice/service.py`, формирование матрицы рефакторинга («что делать / что не трогать») с оценкой рисков.
 - [x] **Актуализация проектной документации**: Созданы [ARCHITECTURE.md](file:///c:/Akakiy%20agent/ARCHITECTURE.md), [DECISIONS.md](file:///c:/Akakiy%20agent/DECISIONS.md), [TASKS.md](file:///c:/Akakiy%20agent/TASKS.md), регламент [GEMINI.md](file:///c:/Akakiy%20agent/GEMINI.md) оптимизирован.
 
@@ -82,9 +83,9 @@
 ## 3. Ближайшие задачи (Backlog)
 
 ### Архитектурный рефакторинг (По результатам аудита Task 024)
-* [ ] **Этап R1: Организация каталога тестов `tests/`** (Высокий приоритет, Низкий риск):
+* [x] **Этап R1: Организация каталога тестов `tests/`** (Высокий приоритет, Низкий риск):
   * Создать официальный каталог `tests/` с `__init__.py`.
-  * Перенести стабильные тестовые наборы из `scratch/` в `tests/` (`test_household_skill.py`, `test_gui_v2.py`, `test_gui_voice_integration.py`, `test_voice_household_023.py`, `test_context_architecture.py`, `test_skills_architecture.py`, `test_memory_system.py`).
+  * Перенести стабильные тестовые наборы из `scratch/` в `tests/` (`test_household_skill.py`, `test_gui_v2.py`, `test_gui_voice_integration.py`, `test_voice_household_023.py`, `test_context_architecture.py`, `test_skills_architecture.py`, `test_memory_system.py`, `test_stt_adaptive.py`, `test_voice_ux_polish.py`).
   * Обеспечить запуск стандартной командой `python -m unittest discover -s tests`.
 * [ ] **Этап R2: Выделение `CommandRouter` из `tools/agent.py`** (Высокий приоритет, Средний риск):
   * Вынести детерминированный fast-path парсинг (`choose_tool`) и строковые перехваты памяти/планов в отдельный модуль `tools/router.py`.
