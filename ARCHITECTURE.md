@@ -124,7 +124,9 @@
   * Атомарная запись и потокобезопасность.
   * Сущности: Задачи (Tasks), Напоминания (Reminders), Заметки (Notes), Списки (Lists).
   * Поддержка пакетного и относительного удаления (`_resolve_delete_targets`).
-  * Парсер времени напоминаний (`parse_reminder_time`).
+* [tools/datetime_utils.py](file:///c:/Akakiy%20agent/tools/datetime_utils.py): Утилиты разбора и нормализации дат и времени.
+  * Чистая функция `parse_reminder_time` (разбор ISO-дат, относительных смещений «через N минут/часов/дней», конструкций «завтра в HH:MM» и времени суток «HH:MM»).
+
 
 ### 3.5. Инструментальный слой (Tools Layer)
 * [tools/registry.py](file:///c:/Akakiy%20agent/tools/registry.py): Центральный реестр `TOOLS` (23 зарегистрированных инструмента) с описаниями, схемами параметров и флагами подтверждения `requires_confirmation`.
