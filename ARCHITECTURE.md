@@ -78,7 +78,7 @@
   * [ui/views/lists.py](file:///c:/Akakiy%20agent/ui/views/lists.py): Двухпанельный модульный экран списков (`ListsView`).
   * [ui/views/memory.py](file:///c:/Akakiy%20agent/ui/views/memory.py): Модульный экран долговременной памяти (`MemoryView`).
   * [ui/views/settings.py](file:///c:/Akakiy%20agent/ui/views/settings.py): Модульный экран настроек и валидации (`SettingsView`).
-* [commands.py](file:///c:/Akakiy%20agent/commands.py): Вспомогательные быстрые команды (`show_status`, `show_files`, `read_file`).
+* [commands.py](file:///c:/Akakiy%20agent/commands.py): Вспомогательные быстрые команды и диспетчер CLI REPL (`show_status`, `show_files`, `read_file`, `handle_cli_command`, алиасы `:status`, `:files`, `:read`, `:help`, `:exit`).
 
 ### 3.2. Голосовой слой (Voice UX)
 * [voice/service.py](file:///c:/Akakiy%20agent/voice/service.py): Координатор голосового сеанса (`VoiceService`). Запускает конвейер `listening -> thinking -> speaking -> listening`. Обеспечивает непрерывный Voice UX, реакцию на команды выхода («стоп», «отключись») и передачу событий в GUI.

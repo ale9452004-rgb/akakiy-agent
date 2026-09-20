@@ -40,9 +40,11 @@ def show_status():
 def show_help():
     print("\n--- Справка по командам Акакия ---")
     print("Быстрые команды CLI:")
-    print("  статус                   - показать статус системы")
-    print("  помощь                   - показать эту справку")
-    print("  выход                    - завершить работу")
+    print("  :status, :s, статус      - показать статус системы")
+    print("  :files, :ls, files       - список файлов проекта")
+    print("  :read <файл>, :cat <файл> - просмотреть содержимое файла")
+    print("  :help, :h, помощь        - показать эту справку")
+    print("  :exit, :quit, выход      - завершить работу")
     print("\nРабота с планами:")
     print("  план: <задача>           - составить план выполнения задачи")
     print("  покажи план              - показать текущий план")
@@ -63,24 +65,26 @@ def show_help():
 
 
 # =====================================================================
-# Устаревшие функции быстрого доступа (Legacy CLI Wrappers)
-# Оставлены для обратной совместимости; основной источник истины — tools.files
+# Вспомогательные функции быстрого доступа CLI
 # =====================================================================
 
 def show_files():
-    """Устаревшая функция вывода файлов; используйте tools.files.list_files."""
+    """Выводит список файлов проекта в консоль."""
     from tools.files import list_files
 
     print("\n--- Файлы проекта ---")
 
-    for item in list_files():
+    result = list_files()
+    files = result.get("files", []) if isinstance(result, dict) else result
+
+    for item in files:
         print(item)
 
     print("---------------------")
 
 
 def read_file(filename):
-    """Устаревшая функция чтения файла; используйте tools.files.read_file."""
+    """Читает файл проекта и возвращает его содержимое."""
     from tools.files import read_file as tool_read_file
 
     result = tool_read_file(filename)
@@ -90,3 +94,87 @@ def read_file(filename):
         return None
 
     return result.get("content")
+
+
+def _safe_print(text: str = ""):
+    """Безопасный вывод строки в консоль с защитой от UnicodeEncodeError."""
+    try:
+        print(text)
+    except UnicodeEncodeError:
+        encoding = getattr(sys.stdout, "encoding", None) or "utf-8"
+        safe_bytes = str(text).encode(encoding, errors="replace")
+        if hasattr(sys.stdout, "buffer"):
+            sys.stdout.buffer.write(safe_bytes + b"\n")
+            sys.stdout.buffer.flush()
+        else:
+            print(safe_bytes.decode(encoding, errors="replace"))
+
+
+def handle_cli_command(user_input: str) -> bool:
+    """
+    Обрабатывает быстрые команды CLI REPL (алиасы :status, :files, :read, :help и т.д.).
+    Возвращает True, если ввод был распознан и обработан как CLI-команда,
+    или False, если ввод должен быть передан дальше в Agent.process().
+    """
+    if not user_input or not isinstance(user_input, str):
+        return False
+
+    raw = user_input.strip()
+    if not raw:
+        return False
+
+    cmd_lower = raw.lower()
+
+    # 1. Статус
+    if cmd_lower in (":status", ":статус", ":s", "статус", "status", "show_status"):
+        show_status()
+        return True
+
+    # 2. Справка
+    if cmd_lower in (":help", ":помощь", ":h", ":?", "?", "помощь", "help", "show_help"):
+        show_help()
+        return True
+
+    # 3. Список файлов проекта
+    if cmd_lower in (":files", ":файлы", ":ls", ":dir", ":f", "files", "show_files"):
+        show_files()
+        return True
+
+    # 4. Чтение файла проекта
+    parts = raw.split(maxsplit=1)
+    first_token = parts[0].lower()
+
+    read_command_tokens = (":read", ":cat", ":read_file", ":view", ":прочитай", "read_file")
+
+    def _display_file(fname: str):
+        content = read_file(fname)
+        if content is not None:
+            content = content.lstrip("\ufeff")
+            _safe_print(f"\n--- {fname} ---")
+            if content:
+                _safe_print(content)
+            else:
+                _safe_print("(файл пуст)")
+            _safe_print("---------------------")
+
+    if first_token in read_command_tokens:
+        if len(parts) == 1:
+            print("\nИспользование: :read <путь_к_файлу> или :cat <путь_к_файлу>")
+            return True
+
+        filename = parts[1].strip("'\"")
+        if not filename:
+            print("\nИспользование: :read <путь_к_файлу> или :cat <путь_к_файлу>")
+            return True
+
+        _display_file(filename)
+        return True
+
+    # Алиас "cat <filename>" (только если аргумент явно указан)
+    if first_token == "cat" and len(parts) == 2:
+        filename = parts[1].strip("'\"")
+        if filename:
+            _display_file(filename)
+            return True
+
+    return False

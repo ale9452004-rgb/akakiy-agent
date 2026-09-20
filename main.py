@@ -1,4 +1,10 @@
-from commands import show_help, show_status
+from commands import (
+    show_help,
+    show_status,
+    show_files,
+    read_file,
+    handle_cli_command
+)
 from tools.agent import Agent
 from cli_formatters import (
     print_step_result,
@@ -22,9 +28,10 @@ def main():
         "и выполнять команды."
     )
     print(
-        "Команды: 'помощь' — список команд, "
-        "'статус' — состояние Акакия, "
-        "'выход' — завершить работу."
+        "Команды: 'помощь' (:help) — список команд, "
+        "'статус' (:status) — состояние Акакия, "
+        "':files' — файлы проекта, ':read <файл>' — чтение файла, "
+        "'выход' (:quit) — завершить работу."
     )
 
     while True:
@@ -36,7 +43,7 @@ def main():
         if not user_input:
             continue
 
-        if user_input.lower() == "выход":
+        if user_input.lower() in ("выход", "exit", "quit", ":exit", ":quit", ":q"):
 
             print(
                 "Акакий завершает работу."
@@ -44,12 +51,7 @@ def main():
 
             break
 
-        if user_input.lower() == "статус":
-            show_status()
-            continue
-
-        if user_input.lower() in ("помощь", "help"):
-            show_help()
+        if handle_cli_command(user_input):
             continue
 
         try:
