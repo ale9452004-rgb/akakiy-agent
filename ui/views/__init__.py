@@ -3,6 +3,8 @@
 """
 
 from ui.views.base import BaseView, _bind_hover, bind_hover
+from ui.views.home import HomeView
+from ui.views.chat import ChatView
 from ui.views.tasks import TasksView
 from ui.views.reminders import RemindersView
 from ui.views.notes import NotesView
@@ -14,6 +16,8 @@ __all__ = [
     "BaseView",
     "_bind_hover",
     "bind_hover",
+    "HomeView",
+    "ChatView",
     "TasksView",
     "RemindersView",
     "NotesView",

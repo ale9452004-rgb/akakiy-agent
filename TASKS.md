@@ -7,8 +7,8 @@
 ## 1. Текущий статус проекта
 
 * **Текущая версия**: Акакий 2.0 (Desktop Hub + Voice UX + Household Assistant + Memory + Core Dev Tools).
-* **Состояние кодовой базы**: Стабильное, все тесты пройдены (`66` файлов валидированы, 151 тест в `tests/` успешен, 0 синтаксических ошибок).
-* **Последний этап**: Рефакторинг R3.4 — Вынос экранов памяти и настроек (`MemoryView`, `SettingsView`).
+* **Состояние кодовой базы**: Стабильное, все тесты пройдены (`69` файлов валидированы, 157 тестов в `tests/` успешны, 0 синтаксических ошибок).
+* **Последний этап**: Рефакторинг R3.5 — Вынос экранов Главная и Чат (`HomeView`, `ChatView`), завершение этапа R3.
 * **Ветка**: `master`, синхронизирована с `origin/master`.
 
 ---
@@ -16,6 +16,7 @@
 ## 2. Реализованный функционал (Done)
 
 ### 2.0. Архитектурный аудит, документация и инфраструктура тестов
+- [x] **Вынос экранов Главная и Чат из `gui.py`, завершение этапа R3 (Этап R3.5)**: Из `gui.py` вынесены последние два экрана в отдельные классы `BaseView`: `ui/views/home.py` (`HomeView` с 3D Neural Core и сводными карточками) и `ui/views/chat.py` (`ChatView` с двухколоночным интерфейсом диалога и системного лога). `gui.py` трансформирован в чистый Shell (Topbar, Sidebar, Command Bar, Polling очереди, Voice integration, управление состояниями). Сохранены все фасадные свойства и методы (`chat_text`, `log_text`, `_append_chat`, `_append_log`, `_clear_chat`, `_quick_complete_task`). Реактивное обновление `refresh_current_view()` дополнено вызовами `home_view.refresh()` и `chat_view.refresh()`. Создан тестовый набор `tests/test_home_chat_views.py` (6 тестов, 100% pass, всего 157 тестов в `tests/`).
 - [x] **Вынос экранов памяти и настроек из `gui.py` (Этап R3.4)**: Из монолита `gui.py` вынесены экраны `MemoryView` (`ui/views/memory.py`) и `SettingsView` (`ui/views/settings.py`). Сохранены все фасадные методы и прокси-атрибуты (`entry_mem`, `mem_list_frame`, `lbl_val_res`, `_ui_remember`, `_ui_forget`, `_ui_run_validation`). Реактивное обновление `refresh_current_view()` дополнено вызовами `memory_view.refresh()` и `settings_view.refresh()`. Создан тестовый набор `tests/test_memory_settings_views.py` (5 тестов, 100% pass, всего 151 тест в `tests/`).
 - [x] **Вынос бытовых экранов из `gui.py` (Этап R3.3)**: Из монолита `gui.py` вынесены 4 бытовых экрана в независимые классы `BaseView`: `ui/views/tasks.py` (`TasksView`), `ui/views/reminders.py` (`RemindersView`), `ui/views/notes.py` (`NotesView`), `ui/views/lists.py` (`ListsView`). В `gui.py` сохранены чистые делегирующие фасады и свойства (`entry_task`, `entry_rem_*`, `entry_note_*`, `entry_new_list`, `entry_item_text`, `tasks_list_frame`, etc.) для 100% обратной совместимости. Обновлён `refresh_current_view()` для обновления через экземпляры Views. Создан тестовый набор `tests/test_household_views.py` (4 теста, 100% pass, всего 146 тестов в `tests/`).
 - [x] **Базовая инфраструктура экранов `ui/views/` (Этап R3.2)**: Создан пакет `ui/views/` с базовым классом `BaseView(tk.Frame)` (`ui/views/base.py`) и единым контрактом (`render()`, `refresh()`, доступ к `shell` и сервисам `agent`, `household`, `memory`, `voice` без дублирования, темовые константы). Общая утилита `_bind_hover` вынесена в `ui/views/base.py`. Создан набор тестов `tests/test_base_view.py` (5 тестов, 100% pass, всего 142 теста).
@@ -97,12 +98,12 @@
   * Вынести детерминированный fast-path парсинг (`choose_tool`) и строковые перехваты памяти/планов в отдельный модуль `tools/router.py`.
   * Устранить затенение команд памяти между `choose_tool()` и `process()`.
   * В `Agent.process()` выстроить прозрачный конвейер: `Router (fast-path) -> Planner -> SkillRegistry -> Ollama Native Tool Calling`.
-* [ ] **Этап R3: Модуляризация представлений `gui.py` в `ui/views/`** (Средний приоритет, Средний риск):
+* [x] **Этап R3: Модуляризация представлений `gui.py` в `ui/views/`** (Средний приоритет, Средний риск):
   * [x] **R3.1**: Аудит и классификация всех 51 методов `gui.py`, карта зависимостей экранов и Shell.
   * [x] **R3.2**: Инфраструктура `BaseView(tk.Frame)` и общие UI-хелперы в `ui/views/base.py`.
   * [x] **R3.3**: Вынос бытовых экранов (`TasksView`, `RemindersView`, `NotesView`, `ListsView`) с сохранением фасадов и атрибутов.
   * [x] **R3.4**: Вынос экранов памяти и настроек (`MemoryView`, `SettingsView`).
-  * [ ] **R3.5**: Вынос экранов Главная и Чат (`HomeView`, `ChatView`), превращение `gui.py` в компактный Shell (Topbar, Sidebar, Command Bar, Polling, Neural Core).
+  * [x] **R3.5**: Вынос экранов Главная и Чат (`HomeView`, `ChatView`), превращение `gui.py` в компактный Shell (Topbar, Sidebar, Command Bar, Polling, Neural Core).
 * [ ] **Этап R4: Вынос утилит парсинга времени из `tools/household.py`** (Низкий приоритет, Низкий риск):
   * Вынести чистую функцию `parse_reminder_time` из `tools/household.py` в `tools/datetime_utils.py`.
 

@@ -70,6 +70,8 @@
 * [ui/neural_core.py](file:///c:/Akakiy%20agent/ui/neural_core.py): UI-компонент Neural Core. Процедурная 3D-проекция пульсирующей нейросферы на `tk.Canvas`. Отражает состояния (`idle`, `thinking`, `working`, `listening`, `speaking`, `error`) и реагирует на реальную громкость речи (RMS аудио).
 * [ui/views/](file:///c:/Akakiy%20agent/ui/views/): Пакет модульных экранов рабочего пространства (Main Workspace):
   * [ui/views/base.py](file:///c:/Akakiy%20agent/ui/views/base.py): Базовый класс `BaseView(tk.Frame)` с единым контрактом `render()` / `refresh()`, темой оформления и доступом к сервисам через Shell.
+  * [ui/views/home.py](file:///c:/Akakiy%20agent/ui/views/home.py): Модульный экран главной сводки (Dashboard Hub) с 3D Neural Core и сводными карточками задач, напоминаний, списков и заметок (`HomeView`).
+  * [ui/views/chat.py](file:///c:/Akakiy%20agent/ui/views/chat.py): Двухколоночный модульный экран диалога с ассистентом и системным логом инструментов (`ChatView`).
   * [ui/views/tasks.py](file:///c:/Akakiy%20agent/ui/views/tasks.py): Модульный экран управления задачами (`TasksView`).
   * [ui/views/reminders.py](file:///c:/Akakiy%20agent/ui/views/reminders.py): Модульный экран управления напоминаниями (`RemindersView`).
   * [ui/views/notes.py](file:///c:/Akakiy%20agent/ui/views/notes.py): Модульный экран заметок с поиском (`NotesView`).
