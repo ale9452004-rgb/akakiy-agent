@@ -42,26 +42,7 @@ from ui.cloud import AkakiyCloud
 from voice import VoiceService
 
 
-def _bind_hover(widget, normal_bg, hover_bg, normal_fg=None, hover_fg=None):
-    """Добавляет плавный hover-эффект при наведении курсора."""
-    def on_enter(e):
-        try:
-            widget.config(bg=hover_bg)
-            if hover_fg is not None:
-                widget.config(fg=hover_fg)
-        except Exception:
-            pass
-
-    def on_leave(e):
-        try:
-            widget.config(bg=normal_bg)
-            if normal_fg is not None:
-                widget.config(fg=normal_fg)
-        except Exception:
-            pass
-
-    widget.bind("<Enter>", on_enter)
-    widget.bind("<Leave>", on_leave)
+from ui.views.base import BaseView, _bind_hover
 
 
 class AkakiyGUI:

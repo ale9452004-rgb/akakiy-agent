@@ -68,6 +68,7 @@
   * **Command Bar (96px)**: нижняя панель ввода текстовых команд, кнопка отправки и кнопка управления микрофоном «🎙 Голос / ⏹ Стоп».
   * **Асинхронная очередь (`queue.Queue`)**: потокобезопасная передача результатов агента, состояний голоса и модальных окон подтверждений (`request_confirmation`).
 * [ui/neural_core.py](file:///c:/Akakiy%20agent/ui/neural_core.py): UI-компонент Neural Core. Процедурная 3D-проекция пульсирующей нейросферы на `tk.Canvas`. Отражает состояния (`idle`, `thinking`, `working`, `listening`, `speaking`, `error`) и реагирует на реальную громкость речи (RMS аудио).
+* [ui/views/base.py](file:///c:/Akakiy%20agent/ui/views/base.py): Базовый класс `BaseView(tk.Frame)` для модульных экранов рабочего пространства (Main Workspace) с контрактом `render()` / `refresh()`, темой оформления и доступом к сервисам через Shell.
 * [commands.py](file:///c:/Akakiy%20agent/commands.py): Вспомогательные быстрые команды (`show_status`, `show_files`, `read_file`).
 
 ### 3.2. Голосовой слой (Voice UX)
