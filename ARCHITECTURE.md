@@ -137,6 +137,23 @@
 * [tools/analysis.py](file:///c:/Akakiy%20agent/tools/analysis.py): Статический анализ Python-файлов через AST `analyze_file`.
 * [tools/validation.py](file:///c:/Akakiy%20agent/tools/validation.py): Проверка синтаксиса проекта через `py_compile` (`validate_project`).
 
+### 3.6. Слой уведомлений (Notifications Layer)
+* [notifications/monitor.py](file:///c:/Akakiy%20agent/notifications/monitor.py): Фоновый монитор напоминаний (`ReminderMonitor`).
+  * Работает в выделенном потоке-демоне, периодически проверяет наступившие напоминания через `HouseholdManager.check_due_reminders()`.
+  * Не содержит зависимостей от Tkinter.
+  * Обеспечивает строгую дедупликацию (одно напоминание срабатывает ровно один раз).
+  * Безопасный жизненный цикл `start()` / `stop()`.
+* [notifications/service.py](file:///c:/Akakiy%20agent/notifications/service.py): Централизованный сервис уведомлений (`NotificationService`).
+  * Управляет жизненным циклом и вертикальным стеком всплывающих окон в правом нижнем углу экрана.
+  * Потокобезопасен (при вызове из фонового потока перенаправляет в UI-поток через `master.after()`).
+  * Автоматически выполняет перекомпоновку (репозиционирование) оставшихся окон при закрытии любого уведомления.
+  * Предоставляет чистый фасад: `notify()`, `show_reminder()`, `show_info()`, `close()`, `close_all()`.
+* [notifications/window.py](file:///c:/Akakiy%20agent/notifications/window.py): Модульное окно уведомления (`NotificationWindow`).
+  * Наследуется от `tk.Toplevel`, отображается поверх окон (`overrideredirect(True)`, `attributes("-topmost", True)`).
+  * Выполнено в фирменном тёмном стиле Акакия (карточка `#161b22`, рамка `#30363d`, кнопка закрытия `×`).
+  * Поддерживает типовые бейджи (Reminder, Info, Warning, Success, Error) и кнопки действий (`✓ Выполнено`, `⏰ Отложить`).
+* [notifications/models.py](file:///c:/Akakiy%20agent/notifications/models.py): Модели данных `NotificationItem` и `NotificationAction`.
+
 ---
 
 ## 4. Потоки данных (Data Flows)
@@ -220,6 +237,36 @@ strip_wake_word(text)  [Отделение обращения]
                                  ▼
                                clean_for_speech() -> TextToSpeechEngine.speak()
                                  └─ Озвучка pyttsx3/SAPI5 в фоновом потоке
+```
+
+### Поток 3: Фоновый мониторинг и стек уведомлений (Notifications)
+```
+HouseholdManager (data/household.json)
+   │
+   ▼
+ReminderMonitor.check_now()  [Фоновый поток-демон]
+   ├─ HouseholdManager.check_due_reminders()
+   ├─ Дедупликация: _notified_ids
+   │
+   ▼
+AkakiyGUI._on_reminder_due()  [Потокобезопасный Callback]
+   │
+   ▼
+AkakiyGUI.queue.put(("reminder_due", reminder))
+   │
+   ▼
+AkakiyGUI._poll_queue() -> _handle_reminder_due()  [Главный UI-поток Tkinter]
+   │
+   ▼
+NotificationService.show_reminder()
+   ├─ Формирование NotificationItem (действия «✓ Выполнено», «⏰ Отложить»)
+   ├─ Создание NotificationWindow (Toplevel, overrideredirect, topmost)
+   ├─ Добавление в стек и расчет координат (правый нижний угол)
+   └─ _restack()
+        │
+        ├─► Пользователь нажал «✓ Выполнено» ──► HouseholdManager.delete_reminder() -> refresh view
+        ├─► Пользователь нажал «⏰ Отложить»   ──► HouseholdManager.create_reminder("... через 10 минут") -> refresh view
+        └─► Пользователь нажал «×» (Закрыть)   ──► Закрытие окна -> _restack() оставшихся
 ```
 
 ---

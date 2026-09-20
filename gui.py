@@ -40,6 +40,7 @@ from tools.validation import validate_project
 from ui.neural_core import NeuralCore
 from ui.cloud import AkakiyCloud
 from voice import VoiceService
+from notifications import NotificationService, ReminderMonitor
 
 
 from ui.views import (
@@ -151,6 +152,18 @@ class AkakiyGUI:
         set_confirmation_handler(self._on_confirmation_requested)
         set_action_observer(self._on_action_observed)
 
+        # Модульная система уведомлений и мониторинга напоминаний
+        self.notification_service = NotificationService(master=self.root)
+        if self.household is not None:
+            self.reminder_monitor = ReminderMonitor(
+                household=self.household,
+                on_reminder=self._on_reminder_due,
+                interval_sec=5.0
+            )
+            self.reminder_monitor.start()
+        else:
+            self.reminder_monitor = None
+
         # 3. Построение UI
         self._create_layout()
         self._start_clock()
@@ -180,6 +193,16 @@ class AkakiyGUI:
 
     def _on_window_close(self):
         self._is_closing = True
+        try:
+            if hasattr(self, "reminder_monitor") and self.reminder_monitor:
+                self.reminder_monitor.stop()
+        except Exception:
+            pass
+        try:
+            if hasattr(self, "notification_service") and self.notification_service:
+                self.notification_service.close_all()
+        except Exception:
+            pass
         try:
             if hasattr(self, "neural_core") and self.neural_core:
                 self.neural_core.stop()
@@ -843,6 +866,38 @@ class AkakiyGUI:
     def _on_voice_event(self, event_type: str, data: dict):
         self.queue.put(("voice_event", (event_type, data)))
 
+    def _on_reminder_due(self, reminder: dict):
+        """Потокобезопасная передача наступившего напоминания в очередь GUI."""
+        self.queue.put(("reminder_due", reminder))
+
+    def _handle_reminder_due(self, reminder: dict):
+        """Отображение всплывающего уведомления о наступившем напоминании."""
+        rem_id = reminder.get("id")
+        rem_text = reminder.get("text", "")
+        rem_time = reminder.get("remind_at", "")
+
+        def on_complete():
+            if self.household and rem_id is not None:
+                self.household.delete_reminder(rem_id)
+                self.refresh_current_view()
+                self._append_log("DONE", f"Напоминание #{rem_id} выполнено.")
+
+        def on_snooze():
+            if self.household:
+                self.household.create_reminder(rem_text, "через 10 минут")
+                self.refresh_current_view()
+                self._append_log("INFO", f"Напоминание '{rem_text}' отложено на 10 минут.")
+
+        if hasattr(self, "notification_service") and self.notification_service:
+            self.notification_service.show_reminder(
+                title="Напоминание",
+                text=rem_text,
+                timestamp_str=rem_time,
+                on_complete=on_complete,
+                on_snooze=on_snooze,
+                reminder_id=f"rem_{rem_id}"
+            )
+
     def _on_toggle_voice(self):
         if not hasattr(self, "voice") or self.voice is None:
             self._append_log("VOICE", "Голосовой модуль недоступен.")
@@ -1061,6 +1116,9 @@ class AkakiyGUI:
                     prompt = f"Требуется подтверждение для действия:\n\nИнструмент: {tool_name}\n\n{details}\n\nРазрешить выполнение?"
                     self.confirm_result = messagebox.askyesno("Подтверждение безопасности", prompt)
                     self.confirm_event.set()
+
+                elif msg_type == "reminder_due":
+                    self._handle_reminder_due(data)
 
         except queue.Empty:
             pass
