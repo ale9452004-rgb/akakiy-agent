@@ -16,11 +16,14 @@ class AkakiyCloud(tk.Canvas):
     - 'speaking': модуляция амплитуды (архитектурный задел под голос).
     """
 
-    def __init__(self, parent, size=130, **kwargs):
+    def __init__(self, parent, size=130, width=None, height=None, **kwargs):
+        effective_w = width if width is not None else kwargs.pop("width", size)
+        effective_h = height if height is not None else kwargs.pop("height", size)
+        size = min(effective_w, effective_h)
         super().__init__(
             parent,
-            width=size,
-            height=size,
+            width=effective_w,
+            height=effective_h,
             bg="#161b22",
             highlightthickness=0,
             **kwargs
