@@ -21,6 +21,7 @@ from skills.registry import get_skill_registry
 
 from tools.edit_preparer import EditPreparer
 from tools.summary import format_task_summary
+from tools.router import CommandRouter, get_router
 
 class Agent:
     """
@@ -34,11 +35,12 @@ class Agent:
     - координацию единого контекста диалога и памяти.
     """
 
-    def __init__(self, memory_manager=None, context_manager=None, ai_client=None, skill_registry=None):
+    def __init__(self, memory_manager=None, context_manager=None, ai_client=None, skill_registry=None, router=None):
         mem = memory_manager or get_memory_manager()
         self.context_manager = context_manager or ContextManager(memory_manager=mem)
         self.ai = ai_client or OllamaClient()
         self.skill_registry = skill_registry or get_skill_registry()
+        self.router = router or CommandRouter()
         self.edit_preparer = EditPreparer(self.ai)
         self.planner = Planner(context_manager=self.context_manager, ai_client=self.ai)
         self.executor = PlanExecutor(self)
@@ -76,209 +78,9 @@ class Agent:
     def choose_tool(self, user_input):
         """
         Определяет, какой инструмент необходимо использовать для детерминированных CLI-команд.
-        Любые запросы на естественном языке не перехватываются и передаются в Native Tool Calling.
+        Делегирует в CommandRouter.
         """
-
-        normalized_input = user_input.strip().lower().rstrip(".,!?;:")
-
-        # =================================================
-        # Поиск конкретного файла (строгая CLI-команда)
-        # =================================================
-
-        file_search_patterns = [
-            r"^(?:найди|найти)(?:\s+в\s+проекте)?\s+файл\s+([^\s,!?;:]+)$",
-        ]
-
-        for pattern in file_search_patterns:
-            match = re.match(
-                pattern,
-                normalized_input,
-                flags=re.IGNORECASE
-            )
-
-            if match:
-                filename = match.group(1).strip()
-                filename = filename.rstrip(".,!?;:")
-
-                return {
-                    "tool": "find_file",
-                    "arguments": {
-                        "filename": filename
-                    }
-                }
-
-        # =================================================
-        # Просмотр списка файлов проекта (строгая CLI-команда)
-        # =================================================
-
-        list_files_exact = {
-            "покажи список файлов проекта",
-            "покажи файлы проекта",
-            "список файлов проекта",
-            "перечисли файлы проекта",
-            "покажи список файлов",
-            "покажи файлы",
-            "список файлов",
-            "перечисли файлы",
-            "файлы проекта",
-        }
-
-        if normalized_input in list_files_exact:
-            return {
-                "tool": "list_files",
-                "arguments": {}
-            }
-
-        # =================================================
-        # Анализ структуры проекта (строгая CLI-команда)
-        # =================================================
-
-        structure_exact = {
-            "покажи структуру проекта",
-            "покажи структуру проекта акакия",
-            "структура проекта",
-        }
-
-        if normalized_input in structure_exact:
-            return {
-                "tool": "list_files",
-                "arguments": {}
-            }
-
-        # =================================================
-        # Поиск функции (строгая CLI-команда)
-        # =================================================
-
-        func_match = re.match(
-            r"^(?:найди|найти)\s+функцию\s+([a-zA-Z_0-9]+)$",
-            normalized_input,
-            flags=re.IGNORECASE
-        )
-        if func_match:
-            search_query = f"def {func_match.group(1).strip()}"
-            return {
-                "tool": "search_files",
-                "arguments": {
-                    "query": search_query
-                }
-            }
-
-        # =================================================
-        # Поиск по проекту (строгая CLI-команда)
-        # =================================================
-
-        search_match = re.match(
-            r"^(?:поиск\s+по\s+проекту|(?:найди|найти)\s+в\s+проекте\s+текст)\s+(.+)$",
-            normalized_input,
-            flags=re.IGNORECASE
-        )
-        if search_match:
-            search_query = search_match.group(1).strip()
-            return {
-                "tool": "search_files",
-                "arguments": {
-                    "query": search_query
-                }
-            }
-
-        # =================================================
-        # Бытовые команды (Household & Memory) - Детерминированная маршрутизация
-        # =================================================
-
-        # --- 1. Задачи (Tasks) ---
-        task_create_m = re.match(r"^(?:создай|добавь|новая)\s+задач[ауе]\s+(.+)$", normalized_input, re.I)
-        if not task_create_m:
-            task_create_m = re.match(r"^задача:\s*(.+)$", normalized_input, re.I)
-        if task_create_m:
-            return {"tool": "create_task", "arguments": {"title": task_create_m.group(1).strip()}}
-
-        if normalized_input in {"покажи задачи", "покажи все задачи", "список задач", "мои задачи", "задачи", "показать задачи"}:
-            return {"tool": "list_tasks", "arguments": {"status": "all"}}
-        if normalized_input in {"активные задачи", "покажи активные задачи", "невыполненные задачи"}:
-            return {"tool": "list_tasks", "arguments": {"status": "pending"}}
-        if normalized_input in {"выполненные задачи", "покажи выполненные задачи", "завершенные задачи"}:
-            return {"tool": "list_tasks", "arguments": {"status": "completed"}}
-
-        task_done_m = re.match(r"^(?:выполни|отметь\s+(?:выполненной|сделанной)|закрой|сделай)\s+задач[уе]\s+([#№]?\d+|.+)$", normalized_input, re.I)
-        if task_done_m:
-            return {"tool": "complete_task", "arguments": {"task_id": task_done_m.group(1).strip()}}
-
-        task_del_m = re.match(r"^(?:удали|удалить|сотри)\s+задач[уие]?\s+(.+)$", normalized_input, re.I)
-        if not task_del_m:
-            task_del_m = re.match(r"^(?:удали|удалить|сотри)\s+(?:все\s+)?(последн(?:юю|ие|их|яя)(?:\s+(?:\d+|[а-яё]+))?)\s+задач[иа-я]*$", normalized_input, re.I)
-        if task_del_m:
-            return {"tool": "delete_task", "arguments": {"task_id": task_del_m.group(1).strip()}}
-
-        # --- 2. Заметки (Notes) ---
-        note_create_m = re.match(r"^(?:создай|добавь|новая|запиши)\s+заметк[ауе]\s+([^:]+?)(?:\s*:\s*|\s+текст\s+)(.+)$", normalized_input, re.I)
-        if note_create_m:
-            return {"tool": "create_note", "arguments": {"title": note_create_m.group(1).strip(), "content": note_create_m.group(2).strip()}}
-        note_create_m2 = re.match(r"^(?:создай|добавь|новая|запиши)\s+заметк[ауе]\s+(.+)$", normalized_input, re.I)
-        if note_create_m2:
-            n_text = note_create_m2.group(1).strip()
-            return {"tool": "create_note", "arguments": {"title": n_text, "content": n_text}}
-
-        if normalized_input in {"покажи заметки", "список заметок", "мои заметки", "заметки", "показать заметки", "все заметки"}:
-            return {"tool": "list_notes", "arguments": {}}
-
-        note_search_m = re.match(r"^(?:найди|поиск)(?:\s+в)?\s+заметк[а-я]*\s+(.+)$", normalized_input, re.I)
-        if note_search_m:
-            return {"tool": "search_notes", "arguments": {"query": note_search_m.group(1).strip()}}
-
-        note_del_m = re.match(r"^(?:удали|удалить|сотри)\s+заметк[уие]?\s+(.+)$", normalized_input, re.I)
-        if not note_del_m:
-            note_del_m = re.match(r"^(?:удали|удалить|сотри)\s+(?:все\s+)?(последн(?:юю|ие|их|яя)(?:\s+(?:\d+|[а-яё]+))?)\s+заметк[иа-я]*$", normalized_input, re.I)
-        if note_del_m:
-            return {"tool": "delete_note", "arguments": {"note_id": note_del_m.group(1).strip()}}
-
-        # --- 3. Напоминания (Reminders) ---
-        rem_create_m = re.match(r"^(?:напомни|создай\s+напоминание|новое\s+напоминание)\s+(.+?)\s+((?:в|через|завтра)\s+.+)$", normalized_input, re.I)
-        if rem_create_m:
-            return {"tool": "create_reminder", "arguments": {"text": rem_create_m.group(1).strip(), "remind_at": rem_create_m.group(2).strip()}}
-
-        if normalized_input in {"покажи напоминания", "список напоминаний", "мои напоминания", "напоминания", "показать напоминания"}:
-            return {"tool": "list_reminders", "arguments": {}}
-
-        rem_del_m = re.match(r"^(?:удали|удалить|сотри)\s+напоминани[ея]?\s+(.+)$", normalized_input, re.I)
-        if not rem_del_m:
-            rem_del_m = re.match(r"^(?:удали|удалить|сотри)\s+(?:все\s+)?(последн(?:ее|ие|их)(?:\s+(?:\d+|[а-яё]+))?)\s+напоминан[иеа-я]*$", normalized_input, re.I)
-        if rem_del_m:
-            return {"tool": "delete_reminder", "arguments": {"reminder_id": rem_del_m.group(1).strip()}}
-
-        # --- 4. Списки (Lists) ---
-        if normalized_input in {"покажи списки", "список списков", "списки", "показать списки"}:
-            return {"tool": "show_list", "arguments": {}}
-
-        list_show_m = re.match(r"^(?:покажи|открой)\s+список\s+(.+)$", normalized_input, re.I)
-        if list_show_m:
-            return {"tool": "show_list", "arguments": {"name": list_show_m.group(1).strip()}}
-
-        list_create_m = re.match(r"^(?:создай|добавь|новый)\s+список\s+(.+)$", normalized_input, re.I)
-        if list_create_m:
-            return {"tool": "create_list", "arguments": {"name": list_create_m.group(1).strip()}}
-
-        list_add_m = re.match(r"^добавь\s+в\s+список\s+([^\s]+)\s+(.+)$", normalized_input, re.I)
-        if list_add_m:
-            return {"tool": "add_list_item", "arguments": {"list_name": list_add_m.group(1).strip(), "text": list_add_m.group(2).strip()}}
-
-        # --- 5. Память (Memory) ---
-        mem_rem_m = re.match(r"^(?:запомни|сохрани\s+в\s+память)[:\s]+(.+)$", normalized_input, re.I)
-        if mem_rem_m:
-            return {"tool": "remember", "arguments": {"text": mem_rem_m.group(1).strip()}}
-
-        if normalized_input in {"что ты помнишь", "что помнишь", "покажи память", "список памяти", "что в памяти", "память", "показать память"}:
-            return {"tool": "recall_memory", "arguments": {}}
-
-        mem_forg_m = re.match(r"^(?:забудь|удали\s+из\s+памяти)[:\s]+(.+)$", normalized_input, re.I)
-        if mem_forg_m:
-            return {"tool": "forget_memory", "arguments": {"target": mem_forg_m.group(1).strip()}}
-
-        # Если ни один детерминированный шаблон не подошёл,
-        # возвращаем отсутствие инструмента (маршрутизация передаётся в Native Tool Calling)
-        return {
-            "tool": None,
-            "arguments": {}
-        }
+        return self.router.choose_tool(user_input)
 
     def execute_tool(self, tool_name, arguments):
         """
@@ -560,10 +362,10 @@ class Agent:
 
     def process(self, user_input):
         """
-        Главный обработчик пользовательского запроса.
+        Главный обработчик пользовательского запроса (оркестратор).
 
-        Возвращает единый формат результата,
-        который ожидает main.py.
+        Конвейер:
+        CommandRouter (fast-path: memory / plan / tools) -> Teamwork -> SkillRegistry -> Native Tool Calling (Ollama).
         """
 
         user_input = user_input.strip()
@@ -574,188 +376,115 @@ class Agent:
                 "answer": "Пустой запрос."
             }
 
-        # =================================================
-        # Команды долговременной памяти (Memory Commands)
-        # =================================================
+        # 1. Детерминированная маршрутизация через CommandRouter
+        route = self.router.route(user_input)
+        route_type = route.get("type")
 
-        # 1. Запомнить факт
-        remember_match = re.match(
-            r"^(?:запомни|сохрани\s+в\s+память)[:\s]+(.+)$",
-            user_input,
-            flags=re.IGNORECASE
-        )
-        if remember_match:
-            fact_text = remember_match.group(1).strip()
-            success, msg, _ = self.memory.remember(fact_text)
-            if success:
-                self._sync_memory_to_system_prompt()
-            self._record_interaction(user_input, msg)
-            return {
-                "type": "chat",
-                "answer": msg
-            }
-
-        # 2. Что ты помнишь / покажи память
-        normalized_mem = user_input.strip().lower().rstrip(".,!?;:")
-        if normalized_mem in {
-            "что ты помнишь",
-            "что помнишь",
-            "покажи память",
-            "список памяти",
-            "что в памяти",
-            "память",
-            "показать память",
-        }:
-            summary = self.memory.format_memories_summary()
-            self._record_interaction(user_input, summary)
-            return {
-                "type": "chat",
-                "answer": summary
-            }
-
-        # 3. Забудь
-        forget_match = re.match(
-            r"^(?:забудь|удали\s+из\s+памяти)[:\s]+(.+)$",
-            user_input,
-            flags=re.IGNORECASE
-        )
-        if forget_match:
-            target = forget_match.group(1).strip()
-            success, msg = self.memory.forget(target)
-            if success:
-                self._sync_memory_to_system_prompt()
-            self._record_interaction(user_input, msg)
-            return {
-                "type": "chat",
-                "answer": msg
-            }
-
-        # 4. Поиск в памяти
-        search_mem_match = re.match(
-            r"^(?:найди\s+в\s+памяти|вспомни)[:\s]+(.+)$",
-            user_input,
-            flags=re.IGNORECASE
-        )
-        if search_mem_match:
-            query = search_mem_match.group(1).strip()
-            results = self.memory.search(query)
-            if results:
-                summary = self.memory.format_memories_summary(results)
-            else:
-                summary = f"В памяти ничего не найдено по запросу \"{query}\"."
-            self._record_interaction(user_input, summary)
-            return {
-                "type": "chat",
-                "answer": summary
-            }
-
-        # 5. Очистка всей памяти
-        if normalized_mem in {
-            "очисти память",
-            "очистить память",
-            "забудь всё",
-            "забудь все",
-            "сбрось память",
-            "сбросить память",
-        }:
-            _, msg = self.memory.clear_long_term()
-            self._sync_memory_to_system_prompt()
-            self._record_interaction(user_input, msg)
-            return {
-                "type": "chat",
-                "answer": msg
-            }
-
-        # =================================================
-        # Создание плана
-        # =================================================
-
-        if user_input.lower().startswith("план:"):
-            request = user_input[5:].strip()
-
-            if not request:
+        # 1.1. Долговременная память (Memory Fast-Path)
+        if route_type == "memory":
+            action = route.get("action")
+            if action == "remember":
+                fact_text = route.get("text", "")
+                success, msg, _ = self.memory.remember(fact_text)
+                if success:
+                    self._sync_memory_to_system_prompt()
+                self._record_interaction(user_input, msg)
                 return {
-                    "type": "plan",
-                    "tool": "plan",
-                    "result": {
-                        "success": False,
-                        "message": (
-                            "После 'план:' необходимо "
-                            "указать задачу."
-                        )
-                    }
+                    "type": "chat",
+                    "answer": msg
+                }
+            elif action == "recall":
+                summary = self.memory.format_memories_summary()
+                self._record_interaction(user_input, summary)
+                return {
+                    "type": "chat",
+                    "answer": summary
+                }
+            elif action == "forget":
+                target = route.get("target", "")
+                success, msg = self.memory.forget(target)
+                if success:
+                    self._sync_memory_to_system_prompt()
+                self._record_interaction(user_input, msg)
+                return {
+                    "type": "chat",
+                    "answer": msg
+                }
+            elif action == "search":
+                query = route.get("query", "")
+                results = self.memory.search(query)
+                if results:
+                    summary = self.memory.format_memories_summary(results)
+                else:
+                    summary = f'В памяти ничего не найдено по запросу "{query}".'
+                self._record_interaction(user_input, summary)
+                return {
+                    "type": "chat",
+                    "answer": summary
+                }
+            elif action == "clear":
+                _, msg = self.memory.clear_long_term()
+                self._sync_memory_to_system_prompt()
+                self._record_interaction(user_input, msg)
+                return {
+                    "type": "chat",
+                    "answer": msg
                 }
 
-            result = self.create_plan(request)
-            plan_res = {
-                "type": "plan",
-                "tool": "plan",
-                "result": result
-            }
-            self._record_interaction(user_input, plan_res)
-            return plan_res
+        # 1.2. Управление планами (Planning Fast-Path)
+        if route_type == "plan":
+            action = route.get("action")
+            if action == "create":
+                request = route.get("request", "")
+                if not request:
+                    return {
+                        "type": "plan",
+                        "tool": "plan",
+                        "result": {
+                            "success": False,
+                            "message": (
+                                "После 'план:' необходимо "
+                                "указать задачу."
+                            )
+                        }
+                    }
+                result = self.create_plan(request)
+                plan_res = {
+                    "type": "plan",
+                    "tool": "plan",
+                    "result": result
+                }
+                self._record_interaction(user_input, plan_res)
+                return plan_res
+            elif action == "execute":
+                result = self.execute_plan()
+                exec_res = {
+                    "type": "plan_execution",
+                    "tool": "execute_plan",
+                    "result": result
+                }
+                self._record_interaction(user_input, exec_res)
+                return exec_res
+            elif action == "get":
+                result = self.planner.get_current_plan()
+                resp = {
+                    "type": "plan",
+                    "tool": "get_current_plan",
+                    "result": result
+                }
+                self._record_interaction(user_input, resp)
+                return resp
+            elif action == "clear":
+                result = self.planner.clear_plan()
+                resp = {
+                    "type": "tool",
+                    "tool": "clear_plan",
+                    "result": result
+                }
+                self._record_interaction(user_input, resp)
+                return resp
 
-        # =================================================
-        # Выполнение плана
-        # =================================================
-
-        if user_input.lower() in {
-            "выполни план",
-            "выполнить план",
-            "запусти план",
-        }:
-            result = self.execute_plan()
-            exec_res = {
-                "type": "plan_execution",
-                "tool": "execute_plan",
-                "result": result
-            }
-            self._record_interaction(user_input, exec_res)
-            return exec_res
-
-        # =================================================
-        # Просмотр текущего плана
-        # =================================================
-
-        if user_input.lower() in {
-            "покажи план",
-            "текущий план",
-            "показать план",
-        }:
-            result = self.planner.get_current_plan()
-            resp = {
-                "type": "plan",
-                "tool": "get_current_plan",
-                "result": result
-            }
-            self._record_interaction(user_input, resp)
-            return resp
-
-        # =================================================
-        # Очистка плана
-        # =================================================
-
-        if user_input.lower() in {
-            "очисти план",
-            "удали план",
-            "сбрось план",
-        }:
-            result = self.planner.clear_plan()
-            resp = {
-                "type": "tool",
-                "tool": "clear_plan",
-                "result": result
-            }
-            self._record_interaction(user_input, resp)
-            return resp
-
-        # =================================================
-        # Обычный инструмент
-        # =================================================
-
-        # =================================================
-        # Teamwork Preview для сложных многошаговых задач
-        # =================================================
+        # 2. Teamwork Preview для сложных многошаговых задач
         if self.teamwork.is_complex_task(user_input):
             execution_result = self.teamwork.run(user_input)
             resp = {
@@ -766,32 +495,25 @@ class Agent:
             self._record_interaction(user_input, resp)
             return resp
 
-        tool_selection = self.choose_tool(
-            user_input
-        )
+        # 3. Детерминированный запуск инструментов (Tool Fast-Path)
+        if route_type == "tool":
+            tool_name = route.get("tool")
+            if tool_name and str(tool_name).strip().lower() not in {"null", "none"}:
+                arguments = route.get("arguments", {})
+                result = self.execute_tool(
+                    tool_name,
+                    arguments
+                )
+                if tool_name in ("remember", "forget_memory"):
+                    self._sync_memory_to_system_prompt()
 
-        tool_name = tool_selection.get("tool") if tool_selection else None
-
-        if tool_name and str(tool_name).strip().lower() not in {"null", "none"}:
-            arguments = tool_selection.get(
-                "arguments",
-                {}
-            )
-
-            result = self.execute_tool(
-                tool_name,
-                arguments
-            )
-            if tool_name in ("remember", "forget_memory"):
-                self._sync_memory_to_system_prompt()
-
-            resp = {
-                "type": "tool",
-                "tool": tool_name,
-                "result": result
-            }
-            self._record_interaction(user_input, resp, tool_name=tool_name)
-            return resp
+                resp = {
+                    "type": "tool",
+                    "tool": tool_name,
+                    "result": result
+                }
+                self._record_interaction(user_input, resp, tool_name=tool_name)
+                return resp
 
         # =================================================
         # Skill Selection

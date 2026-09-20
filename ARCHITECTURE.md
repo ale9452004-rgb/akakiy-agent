@@ -80,8 +80,13 @@
 * [voice/normalizer.py](file:///c:/Akakiy%20agent/voice/normalizer.py): Числовая и вербальная нормализация русских сокращений, чисел и технических терминов.
 
 ### 3.3. Мозговой центр и контекст (Core & Brain)
+* [tools/router.py](file:///c:/Akakiy%20agent/tools/router.py): Класс `CommandRouter`.
+  * **Детерминированная маршрутизация (Fast-Path, < 1 мс)**: распознавание типовых команд без обращения к LLM.
+  * **Единые правила роутинга**: файлы проекта (`find_file`, `list_files`, `search_files`), бытовые сущности (`create_task`, `list_tasks`, `complete_task`, `delete_task`, заметки, напоминания, списки).
+  * **Устранение дублирования памяти**: единые шаблоны команд памяти (`remember`, `recall`, `forget`, `search`, `clear`) как для `choose_tool()`, так и для оркестратора `route()`.
+  * **Управление планами**: распознавание директив планирования (`create`, `execute`, `get`, `clear`).
 * [tools/agent.py](file:///c:/Akakiy%20agent/tools/agent.py): Класс `Agent`.
-  * **Двухуровневая маршрутизация**: быстрый детерминированный путь в `choose_tool()` (< 1 мс) для типовых команд; передача естественного языка в Native Tool Calling.
+  * **Оркестрация конвейера**: прозрачная цепочка `CommandRouter (fast-path)` $\to$ `Teamwork` $\to$ `SkillRegistry` $\to$ `Native Tool Calling`.
   * **Интеграция навыков**: выбор активного навыка через `SkillRegistry` для контекстной фильтрации инструментов.
   * **Multi-turn loop**: до 5 раундов вызова инструментов Ollama Native Tool Calling за один ход.
   * **Self-healing**: однократная попытка исправления синтаксиса через `edit_file` при возникновении ошибок валидации.
@@ -131,16 +136,18 @@
    ▼
 Agent.process(user_input)
    │
-   ├─► 1. Проверка choose_tool() (Детерминированный fast-path)
-   │       ├─ Найдено совпадение (задачи, заметки, списки, память, файлы)
-   │       │     ▼
-   │       │   Agent.execute_tool(tool_name, args)  [Латентность < 1 мс]
+   ├─► 1. CommandRouter.route(user_input) (Детерминированный fast-path, латентность < 1 мс)
+   │       ├─ Память: remember, recall, forget, search, clear ──► MemoryManager
+   │       ├─ Планы: create, execute, get, clear ──► Planner / PlanExecutor
+   │       ├─ Инструменты: find_file, list_files, search_files, бытовой CRUD ──► Agent.execute_tool()
    │       │     ▼
    │       │   ContextManager.record_interaction()
    │       │     ▼
    │       └─► Ответ клиенту (CLI / GUI)
    │
-   └─► 2. Не совпало (Свободный естественный язык / сложный запрос)
+   ├─► 2. TeamworkCoordinator.is_complex_task(user_input) ──► Teamwork Preview
+   │
+   └─► 3. Не совпало (Свободный естественный язык / сложный запрос)
            │
            ├─► SkillRegistry.find_matching_skill(user_input)
            │     └─ Выбор активного навыка (Project, Memory или Household)
