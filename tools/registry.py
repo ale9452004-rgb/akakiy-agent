@@ -292,13 +292,18 @@ TOOL_PARAMETERS = {
 }
 
 
-def get_tools_schema():
+def get_tools_schema(tool_names=None):
     """
     Преобразует реестр TOOLS в спецификацию tools для Ollama /api/chat.
+    Если передан список tool_names, возвращает схемы только для указанных инструментов.
     """
     schemas = []
+    target_names = tool_names if tool_names is not None else TOOLS.keys()
 
-    for name, tool in TOOLS.items():
+    for name in target_names:
+        if name not in TOOLS:
+            continue
+        tool = TOOLS[name]
         params = TOOL_PARAMETERS.get(
             name,
             {"properties": {}, "required": []}

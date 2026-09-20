@@ -17,6 +17,7 @@ from tools.teamwork import TeamworkCoordinator
 from tools.registry import TOOLS, get_tools_schema
 from tools.memory import get_memory_manager
 from tools.context import ContextManager, get_context_manager
+from skills.registry import get_skill_registry
 
 from tools.edit_preparer import EditPreparer
 from tools.summary import format_task_summary
@@ -27,16 +28,17 @@ class Agent:
 
     Отвечает за:
     - понимание запроса пользователя;
-    - выбор инструмента;
+    - выбор инструмента и навыка;
     - создание и выполнение планов;
     - подготовку изменений файлов;
     - координацию единого контекста диалога и памяти.
     """
 
-    def __init__(self, memory_manager=None, context_manager=None, ai_client=None):
+    def __init__(self, memory_manager=None, context_manager=None, ai_client=None, skill_registry=None):
         mem = memory_manager or get_memory_manager()
         self.context_manager = context_manager or ContextManager(memory_manager=mem)
         self.ai = ai_client or OllamaClient()
+        self.skill_registry = skill_registry or get_skill_registry()
         self.edit_preparer = EditPreparer(self.ai)
         self.planner = Planner(context_manager=self.context_manager, ai_client=self.ai)
         self.executor = PlanExecutor(self)
@@ -680,6 +682,20 @@ class Agent:
             return resp
 
         # =================================================
+        # Skill Selection
+        # =================================================
+        active_skill = None
+        if hasattr(self, "skill_registry") and self.skill_registry:
+            active_skill = self.skill_registry.find_matching_skill(user_input)
+
+        if active_skill and getattr(active_skill, "enabled", True):
+            tools_for_llm = active_skill.get_tools_schema()
+            extra_instruction = active_skill.system_prompt
+        else:
+            tools_for_llm = get_tools_schema()
+            extra_instruction = None
+
+        # =================================================
         # Native Tool Calling (Ollama)
         # =================================================
 
@@ -688,21 +704,25 @@ class Agent:
         correction_attempts = 0
         has_validation_errors = False
 
-        # Формируем сообщения с учётом единого ContextManager и релевантной памяти
-        llm_messages = self.context_manager.build_messages_for_llm(user_input, include_memory=True)
+        # Формируем сообщения с учётом единого ContextManager, релевантной памяти и контекста навыка
+        llm_messages = self.context_manager.build_messages_for_llm(
+            user_input,
+            include_memory=True,
+            extra_system_instruction=extra_instruction
+        )
         current_user_msg = llm_messages[-1]
         turn_messages = [current_user_msg]
 
         if hasattr(self.ai, "send_chat") and callable(self.ai.send_chat):
             response = self.ai.send_chat(
                 llm_messages,
-                tools=get_tools_schema()
+                tools=tools_for_llm
             )
         else:
             response = self.ai.ask(
                 user_input,
                 add_to_history=False,
-                tools=get_tools_schema()
+                tools=tools_for_llm
             )
 
         if isinstance(response, dict):
@@ -868,12 +888,12 @@ class Agent:
             if hasattr(self.ai, "send_chat") and callable(self.ai.send_chat):
                 next_response = self.ai.send_chat(
                     step_messages,
-                    tools=get_tools_schema()
+                    tools=tools_for_llm
                 )
             else:
                 next_response = self.ai.send_tool_step(
                     turn_messages,
-                    tools=get_tools_schema()
+                    tools=tools_for_llm
                 )
 
             tool_calls = next_response.get("tool_calls", [])

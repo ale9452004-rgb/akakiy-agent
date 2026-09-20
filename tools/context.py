@@ -153,19 +153,24 @@ class ContextManager:
         self,
         user_input: str,
         include_memory: bool = True,
-        max_memories: int = 5
+        max_memories: int = 5,
+        extra_system_instruction: Optional[str] = None
     ) -> List[Dict[str, Any]]:
         """
         Формирует полный список сообщений для отправки в Ollama /api/chat:
-        1. Системный промпт (role: system) — базовые инструкции Акакия.
+        1. Системный промпт (role: system) — базовые инструкции Акакия + опциональный контекст навыка.
         2. Скользящее окно истории сессии (role: user / assistant / tool).
         3. Сообщение текущего хода с релевантной памятью в виде данных (role: user).
         """
         with self._lock:
+            system_content = self.base_system_prompt
+            if extra_system_instruction and str(extra_system_instruction).strip():
+                system_content = f"{system_content}\n\n{str(extra_system_instruction).strip()}"
+
             messages: List[Dict[str, Any]] = [
                 {
                     "role": "system",
-                    "content": self.base_system_prompt
+                    "content": system_content
                 }
             ]
 
