@@ -255,35 +255,110 @@ class HouseholdManager:
                 "task": target
             }
 
+    def _resolve_delete_targets(
+        self,
+        query: Any,
+        collection: List[Dict[str, Any]],
+        single_name: str,
+        plural_name: str
+    ) -> Tuple[List[int], Optional[str]]:
+        """
+        Разрешает цели для удаления:
+        - Относительные указатели: 'последняя', 'последнюю', 'последние N', 'последние три/две/одну'
+        - Множественные ID: '1, 2, 3', '#1, #2', '1 2 3'
+        - Одиночный ID: 5 или '#5'
+        - Подстрока названия/текста: 'купить хлеб'
+        Возвращает кортеж (список_индексов, сообщение_об_ошибке_если_нет).
+        """
+        if not collection:
+            return [], f"Нет {plural_name} для удаления."
+
+        q_str = str(query).strip().lower()
+        if not q_str:
+            return [], f"Не указан идентификатор или описание для удаления {plural_name}."
+
+        rus_nums = {
+            "одну": 1, "один": 1, "одна": 1,
+            "две": 2, "два": 2,
+            "три": 3, "трех": 3, "трёх": 3,
+            "четыре": 4, "четырех": 4, "четырёх": 4,
+            "пять": 5, "шесть": 6, "семь": 7, "восемь": 8, "девять": 9, "десять": 10,
+        }
+
+        # 1. Проверка относительного удаления: 'последнюю', 'последняя', 'последний', 'последнее'
+        if re.match(r"^(?:удали(?:ть)?\s+)?последн(?:юю|яя|ий|ее)(?:\s+(?:заметк[уа-я]*|задач[уа-я]*|напоминан[иеа-я]*))?$", q_str):
+            return [len(collection) - 1], None
+
+        # 'последние N', 'последние три'
+        rel_match = re.match(
+            r"^(?:удали(?:ть)?\s+)?(?:все\s+)?последн(?:ие|их)\s+(\d+|[а-яё]+)(?:\s+(?:заметк[иа-я]*|задач[иа-я]*|напоминан[иа-я]*))?$",
+            q_str
+        )
+        if rel_match:
+            num_raw = rel_match.group(1).lower()
+            if num_raw.isdigit():
+                count = int(num_raw)
+            else:
+                count = rus_nums.get(num_raw, 0)
+            if count > 0:
+                actual_count = min(count, len(collection))
+                return list(range(len(collection) - actual_count, len(collection))), None
+
+        # 2. Проверка множественных ID: '1, 2, 3', '#1, #2', '1 2 3', '1,2,3'
+        id_tokens = re.findall(r"#?(\d+)\b", q_str)
+        non_id_chars = re.sub(r"[#\d\s,и]+", "", q_str)
+        if id_tokens and not non_id_chars:
+            target_ids = [int(tok) for tok in id_tokens]
+            matched_indices = []
+            found_ids = set()
+            for idx, item in enumerate(collection):
+                if item.get("id") in target_ids:
+                    matched_indices.append(idx)
+                    found_ids.add(item.get("id"))
+            if not matched_indices:
+                return [], f"{single_name.capitalize()} с номерами ({', '.join(str(i) for i in target_ids)}) не найдены."
+            return matched_indices, None
+
+        # 3. Одиночный ID
+        try:
+            exact_id = int(q_str.lstrip("#"))
+            for idx, item in enumerate(collection):
+                if item.get("id") == exact_id:
+                    return [idx], None
+        except ValueError:
+            pass
+
+        # 4. Поиск по заголовку или тексту
+        for idx, item in enumerate(collection):
+            item_text = str(item.get("title", "") or item.get("text", "")).lower()
+            if q_str in item_text:
+                return [idx], None
+
+        return [], f"{single_name.capitalize()} '{query}' не найдена."
+
     def delete_task(self, task_id: Union[int, str]) -> Dict[str, Any]:
-        """Удаляет задачу по ID или названию."""
+        """Удаляет одну или несколько задач по ID, относительному положению или названию."""
         with self._lock:
-            target_idx = None
-            try:
-                t_int = int(str(task_id).lstrip("#"))
-                for idx, t in enumerate(self.tasks):
-                    if t.get("id") == t_int:
-                        target_idx = idx
-                        break
-            except ValueError:
-                pass
+            indices, err = self._resolve_delete_targets(task_id, self.tasks, "задача", "задач")
+            if err or not indices:
+                return {"success": False, "error": err or f"Задача '{task_id}' не найдена."}
 
-            if target_idx is None:
-                norm_query = str(task_id).strip().lower()
-                for idx, t in enumerate(self.tasks):
-                    if norm_query in t.get("title", "").lower():
-                        target_idx = idx
-                        break
-
-            if target_idx is None:
-                return {"success": False, "error": f"Задача '{task_id}' не найдена."}
-
-            deleted = self.tasks.pop(target_idx)
+            indices.sort(reverse=True)
+            deleted = [self.tasks.pop(idx) for idx in indices]
+            deleted.reverse()
             self._save()
+
+            if len(deleted) == 1:
+                msg = f"Задача #{deleted[0]['id']} \"{deleted[0]['title']}\" удалена."
+            else:
+                ids_str = ", ".join(f"#{t['id']}" for t in deleted)
+                msg = f"Удалены {len(deleted)} задач: {ids_str}."
+
             return {
                 "success": True,
-                "message": f"Задача #{deleted['id']} \"{deleted['title']}\" удалена.",
-                "deleted": deleted
+                "message": msg,
+                "deleted": deleted if len(deleted) > 1 else deleted[0],
+                "count": len(deleted)
             }
 
     # =========================================================================
@@ -346,34 +421,28 @@ class HouseholdManager:
             }
 
     def delete_reminder(self, reminder_id: Union[int, str]) -> Dict[str, Any]:
-        """Удаляет напоминание по ID."""
+        """Удаляет одно или несколько напоминаний по ID, относительному положению или тексту."""
         with self._lock:
-            target_idx = None
-            try:
-                r_int = int(str(reminder_id).lstrip("#"))
-                for idx, r in enumerate(self.reminders):
-                    if r.get("id") == r_int:
-                        target_idx = idx
-                        break
-            except ValueError:
-                pass
+            indices, err = self._resolve_delete_targets(reminder_id, self.reminders, "напоминание", "напоминаний")
+            if err or not indices:
+                return {"success": False, "error": err or f"Напоминание '{reminder_id}' не найдено."}
 
-            if target_idx is None:
-                norm_query = str(reminder_id).strip().lower()
-                for idx, r in enumerate(self.reminders):
-                    if norm_query in r.get("text", "").lower():
-                        target_idx = idx
-                        break
-
-            if target_idx is None:
-                return {"success": False, "error": f"Напоминание '{reminder_id}' не найдено."}
-
-            deleted = self.reminders.pop(target_idx)
+            indices.sort(reverse=True)
+            deleted = [self.reminders.pop(idx) for idx in indices]
+            deleted.reverse()
             self._save()
+
+            if len(deleted) == 1:
+                msg = f"Напоминание #{deleted[0]['id']} \"{deleted[0]['text']}\" удалено."
+            else:
+                ids_str = ", ".join(f"#{r['id']}" for r in deleted)
+                msg = f"Удалены {len(deleted)} напоминаний: {ids_str}."
+
             return {
                 "success": True,
-                "message": f"Напоминание #{deleted['id']} \"{deleted['text']}\" удалено.",
-                "deleted": deleted
+                "message": msg,
+                "deleted": deleted if len(deleted) > 1 else deleted[0],
+                "count": len(deleted)
             }
 
     def check_due_reminders(self, current_time: Optional[str] = None) -> Dict[str, Any]:
@@ -420,7 +489,7 @@ class HouseholdManager:
     # 3. Заметки (Notes)
     # =========================================================================
 
-    def create_note(self, title: str, content: str) -> Dict[str, Any]:
+    def create_note(self, title: str, content: str = "") -> Dict[str, Any]:
         """Создаёт новую заметку."""
         clean_title = str(title).strip() if title else ""
         clean_content = str(content).strip() if content else ""
@@ -496,34 +565,28 @@ class HouseholdManager:
             }
 
     def delete_note(self, note_id: Union[int, str]) -> Dict[str, Any]:
-        """Удаляет заметку по ID или заголовку."""
+        """Удаляет одну или несколько заметок по ID, относительному положению или заголовку."""
         with self._lock:
-            target_idx = None
-            try:
-                n_int = int(str(note_id).lstrip("#"))
-                for idx, n in enumerate(self.notes):
-                    if n.get("id") == n_int:
-                        target_idx = idx
-                        break
-            except ValueError:
-                pass
+            indices, err = self._resolve_delete_targets(note_id, self.notes, "заметка", "заметок")
+            if err or not indices:
+                return {"success": False, "error": err or f"Заметка '{note_id}' не найдена."}
 
-            if target_idx is None:
-                norm_query = str(note_id).strip().lower()
-                for idx, n in enumerate(self.notes):
-                    if norm_query in n.get("title", "").lower():
-                        target_idx = idx
-                        break
-
-            if target_idx is None:
-                return {"success": False, "error": f"Заметка '{note_id}' не найдена."}
-
-            deleted = self.notes.pop(target_idx)
+            indices.sort(reverse=True)
+            deleted = [self.notes.pop(idx) for idx in indices]
+            deleted.reverse()
             self._save()
+
+            if len(deleted) == 1:
+                msg = f"Заметка #{deleted[0]['id']} \"{deleted[0]['title']}\" удалена."
+            else:
+                ids_str = ", ".join(f"#{n['id']}" for n in deleted)
+                msg = f"Удалены {len(deleted)} заметок: {ids_str}."
+
             return {
                 "success": True,
-                "message": f"Заметка #{deleted['id']} \"{deleted['title']}\" удалена.",
-                "deleted": deleted
+                "message": msg,
+                "deleted": deleted if len(deleted) > 1 else deleted[0],
+                "count": len(deleted)
             }
 
     # =========================================================================
@@ -753,7 +816,7 @@ def delete_reminder(reminder_id: Union[int, str]) -> Dict[str, Any]:
 def check_due_reminders(current_time: Optional[str] = None) -> Dict[str, Any]:
     return get_household_manager().check_due_reminders(current_time=current_time)
 
-def create_note(title: str, content: str) -> Dict[str, Any]:
+def create_note(title: str, content: str = "") -> Dict[str, Any]:
     return get_household_manager().create_note(title=title, content=content)
 
 def list_notes() -> Dict[str, Any]:

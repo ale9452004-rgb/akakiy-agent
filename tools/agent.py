@@ -181,6 +181,98 @@ class Agent:
                 }
             }
 
+        # =================================================
+        # Бытовые команды (Household & Memory) - Детерминированная маршрутизация
+        # =================================================
+
+        # --- 1. Задачи (Tasks) ---
+        task_create_m = re.match(r"^(?:создай|добавь|новая)\s+задач[ауе]\s+(.+)$", normalized_input, re.I)
+        if not task_create_m:
+            task_create_m = re.match(r"^задача:\s*(.+)$", normalized_input, re.I)
+        if task_create_m:
+            return {"tool": "create_task", "arguments": {"title": task_create_m.group(1).strip()}}
+
+        if normalized_input in {"покажи задачи", "покажи все задачи", "список задач", "мои задачи", "задачи", "показать задачи"}:
+            return {"tool": "list_tasks", "arguments": {"status": "all"}}
+        if normalized_input in {"активные задачи", "покажи активные задачи", "невыполненные задачи"}:
+            return {"tool": "list_tasks", "arguments": {"status": "pending"}}
+        if normalized_input in {"выполненные задачи", "покажи выполненные задачи", "завершенные задачи"}:
+            return {"tool": "list_tasks", "arguments": {"status": "completed"}}
+
+        task_done_m = re.match(r"^(?:выполни|отметь\s+(?:выполненной|сделанной)|закрой|сделай)\s+задач[уе]\s+([#№]?\d+|.+)$", normalized_input, re.I)
+        if task_done_m:
+            return {"tool": "complete_task", "arguments": {"task_id": task_done_m.group(1).strip()}}
+
+        task_del_m = re.match(r"^(?:удали|удалить|сотри)\s+задач[уие]?\s+(.+)$", normalized_input, re.I)
+        if not task_del_m:
+            task_del_m = re.match(r"^(?:удали|удалить|сотри)\s+(?:все\s+)?(последн(?:юю|ие|их|яя)(?:\s+(?:\d+|[а-яё]+))?)\s+задач[иа-я]*$", normalized_input, re.I)
+        if task_del_m:
+            return {"tool": "delete_task", "arguments": {"task_id": task_del_m.group(1).strip()}}
+
+        # --- 2. Заметки (Notes) ---
+        note_create_m = re.match(r"^(?:создай|добавь|новая|запиши)\s+заметк[ауе]\s+([^:]+?)(?:\s*:\s*|\s+текст\s+)(.+)$", normalized_input, re.I)
+        if note_create_m:
+            return {"tool": "create_note", "arguments": {"title": note_create_m.group(1).strip(), "content": note_create_m.group(2).strip()}}
+        note_create_m2 = re.match(r"^(?:создай|добавь|новая|запиши)\s+заметк[ауе]\s+(.+)$", normalized_input, re.I)
+        if note_create_m2:
+            n_text = note_create_m2.group(1).strip()
+            return {"tool": "create_note", "arguments": {"title": n_text, "content": n_text}}
+
+        if normalized_input in {"покажи заметки", "список заметок", "мои заметки", "заметки", "показать заметки", "все заметки"}:
+            return {"tool": "list_notes", "arguments": {}}
+
+        note_search_m = re.match(r"^(?:найди|поиск)(?:\s+в)?\s+заметк[а-я]*\s+(.+)$", normalized_input, re.I)
+        if note_search_m:
+            return {"tool": "search_notes", "arguments": {"query": note_search_m.group(1).strip()}}
+
+        note_del_m = re.match(r"^(?:удали|удалить|сотри)\s+заметк[уие]?\s+(.+)$", normalized_input, re.I)
+        if not note_del_m:
+            note_del_m = re.match(r"^(?:удали|удалить|сотри)\s+(?:все\s+)?(последн(?:юю|ие|их|яя)(?:\s+(?:\d+|[а-яё]+))?)\s+заметк[иа-я]*$", normalized_input, re.I)
+        if note_del_m:
+            return {"tool": "delete_note", "arguments": {"note_id": note_del_m.group(1).strip()}}
+
+        # --- 3. Напоминания (Reminders) ---
+        rem_create_m = re.match(r"^(?:напомни|создай\s+напоминание|новое\s+напоминание)\s+(.+?)\s+((?:в|через|завтра)\s+.+)$", normalized_input, re.I)
+        if rem_create_m:
+            return {"tool": "create_reminder", "arguments": {"text": rem_create_m.group(1).strip(), "remind_at": rem_create_m.group(2).strip()}}
+
+        if normalized_input in {"покажи напоминания", "список напоминаний", "мои напоминания", "напоминания", "показать напоминания"}:
+            return {"tool": "list_reminders", "arguments": {}}
+
+        rem_del_m = re.match(r"^(?:удали|удалить|сотри)\s+напоминани[ея]?\s+(.+)$", normalized_input, re.I)
+        if not rem_del_m:
+            rem_del_m = re.match(r"^(?:удали|удалить|сотри)\s+(?:все\s+)?(последн(?:ее|ие|их)(?:\s+(?:\d+|[а-яё]+))?)\s+напоминан[иеа-я]*$", normalized_input, re.I)
+        if rem_del_m:
+            return {"tool": "delete_reminder", "arguments": {"reminder_id": rem_del_m.group(1).strip()}}
+
+        # --- 4. Списки (Lists) ---
+        if normalized_input in {"покажи списки", "список списков", "списки", "показать списки"}:
+            return {"tool": "show_list", "arguments": {}}
+
+        list_show_m = re.match(r"^(?:покажи|открой)\s+список\s+(.+)$", normalized_input, re.I)
+        if list_show_m:
+            return {"tool": "show_list", "arguments": {"name": list_show_m.group(1).strip()}}
+
+        list_create_m = re.match(r"^(?:создай|добавь|новый)\s+список\s+(.+)$", normalized_input, re.I)
+        if list_create_m:
+            return {"tool": "create_list", "arguments": {"name": list_create_m.group(1).strip()}}
+
+        list_add_m = re.match(r"^добавь\s+в\s+список\s+([^\s]+)\s+(.+)$", normalized_input, re.I)
+        if list_add_m:
+            return {"tool": "add_list_item", "arguments": {"list_name": list_add_m.group(1).strip(), "text": list_add_m.group(2).strip()}}
+
+        # --- 5. Память (Memory) ---
+        mem_rem_m = re.match(r"^(?:запомни|сохрани\s+в\s+память)[:\s]+(.+)$", normalized_input, re.I)
+        if mem_rem_m:
+            return {"tool": "remember", "arguments": {"text": mem_rem_m.group(1).strip()}}
+
+        if normalized_input in {"что ты помнишь", "что помнишь", "покажи память", "список памяти", "что в памяти", "память", "показать память"}:
+            return {"tool": "recall_memory", "arguments": {}}
+
+        mem_forg_m = re.match(r"^(?:забудь|удали\s+из\s+памяти)[:\s]+(.+)$", normalized_input, re.I)
+        if mem_forg_m:
+            return {"tool": "forget_memory", "arguments": {"target": mem_forg_m.group(1).strip()}}
+
         # Если ни один детерминированный шаблон не подошёл,
         # возвращаем отсутствие инструмента (маршрутизация передаётся в Native Tool Calling)
         return {
@@ -246,6 +338,26 @@ class Agent:
                 normalized_arguments["query"] = (
                     normalized_arguments.pop("pattern")
                 )
+
+        if tool_name == "remember":
+            if "fact" in normalized_arguments and "text" not in normalized_arguments:
+                normalized_arguments["text"] = normalized_arguments.pop("fact")
+
+        if tool_name == "complete_task":
+            if "id" in normalized_arguments and "task_id" not in normalized_arguments:
+                normalized_arguments["task_id"] = normalized_arguments.pop("id")
+
+        if tool_name == "delete_task":
+            if "id" in normalized_arguments and "task_id" not in normalized_arguments:
+                normalized_arguments["task_id"] = normalized_arguments.pop("id")
+
+        if tool_name == "delete_note":
+            if "id" in normalized_arguments and "note_id" not in normalized_arguments:
+                normalized_arguments["note_id"] = normalized_arguments.pop("id")
+
+        if tool_name == "delete_reminder":
+            if "id" in normalized_arguments and "reminder_id" not in normalized_arguments:
+                normalized_arguments["reminder_id"] = normalized_arguments.pop("id")
 
         # =================================================
         # Получаем реальную сигнатуру инструмента

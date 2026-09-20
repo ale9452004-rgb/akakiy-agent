@@ -6,12 +6,13 @@
 """
 
 import logging
+import re
 import threading
 import time
 from typing import Any, Callable, Dict, Optional
 
 from voice.cleaner import clean_for_speech
-from voice.stt import SpeechToTextEngine
+from voice.stt import SpeechToTextEngine, strip_wake_word
 from voice.tts import TextToSpeechEngine
 
 logger = logging.getLogger(__name__)
@@ -203,15 +204,24 @@ class VoiceService:
                         time.sleep(0.05)
                     break
 
-                # 3. Передача распознанного текста в GUI и Agent
+                # 3. Передача распознанного текста в GUI
                 self.emit("voice_recognized", {"text": recognized_text})
 
                 # 4. Интеллектуальная обработка (thinking)
                 self._set_state("thinking")
 
-                if self.agent:
+                # Отсекаем обращение 'акакий' перед передачей агенту
+                clean_cmd = strip_wake_word(recognized_text)
+                if not clean_cmd and re.match(r"^(?:слушай[,\s]+)?акакий[,\s]*$", recognized_text, flags=re.IGNORECASE):
+                    # Пользователь просто позвал по имени
+                    result_payload = {
+                        "type": "chat",
+                        "answer": "Да, я здесь! Чем могу помочь?"
+                    }
+                elif self.agent:
+                    cmd_for_agent = clean_cmd if clean_cmd else recognized_text
                     try:
-                        result_payload = self.agent.process(recognized_text)
+                        result_payload = self.agent.process(cmd_for_agent)
                     except Exception as ag_ex:
                         logger.error(f"Ошибка агента при обработке голосового запроса: {ag_ex}", exc_info=True)
                         result_payload = {"type": "error", "error": f"Ошибка агента: {ag_ex}"}
@@ -271,9 +281,11 @@ class VoiceService:
             return payload.get("answer", "")
 
         elif p_type in ("plan", "plan_execution"):
-            # Для планов возвращаем summary или message
+            # Для планов возвращаем summary или message, либо ошибку
             res = payload.get("result")
             if isinstance(res, dict):
+                if res.get("success") is False or "error" in res:
+                    return f"Ошибка выполнения плана: {res.get('error') or res.get('message') or 'Не удалось выполнить план.'}"
                 return res.get("summary") or res.get("message") or "План успешно выполнен."
             return payload.get("summary") or payload.get("message") or "План успешно выполнен."
 
@@ -281,8 +293,15 @@ class VoiceService:
             tool_name = payload.get("tool", "")
             res = payload.get("result")
             if isinstance(res, dict):
+                # 1. Проверяем статус ошибки верхнего уровня
+                if res.get("success") is False or "error" in res:
+                    return f"Ошибка: {res.get('error') or res.get('message') or 'Действие не выполнено.'}"
+
+                # 2. Проверяем вложенный результат (inner result)
                 inner = res.get("result", res)
                 if isinstance(inner, dict):
+                    if inner.get("success") is False or "error" in inner:
+                        return f"Ошибка: {inner.get('error') or inner.get('message') or 'Действие не выполнено.'}"
                     if "files" in inner and "count" in inner:
                         return f"В проекте найдено {inner['count']} файлов."
                     if "path" in inner and "exists" in inner:
@@ -296,7 +315,7 @@ class VoiceService:
             return str(res or f"Инструмент {tool_name} выполнен.")
 
         elif p_type == "error":
-            return payload.get("error") or "Произошла ошибка при обработке запроса."
+            return f"Ошибка: {payload.get('error') or 'Произошла ошибка при обработке запроса.'}"
 
         return payload.get("message") or payload.get("answer") or "Запрос обработан."
 

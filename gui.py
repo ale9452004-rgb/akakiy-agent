@@ -1500,13 +1500,36 @@ class AkakiyGUI:
                 if msg_type == "process_result":
                     self.is_busy = False
                     self.btn_send.config(state="normal")
-                    self._set_state("idle")
 
-                    ans = data.get("answer") if isinstance(data, dict) else str(data)
-                    if not ans and isinstance(data, dict):
-                        ans = data.get("result", {}).get("message") or str(data.get("result"))
-                    self._append_chat("Акакий", ans or "Действие выполнено.")
-                    self._append_log("DONE", "Запрос успешно обработан.")
+                    # Проверяем, завершилась ли операция ошибкой
+                    has_err = False
+                    err_msg = ""
+                    if isinstance(data, dict):
+                        if data.get("type") == "error" or data.get("error"):
+                            has_err = True
+                            err_msg = data.get("error")
+                        res_obj = data.get("result")
+                        if isinstance(res_obj, dict):
+                            if res_obj.get("success") is False or "error" in res_obj:
+                                has_err = True
+                                err_msg = res_obj.get("error") or res_obj.get("message")
+                            inner_res = res_obj.get("result")
+                            if isinstance(inner_res, dict) and (inner_res.get("success") is False or "error" in inner_res):
+                                has_err = True
+                                err_msg = inner_res.get("error") or inner_res.get("message")
+
+                    if has_err:
+                        self._set_state("error")
+                        err_text = f"Ошибка: {err_msg or 'Действие не выполнено.'}"
+                        self._append_chat("Акакий", err_text)
+                        self._append_log("ERR", err_text)
+                    else:
+                        self._set_state("idle")
+                        ans = data.get("answer") if isinstance(data, dict) else str(data)
+                        if not ans and isinstance(data, dict):
+                            ans = data.get("result", {}).get("message") or str(data.get("result"))
+                        self._append_chat("Акакий", ans or "Действие выполнено.")
+                        self._append_log("DONE", "Запрос успешно обработан.")
                     self.refresh_current_view()
 
                 elif msg_type == "process_error":
@@ -1524,7 +1547,12 @@ class AkakiyGUI:
                         self._append_log("TOOL", f"Запуск инструмента: {t_name}")
                     elif ev_type == "after_tool":
                         t_name = payload.get("tool")
-                        self._append_log("DONE", f"Инструмент {t_name} выполнен.")
+                        t_res = payload.get("result")
+                        if isinstance(t_res, dict) and (t_res.get("success") is False or "error" in t_res):
+                            err_detail = t_res.get("error") or t_res.get("message") or "Сбой выполнения"
+                            self._append_log("ERR", f"Инструмент {t_name} завершился с ошибкой: {err_detail}")
+                        else:
+                            self._append_log("DONE", f"Инструмент {t_name} выполнен.")
                         self.refresh_current_view()
 
                 elif msg_type == "voice_event":
@@ -1543,17 +1571,39 @@ class AkakiyGUI:
                             self._append_log("VOICE", f"Распознано: {txt}")
                     elif ev_type == "voice_agent_result":
                         res_payload = payload.get("payload", {})
-                        ans = ""
+                        has_err = False
+                        err_msg = ""
                         if isinstance(res_payload, dict):
-                            ans = res_payload.get("answer") or ""
-                            if not ans:
-                                ans = res_payload.get("result", {}).get("message") or str(res_payload.get("result", ""))
-                        elif isinstance(res_payload, str):
-                            ans = res_payload
-                        if ans:
+                            if res_payload.get("type") == "error" or res_payload.get("error"):
+                                has_err = True
+                                err_msg = res_payload.get("error")
+                            res_inner = res_payload.get("result")
+                            if isinstance(res_inner, dict):
+                                if res_inner.get("success") is False or "error" in res_inner:
+                                    has_err = True
+                                    err_msg = res_inner.get("error") or res_inner.get("message")
+                                sub_inner = res_inner.get("result")
+                                if isinstance(sub_inner, dict) and (sub_inner.get("success") is False or "error" in sub_inner):
+                                    has_err = True
+                                    err_msg = sub_inner.get("error") or sub_inner.get("message")
+
+                        if has_err:
+                            self._set_state("error")
+                            ans = f"Ошибка: {err_msg or 'Действие не выполнено.'}"
                             self._append_chat("Акакий (Голос)", ans)
-                            self._append_log("DONE", "Голосовой ответ сформирован.")
-                            self.refresh_current_view()
+                            self._append_log("ERR", ans)
+                        else:
+                            ans = ""
+                            if isinstance(res_payload, dict):
+                                ans = res_payload.get("answer") or ""
+                                if not ans:
+                                    ans = res_payload.get("result", {}).get("message") or str(res_payload.get("result", ""))
+                            elif isinstance(res_payload, str):
+                                ans = res_payload
+                            if ans:
+                                self._append_chat("Акакий (Голос)", ans)
+                                self._append_log("DONE", "Голосовой ответ сформирован.")
+                        self.refresh_current_view()
                     elif ev_type == "voice_mode_toggle":
                         enabled = payload.get("enabled", False) if isinstance(payload, dict) else bool(payload)
                         if not enabled and self.voice_enabled:

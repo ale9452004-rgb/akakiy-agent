@@ -19,7 +19,11 @@ import tkinter as tk
 import unittest
 from unittest.mock import MagicMock, patch
 
-from voice.stt import correct_recognized_text, SpeechToTextEngine
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from voice.stt import correct_recognized_text, strip_wake_word, SpeechToTextEngine
 from skills.household import HOUSEHOLD_SYSTEM_PROMPT, HouseholdSkill
 from tools.household import HouseholdManager
 from tools.context import ContextManager
@@ -32,9 +36,9 @@ class TestSTTPolish(unittest.TestCase):
     """1. Тесты нормализации STT и endpointing."""
 
     def test_acoustic_akakiy_replacements(self):
-        # «Акакий, привет!» распознанный как «а какие привет» -> 'привет'
-        self.assertEqual(correct_recognized_text("а какие привет"), "привет")
-        self.assertEqual(correct_recognized_text("а какие, привет"), "привет")
+        # «Акакий, привет!» распознанный как «а какие привет» -> 'акакий привет' (для UI)
+        self.assertEqual(correct_recognized_text("а какие привет"), "акакий привет")
+        self.assertEqual(correct_recognized_text("а какие, привет"), "акакий, привет")
 
         # Изолированное обращение
         self.assertEqual(correct_recognized_text("а какие"), "акакий")
@@ -42,10 +46,11 @@ class TestSTTPolish(unittest.TestCase):
         self.assertEqual(correct_recognized_text("а какий"), "акакий")
         self.assertEqual(correct_recognized_text("акаки"), "акакий")
 
-        # Команды с искажённым обращением
-        self.assertEqual(correct_recognized_text("акакие у меня задачи"), "у меня задачи")
-        self.assertEqual(correct_recognized_text("а какие создай задачу купить хлеб"), "создай задачу купить хлеб")
-        self.assertEqual(correct_recognized_text("слушай акакий покажи файлы"), "покажи файлы")
+        # Отсечение wake word для передачи агенту
+        self.assertEqual(strip_wake_word("акакий у меня задачи"), "у меня задачи")
+        self.assertEqual(strip_wake_word("акакий, создай задачу купить хлеб"), "создай задачу купить хлеб")
+        self.assertEqual(strip_wake_word("слушай акакий покажи файлы"), "покажи файлы")
+        self.assertEqual(strip_wake_word("акакий"), "")
 
         # Не искажать обычные русские фразы, не содержащие «а какие» перед командами
         self.assertEqual(correct_recognized_text("какие у меня задачи"), "какие у меня задачи")

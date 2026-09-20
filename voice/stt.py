@@ -19,8 +19,9 @@ logger = logging.getLogger(__name__)
 
 COMMON_ACOUSTIC_REPLACEMENTS = [
     # Исправление акустических искажений имени «Акакий»
-    (r"\b(а\s+какие|акакие)\b(?=(?:[\s,]+(?:привет|здравствуй|добр|слушай|помоги|создай|добавь|удали|покажи|открой|напиши|сделай|напомни|запиши|найди|выполни|проверь|очисти|забудь|вспомни|что|где|кто|у\s+меня)|$))", "акакий"),
+    (r"\b(а\s+какие|акакие)\b(?=(?:[\s,]+(?:привет|здравствуй|добр|слушай|помоги|создай|добавь|удали|покажи|открой|напиши|сделай|напомни|запиши|найди|выполни|проверь|очисти|забудь|вспомни|что|где|кто|у\s+меня|скажи|как|сколько)|$))", "акакий"),
     (r"^а\s*какие$", "акакий"),
+    (r"^(?:слушай\s+)?(а\s+какие|акакие|а\s+какий|акаки|а\s+как\s+и|а\s+как\s+ей)\b", "акакий"),
     (r"\b(а\s+какий|акаки|а\s+как\s+и|а\s+как\s+ей)\b", "акакий"),
     (r"\b(дик|гид|гит)\s+статус\b", "git status"),
     (r"\b(гид|гип|гит)\s+(пуш|уж)\b", "git push"),
@@ -40,19 +41,30 @@ COMMON_ACOUSTIC_REPLACEMENTS = [
 def correct_recognized_text(text: str) -> str:
     """
     Пост-обработка распознанного текста Vosk:
-    - исправляет частые фонетические искажения модели на технических терминах;
-    - отсекает обращение 'акакий' / 'слушай акакий' в начале команды для более точной маршрутизации.
+    - исправляет частые фонетические искажения модели на технических терминах и имени;
+    - сохраняет имя 'акакий' в тексте для точного отображения в UI и логах.
     """
     if not text or not isinstance(text, str):
         return ""
     res = text.strip()
     for pat, repl in COMMON_ACOUSTIC_REPLACEMENTS:
         res = re.sub(pat, repl, res, flags=re.IGNORECASE)
+    return res
 
-    # Если фраза начинается с обращения (например, 'акакий', 'слушай акакий') и далее следует команда, убираем префикс
-    wake_match = re.match(r"^(?:слушай\s+)?(?:акакий|акакий,)\s+(.+)$", res, flags=re.IGNORECASE)
+
+def strip_wake_word(text: str) -> str:
+    """
+    Отсекает обращение 'акакий' / 'слушай акакий' в начале команды для передачи в Agent.
+    Если команда состояла только из обращения, возвращает пустую строку.
+    """
+    if not text or not isinstance(text, str):
+        return ""
+    res = text.strip()
+    wake_match = re.match(r"^(?:слушай[,\s]+)?(?:акакий[,\s]*)+(.+)$", res, flags=re.IGNORECASE)
     if wake_match:
-        res = wake_match.group(1).strip()
+        return wake_match.group(1).strip()
+    if re.match(r"^(?:слушай[,\s]+)?акакий[,\s]*$", res, flags=re.IGNORECASE):
+        return ""
     return res
 
 
@@ -148,7 +160,11 @@ class SpeechToTextEngine:
         speech_started_time = None
         last_speech_time = None
         accumulated_parts = []
-        effective_silence = max(1.3, float(silence_threshold_seconds if silence_threshold_seconds is not None else 1.3))
+        effective_silence = max(1.0, float(silence_threshold_seconds if silence_threshold_seconds is not None else 1.1))
+
+        # Адаптивная калибровка порога тишины под аппаратный шум микрофона
+        noise_samples = []
+        speech_threshold = 0.042
 
         try:
             # Захват моно, 16кГц, int16, блоками по 100 мс (1600 сэмплов)
@@ -192,8 +208,14 @@ class SpeechToTextEngine:
                             except Exception:
                                 pass
 
-                        # Детекция активности голоса по энергии (порог 0.022 для тихих согласных и окончаний)
-                        if norm_level > 0.022:
+                        # Адаптивная оценка фонового шума в первые несколько фреймов до начала речи
+                        if speech_started_time is None and len(noise_samples) < 5:
+                            noise_samples.append(norm_level)
+                            avg_noise = sum(noise_samples) / len(noise_samples)
+                            speech_threshold = max(0.042, min(0.08, avg_noise * 1.55))
+
+                        # Детекция активности голоса по энергии (выше адаптивного порога шума)
+                        if norm_level > speech_threshold:
                             if speech_started_time is None:
                                 speech_started_time = now
                             last_speech_time = now

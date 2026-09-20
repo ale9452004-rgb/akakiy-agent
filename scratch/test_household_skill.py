@@ -444,7 +444,7 @@ class TestAgentNativeToolCallingHousehold(unittest.TestCase):
 
         agent = Agent(memory_manager=self.mem_mgr, context_manager=self.ctx, ai_client=mock_ai)
 
-        resp = agent.process("Добавь задачу купить хлеб")
+        resp = agent.process("Нужно купить в магазине продукты к ужину")
         self.assertEqual(resp["type"], "chat")
 
         self.assertTrue(mock_ai.send_chat.called)
