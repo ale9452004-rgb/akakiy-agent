@@ -39,7 +39,7 @@ from tools.memory import get_memory_manager
 from tools.validation import validate_project
 from ui.neural_core import NeuralCore
 from ui.cloud import AkakiyCloud
-from voice import VoiceService
+from voice import VoiceService, GlobalHotKeyManager
 from notifications import NotificationService, ReminderMonitor
 
 
@@ -164,6 +164,18 @@ class AkakiyGUI:
         else:
             self.reminder_monitor = None
 
+        # Глобальный хоткей Push-to-Talk (Ctrl+Shift+Space)
+        self.hotkey_manager = None
+        if sys.platform == "win32" and self.voice is not None:
+            try:
+                self.hotkey_manager = GlobalHotKeyManager(
+                    on_press=self._on_hotkey_press,
+                    on_release=self._on_hotkey_release
+                )
+                self.hotkey_manager.start()
+            except Exception:
+                self.hotkey_manager = None
+
         # 3. Построение UI
         self._create_layout()
         self._start_clock()
@@ -196,6 +208,11 @@ class AkakiyGUI:
         try:
             if hasattr(self, "reminder_monitor") and self.reminder_monitor:
                 self.reminder_monitor.stop()
+        except Exception:
+            pass
+        try:
+            if hasattr(self, "hotkey_manager") and self.hotkey_manager:
+                self.hotkey_manager.stop()
         except Exception:
             pass
         try:
@@ -897,6 +914,33 @@ class AkakiyGUI:
                 on_snooze=on_snooze,
                 reminder_id=f"rem_{rem_id}"
             )
+
+    def _on_hotkey_press(self):
+        """Коллбэк нажатия глобального хоткея (вызывается из фонового потока)."""
+        try:
+            self.root.after(0, self._handle_hotkey_press)
+        except Exception:
+            pass
+
+    def _handle_hotkey_press(self):
+        """Обработка нажатия хоткея в главном UI-потоке."""
+        if self._is_closing or not hasattr(self, "voice") or self.voice is None:
+            return
+        self._on_toggle_voice()
+
+    def _on_hotkey_release(self):
+        """Коллбэк отпускания глобального хоткея после удержания (Push-to-Talk)."""
+        try:
+            self.root.after(0, self._handle_hotkey_release)
+        except Exception:
+            pass
+
+    def _handle_hotkey_release(self):
+        """Обработка отпускания хоткея в главном UI-потоке."""
+        if self._is_closing or not hasattr(self, "voice") or self.voice is None:
+            return
+        if getattr(self.voice, "state", None) == "listening" and hasattr(self.voice, "finish_listening"):
+            self.voice.finish_listening()
 
     def _on_toggle_voice(self):
         if not hasattr(self, "voice") or self.voice is None:

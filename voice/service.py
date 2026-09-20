@@ -83,6 +83,7 @@ class VoiceService:
         self._state = "idle"
         self._lock = threading.Lock()
         self._stop_event = threading.Event()
+        self._finish_event = threading.Event()
         self._session_thread: Optional[threading.Thread] = None
 
     def emit(self, event_type: str, data: Optional[Dict[str, Any]] = None):
@@ -132,11 +133,16 @@ class VoiceService:
     def stop_session(self):
         """Останавливает текущую запись или воспроизведение и завершает сеанс."""
         self._stop_event.set()
+        self._finish_event.set()
         self.tts.stop()
         if self._session_thread and self._session_thread.is_alive():
             if threading.current_thread() != self._session_thread:
                 self._session_thread.join(timeout=1.5)
         self._set_state("idle")
+
+    def finish_listening(self):
+        """Досрочно завершает текущую фазу записи фразы (Push-to-Talk release), передавая её на обработку."""
+        self._finish_event.set()
 
     def speak_text(self, text: str, on_finish: Optional[Callable[[], None]] = None):
         """Прямой вызов озвучивания произвольного текста."""
@@ -167,12 +173,14 @@ class VoiceService:
             while not self._stop_event.is_set():
                 # 1. Захват речи (listening)
                 self._set_state("listening")
+                self._finish_event.clear()
                 recognized_text, err = self.stt.listen_phrase(
                     timeout=None,
                     phrase_time_limit=25.0,
                     silence_threshold_seconds=1.0,
                     on_level_callback=lambda lvl: self.emit("voice_audio_level", {"level": lvl}),
-                    stop_event=self._stop_event
+                    stop_event=self._stop_event,
+                    finish_event=self._finish_event
                 )
 
                 if self._stop_event.is_set():

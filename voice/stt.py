@@ -128,7 +128,8 @@ class SpeechToTextEngine:
         phrase_time_limit: float = 16.0,
         silence_threshold_seconds: float = 1.3,
         on_level_callback: Optional[Callable[[float], None]] = None,
-        stop_event: Optional[threading.Event] = None
+        stop_event: Optional[threading.Event] = None,
+        finish_event: Optional[threading.Event] = None
     ) -> Tuple[str, Optional[str]]:
         """
         Слушает микрофон до завершения произнесения фразы или таймаута.
@@ -177,6 +178,10 @@ class SpeechToTextEngine:
             ):
                 while True:
                     if stop_event and stop_event.is_set():
+                        break
+
+                    if finish_event and finish_event.is_set():
+                        logger.info("Получен сигнал досрочного завершения фразы (finish_event).")
                         break
 
                     now = time.time()

@@ -88,6 +88,7 @@
 * [voice/tts.py](file:///c:/Akakiy%20agent/voice/tts.py): Локальный синтез речи через `pyttsx3` (Windows SAPI5, русский голос). Работает в выделенном фоновом рабочем потоке с очередью фраз и поддержкой мгновенного прерывания.
 * [voice/cleaner.py](file:///c:/Akakiy%20agent/voice/cleaner.py): Очистка текста от Markdown, символов разметки, JSON и путей перед передачей в TTS.
 * [voice/normalizer.py](file:///c:/Akakiy%20agent/voice/normalizer.py): Числовая и вербальная нормализация русских сокращений, чисел и технических терминов.
+* [voice/hotkey.py](file:///c:/Akakiy%20agent/voice/hotkey.py): Менеджер глобального хоткея Windows (`GlobalHotKeyManager`). Нативный перехват комбинации `Ctrl+Shift+Space` через Win32 API `RegisterHotKey`/`GetMessageW` без внешних зависимостей. Поддерживает двойной режим: Toggle (вкл/выкл по нажатию) и Push-to-Talk (удержание и досрочное завершение фразы при отпускании).
 
 ### 3.3. Мозговой центр и контекст (Core & Brain)
 * [tools/router.py](file:///c:/Akakiy%20agent/tools/router.py): Класс `CommandRouter`.
