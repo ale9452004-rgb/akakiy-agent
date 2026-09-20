@@ -18,7 +18,10 @@ from typing import Callable, Optional, Tuple
 logger = logging.getLogger(__name__)
 
 COMMON_ACOUSTIC_REPLACEMENTS = [
-    (r"\b(а как и|а как ей|акаки)\b", "акакий"),
+    # Исправление акустических искажений имени «Акакий»
+    (r"\b(а\s+какие|акакие)\b(?=(?:[\s,]+(?:привет|здравствуй|добр|слушай|помоги|создай|добавь|удали|покажи|открой|напиши|сделай|напомни|запиши|найди|выполни|проверь|очисти|забудь|вспомни|что|где|кто|у\s+меня)|$))", "акакий"),
+    (r"^а\s*какие$", "акакий"),
+    (r"\b(а\s+какий|акаки|а\s+как\s+и|а\s+как\s+ей)\b", "акакий"),
     (r"\b(дик|гид|гит)\s+статус\b", "git status"),
     (r"\b(гид|гип|гит)\s+(пуш|уж)\b", "git push"),
     (r"\b(гид|гит)\s+(дифф|диф)\b", "git diff"),
@@ -31,6 +34,7 @@ COMMON_ACOUSTIC_REPLACEMENTS = [
     (r"\b([a-zA-Zа-яА-Я0-9_]+)\s+пай\b", r"\1.py"),
     (r"\b(очисть|очистить)\b", "очисти"),
 ]
+
 
 
 def correct_recognized_text(text: str) -> str:
@@ -110,7 +114,7 @@ class SpeechToTextEngine:
         self,
         timeout: Optional[float] = 8.0,
         phrase_time_limit: float = 16.0,
-        silence_threshold_seconds: float = 1.0,
+        silence_threshold_seconds: float = 1.3,
         on_level_callback: Optional[Callable[[float], None]] = None,
         stop_event: Optional[threading.Event] = None
     ) -> Tuple[str, Optional[str]]:
@@ -144,6 +148,7 @@ class SpeechToTextEngine:
         speech_started_time = None
         last_speech_time = None
         accumulated_parts = []
+        effective_silence = max(1.3, float(silence_threshold_seconds if silence_threshold_seconds is not None else 1.3))
 
         try:
             # Захват моно, 16кГц, int16, блоками по 100 мс (1600 сэмплов)
@@ -187,8 +192,8 @@ class SpeechToTextEngine:
                             except Exception:
                                 pass
 
-                        # Детекция активности голоса по энергии
-                        if norm_level > 0.035:
+                        # Детекция активности голоса по энергии (порог 0.022 для тихих согласных и окончаний)
+                        if norm_level > 0.022:
                             if speech_started_time is None:
                                 speech_started_time = now
                             last_speech_time = now
@@ -210,12 +215,34 @@ class SpeechToTextEngine:
                                 speech_started_time = now
                             last_speech_time = now
 
-                    # Детекция паузы после начала речи: завершаем фразу, если тишина > silence_threshold_seconds
+                    # Детекция паузы после начала речи: завершаем фразу, если тишина > effective_silence
                     if speech_started_time and last_speech_time:
-                        if (now - last_speech_time) > silence_threshold_seconds:
+                        if (now - last_speech_time) > effective_silence:
                             break
 
-            # Финализируем распознавание через FinalResult
+            # 1. Извлекаем все оставшиеся аудио-чанки из очереди
+            while not audio_queue.empty():
+                try:
+                    rem_data = audio_queue.get_nowait()
+                    if recognizer.AcceptWaveform(rem_data):
+                        res = json.loads(recognizer.Result())
+                        text = res.get("text", "").strip()
+                        if text:
+                            accumulated_parts.append(text)
+                except queue.Empty:
+                    break
+
+            # 2. Подаём акустическую тишину (silence padding) в KaldiRecognizer,
+            # чтобы декодер успел выгрузить согласные и мягкие окончания слова
+            silence_pad = b"\x00" * 3200
+            for _ in range(3):
+                if recognizer.AcceptWaveform(silence_pad):
+                    res = json.loads(recognizer.Result())
+                    text = res.get("text", "").strip()
+                    if text:
+                        accumulated_parts.append(text)
+
+            # 3. Финализируем распознавание через FinalResult
             final_res = json.loads(recognizer.FinalResult())
             final_text = final_res.get("text", "").strip()
             if final_text:

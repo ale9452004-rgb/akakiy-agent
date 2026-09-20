@@ -115,6 +115,9 @@ class AkakiyGUI:
         self.voice_enabled = False
         self.current_section = "home"
         self.current_selected_list = ""
+        self.current_state = "idle"
+        self.chat_messages: List[Tuple[str, str, str]] = []  # [(author, message, time_str)]
+        self.log_messages: List[Tuple[str, str, str]] = []   # [(prefix, text, time_str)]
         self._is_closing = False
 
         # Голосовой сервис
@@ -257,11 +260,11 @@ class AkakiyGUI:
 
         self.status_badge = tk.Label(
             status_row,
-            text="● АКТИВЕН",
-            font=("Consolas", 9, "bold"),
+            text="✓ ГОТОВ",
+            font=("Segoe UI", 9, "bold"),
             fg=self.ACCENT_BLUE,
             bg="#111c2e",
-            padx=8, pady=2,
+            padx=10, pady=2,
             bd=1, relief="solid"
         )
         self.status_badge.pack(side="left")
@@ -596,6 +599,8 @@ class AkakiyGUI:
 
         self.neural_core = NeuralCore(core_box, size=180, bg=self.BG_CARD)
         self.neural_core.pack(pady=4)
+        if hasattr(self, "current_state"):
+            self.neural_core.set_state(self.current_state)
 
         # Средний ряд: 3 интерактивные карточки (Задачи / Напоминания / Списки)
         mid_row = tk.Frame(self.workspace, bg=self.BG_MAIN)
@@ -767,12 +772,19 @@ class AkakiyGUI:
         self.log_text.tag_config("done", foreground=self.ACCENT_GREEN)
         self.log_text.tag_config("err", foreground=self.ACCENT_RED)
 
-        self._append_chat("Акакий", "Привет! Чем я могу помочь? Задавай вопросы, управляй делами или работай с проектом.")
+        # Восстановление сохранённых сообщений сессии
+        if not self.chat_messages:
+            self._append_chat("Акакий", "Привет! Чем я могу помочь? Задавай вопросы, управляй делами или работай с проектом.")
+        else:
+            for author, message, t_str in self.chat_messages:
+                self._insert_chat_ui(author, message, t_str)
 
-    def _append_chat(self, author: str, message: str):
-        if not hasattr(self, "chat_text"):
+        for prefix, text, t_str in self.log_messages:
+            self._insert_log_ui(prefix, text, t_str)
+
+    def _insert_chat_ui(self, author: str, message: str, t_str: str):
+        if not hasattr(self, "chat_text") or not self.chat_text.winfo_exists():
             return
-        t_str = time.strftime("%H:%M:%S")
         self.chat_text.insert(tk.END, "\n")
         author_upper = author.upper()
         if "ВЫ" in author_upper:
@@ -786,10 +798,14 @@ class AkakiyGUI:
         self.chat_text.insert(tk.END, "─" * 48 + "\n", "div")
         self.chat_text.see(tk.END)
 
-    def _append_log(self, prefix: str, text: str):
-        if not hasattr(self, "log_text"):
-            return
+    def _append_chat(self, author: str, message: str):
         t_str = time.strftime("%H:%M:%S")
+        self.chat_messages.append((author, message, t_str))
+        self._insert_chat_ui(author, message, t_str)
+
+    def _insert_log_ui(self, prefix: str, text: str, t_str: str):
+        if not hasattr(self, "log_text") or not self.log_text.winfo_exists():
+            return
         tag = "info"
         if prefix == "TOOL":
             tag = "tool"
@@ -800,11 +816,20 @@ class AkakiyGUI:
         self.log_text.insert(tk.END, f"[{t_str}] [{prefix}] {text}\n", tag)
         self.log_text.see(tk.END)
 
+    def _append_log(self, prefix: str, text: str):
+        t_str = time.strftime("%H:%M:%S")
+        self.log_messages.append((prefix, text, t_str))
+        self._insert_log_ui(prefix, text, t_str)
+
     def _clear_chat(self):
-        if hasattr(self, "chat_text"):
+        self.chat_messages.clear()
+        self.log_messages.clear()
+        if hasattr(self, "chat_text") and self.chat_text.winfo_exists():
             self.chat_text.delete("1.0", tk.END)
-        if hasattr(self, "log_text"):
+        if hasattr(self, "log_text") and self.log_text.winfo_exists():
             self.log_text.delete("1.0", tk.END)
+        if hasattr(self.agent, "context_mgr") and hasattr(self.agent.context_mgr, "clear_history"):
+            self.agent.context_mgr.clear_history()
 
     # =========================================================================
     # ЭКРАН 3: ЗАДАЧИ (TASKS)
@@ -1428,18 +1453,40 @@ class AkakiyGUI:
 
     def _set_state(self, state_name: str):
         states_map = {
-            "idle": ("● АКТИВЕН", self.ACCENT_BLUE, "#111c2e"),
-            "thinking": ("● ДУМАЕТ", self.ACCENT_PURPLE, "#21153b"),
-            "working": ("● РАБОТАЕТ", self.ACCENT_GREEN, "#112d1b"),
-            "listening": ("● СЛУШАЕТ", self.ACCENT_CYAN, "#112b3c"),
-            "speaking": ("● ОТВЕТ", self.ACCENT_GREEN, "#112d1b"),
-            "error": ("● ОШИБКА", self.ACCENT_RED, "#361414"),
+            "idle": ("✓ ГОТОВ", self.ACCENT_BLUE, "#111c2e"),
+            "thinking": ("◌ ДУМАЕТ...", self.ACCENT_PURPLE, "#21153b"),
+            "working": ("⚙ ВЫПОЛНЯЕТ ДЕЙСТВИЕ", self.ACCENT_GREEN, "#112d1b"),
+            "listening": ("🎙 СЛУШАЕТ...", self.ACCENT_CYAN, "#112b3c"),
+            "speaking": ("🔊 ОТВЕЧАЕТ (ОТВЕТ)...", self.ACCENT_GREEN, "#112d1b"),
+            "error": ("✖ ОШИБКА", self.ACCENT_RED, "#361414"),
         }
+        self.current_state = state_name
         if state_name in states_map:
             txt, fg_col, bg_col = states_map[state_name]
             self.status_badge.config(text=txt, fg=fg_col, bg=bg_col)
             if hasattr(self, "neural_core") and self.neural_core:
                 self.neural_core.set_state(state_name)
+
+    def refresh_current_view(self):
+        """Реактивно обновляет данные текущего активного экрана без перезагрузки GUI."""
+        sec = self.current_section
+        if sec == "home":
+            self._switch_section("home")
+        elif sec == "tasks":
+            if hasattr(self, "tasks_list_frame") and self.tasks_list_frame.winfo_exists():
+                self._refresh_tasks_list()
+        elif sec == "reminders":
+            if hasattr(self, "rems_list_frame") and self.rems_list_frame.winfo_exists():
+                self._refresh_reminders_list()
+        elif sec == "notes":
+            if hasattr(self, "notes_list_frame") and self.notes_list_frame.winfo_exists():
+                self._refresh_notes_list()
+        elif sec == "lists":
+            if hasattr(self, "list_names_box") and self.list_names_box.winfo_exists():
+                self._refresh_lists_menu()
+        elif sec == "memory":
+            if hasattr(self, "mem_list_frame") and self.mem_list_frame.winfo_exists():
+                self._refresh_memory_list()
 
     # =========================================================================
     # Опрос очереди событий (Queue Polling)
@@ -1460,6 +1507,7 @@ class AkakiyGUI:
                         ans = data.get("result", {}).get("message") or str(data.get("result"))
                     self._append_chat("Акакий", ans or "Действие выполнено.")
                     self._append_log("DONE", "Запрос успешно обработан.")
+                    self.refresh_current_view()
 
                 elif msg_type == "process_error":
                     self.is_busy = False
@@ -1477,6 +1525,7 @@ class AkakiyGUI:
                     elif ev_type == "after_tool":
                         t_name = payload.get("tool")
                         self._append_log("DONE", f"Инструмент {t_name} выполнен.")
+                        self.refresh_current_view()
 
                 elif msg_type == "voice_event":
                     ev_type, payload = data
@@ -1504,6 +1553,7 @@ class AkakiyGUI:
                         if ans:
                             self._append_chat("Акакий (Голос)", ans)
                             self._append_log("DONE", "Голосовой ответ сформирован.")
+                            self.refresh_current_view()
                     elif ev_type == "voice_mode_toggle":
                         enabled = payload.get("enabled", False) if isinstance(payload, dict) else bool(payload)
                         if not enabled and self.voice_enabled:
