@@ -74,11 +74,10 @@
   * [ui/views/chat.py](file:///c:/Akakiy%20agent/ui/views/chat.py): Модульный экран диалога (`ChatView`, двухколоночный чат с Акакием и логом рассуждений агента).
   * [ui/views/tasks.py](file:///c:/Akakiy%20agent/ui/views/tasks.py): Модульный экран задач (`TasksView`, фильтрация поиска, пагинация, создание, выполнение, удаление).
   * [ui/views/reminders.py](file:///c:/Akakiy%20agent/ui/views/reminders.py): Модульный экран напоминаний (`RemindersView`, создание разовых и повторяющихся правил, бейджи регулярности, отметка выполнения, удаление).
-  * [ui/views/notes.py](file:///c:/Akakiy%20agent/ui/views/notes.py): Модульный экран заметок (`NotesView`, фильтрация поиска, пагинация, создание, просмотр, удаление).
-  * [ui/views/lists.py](file:///c:/Akakiy%20agent/ui/views/lists.py): Модульный экран списков (`ListsView`, просмотр, создание, чекбоксы пунктов, удаление).
-  * [ui/views/memory.py](file:///c:/Akakiy%20agent/ui/views/memory.py): Модульный экран памяти (`MemoryView`, ручное добавление, поиск по воспоминаниям, удаление фактов).
+  * [ui/views/lists.py](file:///c:/Akakiy%20agent/ui/views/lists.py): Модульный экран списков (`ListsView`, фильтрация поиска по названию и #ID, пагинация списков, создание, чекбоксы пунктов, удаление).
+  * [ui/views/memory.py](file:///c:/Akakiy%20agent/ui/views/memory.py): Модульный экран памяти (`MemoryView`, фильтрация поиска по тексту и #ID, пагинация, ручное добавление, удаление фактов).
   * [ui/views/settings.py](file:///c:/Akakiy%20agent/ui/views/settings.py): Модульный экран настроек, валидации и резервного копирования (`SettingsView`, тумблеры звука уведомлений и TTS, запуск валидации, экспорт и импорт пользовательских данных).
-* [ui/pagination.py](file:///c:/Akakiy%20agent/ui/pagination.py): Переиспользуемый UI-механизм фильтрации и пагинации (`PaginationModel`, `PaginationBar`, `PagedListController`).
+* [ui/pagination.py](file:///c:/Akakiy%20agent/ui/pagination.py): Переиспользуемый UI-механизм фильтрации и пагинации (`PaginationModel`, `PaginationBar`, `PagedListController`), подключенный к экранам `TasksView`, `NotesView`, `MemoryView` и `ListsView`.
 * [commands.py](file:///c:/Akakiy%20agent/commands.py): Вспомогательные быстрые команды и диспетчер CLI REPL (`show_status`, `show_files`, `read_file`, `handle_cli_command`, алиасы `:status`, `:files`, `:read`, `:export`, `:import`, `:brief`, `:today`, `:help`, `:exit`).
 
 ### 3.2. Голосовой слой (Voice UX)

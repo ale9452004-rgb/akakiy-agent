@@ -4,21 +4,26 @@
 
 import tkinter as tk
 from tkinter import messagebox
-from typing import Any
+from typing import Any, Dict, Optional
 
+from ui.pagination import PagedListController, PaginationBar
 from ui.views.base import BaseView, _bind_hover
 
 
 class MemoryView(BaseView):
     """
     Экран управления долговременной памятью (Memory).
-    Обеспечивает сохранение фактов, просмотр всех записей и удаление фактов (забывание).
+    Обеспечивает сохранение фактов, текстовый поиск/фильтрацию, пагинацию,
+    просмотр всех записей и удаление фактов (забывание).
     """
 
     def __init__(self, master: tk.Widget, shell: Any = None, **kwargs):
         super().__init__(master, shell=shell, **kwargs)
-        self.entry_mem: tk.Entry = None
-        self.mem_list_frame: tk.Frame = None
+        self.entry_mem: Optional[tk.Entry] = None
+        self.entry_mem_search: Optional[tk.Entry] = None
+        self.mem_list_frame: Optional[tk.Frame] = None
+        self.pagination_bar: Optional[PaginationBar] = None
+        self.paged_controller: Optional[PagedListController] = None
         self.render()
 
     def render(self) -> None:
@@ -36,6 +41,30 @@ class MemoryView(BaseView):
             fg=self.FG_WHITE,
             bg=self.BG_MAIN
         ).pack(side="left")
+
+        # Поиск записей памяти
+        search_box = tk.Frame(header_row, bg=self.BG_MAIN)
+        search_box.pack(side="right")
+
+        tk.Label(
+            search_box,
+            text="Поиск:",
+            font=("Segoe UI", 9),
+            fg=self.FG_MUTED,
+            bg=self.BG_MAIN
+        ).pack(side="left", padx=4)
+
+        self.entry_mem_search = tk.Entry(
+            search_box,
+            font=("Segoe UI", 10),
+            bg=self.BG_CARD,
+            fg=self.FG_WHITE,
+            width=20,
+            bd=1,
+            relief="solid"
+        )
+        self.entry_mem_search.pack(side="left", padx=4)
+        self.entry_mem_search.bind("<KeyRelease>", lambda e: self._on_search_changed())
 
         # Форма добавления факта
         add_box = tk.Frame(self, bg=self.BG_CARD, bd=1, relief="solid")
@@ -79,7 +108,82 @@ class MemoryView(BaseView):
         self.mem_list_frame = tk.Frame(self, bg=self.BG_CARD, bd=1, relief="solid")
         self.mem_list_frame.pack(fill="both", expand=True)
 
+        # Панель пагинации
+        self.pagination_bar = PaginationBar(self, bg=self.BG_MAIN)
+        self.pagination_bar.pack(fill="x", pady=(8, 0))
+
+        # Контроллер пагинации и поиска
+        self.paged_controller = PagedListController[Dict[str, Any]](
+            content_frame=self.mem_list_frame,
+            pagination_bar=self.pagination_bar,
+            render_item=self._render_mem_item,
+            filter_fn=self._filter_memory,
+            page_size=8,
+            empty_text="Долговременная память пуста.",
+            no_results_text="Записей памяти по запросу не найдено.",
+            empty_bg=self.BG_CARD,
+            empty_fg=self.FG_MUTED,
+        )
+
         self.refresh()
+
+    def _filter_memory(self, mem: Dict[str, Any], query: str) -> bool:
+        """Предикат фильтрации записи памяти по тексту или номеру #id."""
+        q = query.strip().lower()
+        if not q:
+            return True
+        clean_q = q.lstrip("#")
+        text = str(mem.get("text", "")).lower()
+        mem_id = str(mem.get("id", ""))
+        return q in text or clean_q == mem_id or f"#{mem_id}" == q
+
+    def _on_search_changed(self) -> None:
+        """Обработка ввода в строку поиска."""
+        if not self.paged_controller:
+            return
+        query = self.entry_mem_search.get().strip() if self.entry_mem_search else ""
+        self.paged_controller.set_filter(query)
+
+    def _render_mem_item(self, parent: tk.Widget, m: Dict[str, Any]) -> None:
+        """Отрисовка одной строки долговременной памяти."""
+        row = tk.Frame(parent, bg="#13171f", bd=1, relief="solid")
+        row.pack(fill="x", padx=16, pady=4)
+
+        tk.Label(
+            row,
+            text="🧠",
+            font=("Segoe UI", 10),
+            fg=self.ACCENT_CYAN,
+            bg="#13171f"
+        ).pack(side="left", padx=10, pady=8)
+
+        tk.Label(
+            row,
+            text=f"#{m['id']} {m['text']}",
+            font=("Segoe UI", 9),
+            fg=self.FG_WHITE,
+            bg="#13171f"
+        ).pack(side="left", padx=4)
+
+        btn_del = tk.Button(
+            row,
+            text="✕",
+            font=("Segoe UI", 8),
+            fg=self.ACCENT_RED,
+            bg="#13171f",
+            bd=0,
+            cursor="hand2",
+            command=lambda mid=m["id"]: self.ui_forget(mid)
+        )
+        btn_del.pack(side="right", padx=8)
+
+        tk.Label(
+            row,
+            text=m.get("created_at", ""),
+            font=("Consolas", 8),
+            fg=self.FG_DIM,
+            bg="#13171f"
+        ).pack(side="right", padx=8)
 
     def ui_remember(self) -> None:
         """Сохранение нового факта из поля ввода."""
@@ -98,10 +202,9 @@ class MemoryView(BaseView):
         if not self.mem_list_frame or not self.mem_list_frame.winfo_exists():
             return
 
-        for w in self.mem_list_frame.winfo_children():
-            w.destroy()
-
         if not self.memory:
+            for w in self.mem_list_frame.winfo_children():
+                w.destroy()
             tk.Label(
                 self.mem_list_frame,
                 text="Сервис памяти недоступен.",
@@ -109,58 +212,15 @@ class MemoryView(BaseView):
                 fg=self.FG_MUTED,
                 bg=self.BG_CARD
             ).pack(pady=40)
+            if self.pagination_bar and self.paged_controller:
+                self.pagination_bar.update_state(self.paged_controller.model)
             return
 
         memories = self.memory.get_all()
-        if not memories:
-            tk.Label(
-                self.mem_list_frame,
-                text="Долговременная память пуста.",
-                font=("Segoe UI", 11),
-                fg=self.FG_MUTED,
-                bg=self.BG_CARD
-            ).pack(pady=40)
-            return
-
-        for m in reversed(memories):
-            row = tk.Frame(self.mem_list_frame, bg="#13171f", bd=1, relief="solid")
-            row.pack(fill="x", padx=16, pady=4)
-
-            tk.Label(
-                row,
-                text="🧠",
-                font=("Segoe UI", 10),
-                fg=self.ACCENT_CYAN,
-                bg="#13171f"
-            ).pack(side="left", padx=10, pady=8)
-
-            tk.Label(
-                row,
-                text=f"#{m['id']} {m['text']}",
-                font=("Segoe UI", 9),
-                fg=self.FG_WHITE,
-                bg="#13171f"
-            ).pack(side="left", padx=4)
-
-            btn_del = tk.Button(
-                row,
-                text="✕",
-                font=("Segoe UI", 8),
-                fg=self.ACCENT_RED,
-                bg="#13171f",
-                bd=0,
-                cursor="hand2",
-                command=lambda mid=m["id"]: self.ui_forget(mid)
-            )
-            btn_del.pack(side="right", padx=8)
-
-            tk.Label(
-                row,
-                text=m.get("created_at", ""),
-                font=("Consolas", 8),
-                fg=self.FG_DIM,
-                bg="#13171f"
-            ).pack(side="right", padx=8)
+        query = self.entry_mem_search.get().strip() if self.entry_mem_search else ""
+        if self.paged_controller:
+            self.paged_controller.model.set_filter(query)
+            self.paged_controller.set_items(list(reversed(memories)))
 
     def ui_forget(self, mem_id: int) -> None:
         """Удаление факта из памяти с запросом подтверждения."""
