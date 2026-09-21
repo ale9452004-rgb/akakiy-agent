@@ -6,9 +6,9 @@
 
 ## 1. Текущий статус проекта
 
-* **Текущая версия**: Акакий 2.0 (Desktop Hub + Voice UX + Household Assistant + Memory + Core Dev Tools + Notifications + Fast CLI REPL + Global Push-to-Talk + Backup & Restore + UI Filter & Pagination + Recurring Reminders & Tasks + Daily Briefing).
-* **Состояние кодовой базы**: Стабильное, все тесты пройдены (`87` файлов валидированы, 274 теста в `tests/` успешны, 0 синтаксических ошибок).
-* **Последний этап**: Дневной брифинг «Что у меня сегодня?» (Daily Briefing).
+* **Текущая версия**: Акакий 2.0 (Desktop Hub + Voice UX + Household Assistant + Memory + Core Dev Tools + Notifications + Fast CLI REPL + Global Push-to-Talk + Backup & Restore + UI Filter & Pagination + Recurring Reminders & Tasks + Daily Briefing + Audio Notifications & Settings).
+* **Состояние кодовой базы**: Стабильное, все тесты пройдены (`90` файлов валидированы, 289 тестов в `tests/` успешны, 0 синтаксических ошибок).
+* **Последний этап**: Звуковые уведомления и настройки Акакия (Audio Notifications & Settings).
 * **Ветка**: `master`, синхронизирована с `origin/master`.
 
 ---
@@ -163,6 +163,14 @@
   * Кнопка «⚡ Сводка дня» в блоке «Сегодня» дашборда `HomeView` с диалоговым окном `messagebox.showinfo` и безопасным воспроизведением через `VoiceService.speak_phrase()` (если активен голос).
   * Быстрые команды `:brief`, `:today`, `:сводка` в CLI REPL (`commands.py`).
   * Создан полный тестовый набор `tests/test_daily_briefing.py` (14 тестов, 100% pass, всего 274 теста в `tests/`).
+* [x] **Звуковые уведомления и настройки Акакия (Audio Notifications & Settings)**:
+  * Создан модуль персистентных настроек `tools/settings.py` (`AppSettings`, `get_app_settings`) с атомарным сохранением в `data/settings.json` (`notification_sound: True`, `speak_reminders: True`).
+  * Создан модуль звуковых эффектов `notifications/sound.py` (`play_notification_sound`, `play_system_sound`) на базе стандартного Win32-механизма `winsound` с асинхронным воспроизведением (`SND_ASYNC`) и защитой от аппаратных сбоев.
+  * Интеграция звука в `NotificationService.notify()`: при отображении каждого нового всплывающего окна воспроизводится системный звук (если включен в настройках).
+  * Интеграция голосового оповещения в `AkakiyGUI._handle_reminder_due()`: при наступлении напоминания текст озвучивается через существующий экземпляр `self.voice.tts.speak()` (если `speak_reminders=True`) без создания дублирующего голосового пайплайна.
+  * В `SettingsView` добавлена интерактивная секция «УВЕДОМЛЕНИЯ И ЗВУК» с тумблерами «Звук уведомлений» и «Озвучивать напоминания (TTS)», мгновенным сохранением состояния и кнопкой проверки звукового сигнала.
+  * В `BaseView` добавлено свойство `settings` для унифицированного доступа к настройкам из любого экрана.
+  * Создан специализированный набор тестов `tests/test_audio_notifications.py` (15 тестов, 100% pass, всего 289 тестов в `tests/`).
 * [ ] **Интеграционные E2E тесты с виртуальным микрофоном**:
   * Реализовать тестовый сценарий, прогоняющий синтезированные аудиофайлы (WAV) через живой конвейер `VoiceService` с проверкой реакции GUI.
 * [ ] **Очистка устаревших бэкап-файлов `*.bak` в корне**:

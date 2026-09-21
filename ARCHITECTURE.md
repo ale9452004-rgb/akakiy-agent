@@ -77,7 +77,7 @@
   * [ui/views/notes.py](file:///c:/Akakiy%20agent/ui/views/notes.py): Модульный экран заметок (`NotesView`, фильтрация поиска, пагинация, создание, просмотр, удаление).
   * [ui/views/lists.py](file:///c:/Akakiy%20agent/ui/views/lists.py): Модульный экран списков (`ListsView`, просмотр, создание, чекбоксы пунктов, удаление).
   * [ui/views/memory.py](file:///c:/Akakiy%20agent/ui/views/memory.py): Модульный экран памяти (`MemoryView`, ручное добавление, поиск по воспоминаниям, удаление фактов).
-  * [ui/views/settings.py](file:///c:/Akakiy%20agent/ui/views/settings.py): Модульный экран настроек, валидации и резервного копирования (`SettingsView`, запуск валидации, экспорт и импорт пользовательских данных).
+  * [ui/views/settings.py](file:///c:/Akakiy%20agent/ui/views/settings.py): Модульный экран настроек, валидации и резервного копирования (`SettingsView`, тумблеры звука уведомлений и TTS, запуск валидации, экспорт и импорт пользовательских данных).
 * [ui/pagination.py](file:///c:/Akakiy%20agent/ui/pagination.py): Переиспользуемый UI-механизм фильтрации и пагинации (`PaginationModel`, `PaginationBar`, `PagedListController`).
 * [commands.py](file:///c:/Akakiy%20agent/commands.py): Вспомогательные быстрые команды и диспетчер CLI REPL (`show_status`, `show_files`, `read_file`, `handle_cli_command`, алиасы `:status`, `:files`, `:read`, `:export`, `:import`, `:brief`, `:today`, `:help`, `:exit`).
 
@@ -138,6 +138,10 @@
 * [tools/daily_briefing.py](file:///c:/Akakiy%20agent/tools/daily_briefing.py): Модуль дневного брифинга («Что у меня сегодня?»).
   * Строго read-only агрегатор данных: активные задачи (с выделением просроченных), напоминания на сегодня, регулярные напоминания (daily, weekdays, weekly, interval hours) и активные списки с количеством незавершённых пунктов.
   * Детерминированная сборка сводки без обращения к LLM с правильными грамматическими склонениями числительных (`pluralize_ru`).
+* [tools/settings.py](file:///c:/Akakiy%20agent/tools/settings.py): Менеджер настроек приложения (`AppSettings`).
+  * Хранилище: `data/settings.json`.
+  * Потокобезопасная атомарная запись через `.tmp` и `os.replace`.
+  * Хранит флаги звуковых уведомлений (`notification_sound`), озвучивания напоминаний (`speak_reminders`) и произвольные параметры приложения.
 
 ### 3.5. Инструментальный слой (Tools Layer)
 * [tools/registry.py](file:///c:/Akakiy%20agent/tools/registry.py): Центральный реестр `TOOLS` (24 зарегистрированных инструмента) с описаниями, схемами параметров и флагами подтверждения `requires_confirmation`.
@@ -155,9 +159,13 @@
   * Не содержит зависимостей от Tkinter.
   * Обеспечивает строгую дедупликацию (одно напоминание срабатывает ровно один раз).
   * Безопасный жизненный цикл `start()` / `stop()`.
+* [notifications/sound.py](file:///c:/Akakiy%20agent/notifications/sound.py): Модуль системных звуковых оповещений (`play_notification_sound`, `play_system_sound`).
+  * Воспроизведение через стандартный модуль `winsound` Windows (`SND_ALIAS | SND_ASYNC`, fallback на `MessageBeep`).
+  * Неблокирующий асинхронный запуск, полная изоляция аппаратных ошибок аудиоустройств.
 * [notifications/service.py](file:///c:/Akakiy%20agent/notifications/service.py): Централизованный сервис уведомлений (`NotificationService`).
   * Управляет жизненным циклом и вертикальным стеком всплывающих окон в правом нижнем углу экрана.
   * Потокобезопасен (при вызове из фонового потока перенаправляет в UI-поток через `master.after()`).
+  * Воспроизводит системный звук при отображении каждого нового всплывающего окна (при активной настройке `notification_sound`).
   * Автоматически выполняет перекомпоновку (репозиционирование) оставшихся окон при закрытии любого уведомления.
   * Предоставляет чистый фасад: `notify()`, `show_reminder()`, `show_info()`, `close()`, `close_all()`.
 * [notifications/window.py](file:///c:/Akakiy%20agent/notifications/window.py): Модульное окно уведомления (`NotificationWindow`).

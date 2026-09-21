@@ -95,6 +95,14 @@ class BaseView(tk.Frame):
         """Доступ к VoiceService через Shell."""
         return getattr(self.shell, "voice", None) if self.shell else None
 
+    @property
+    def settings(self) -> Any:
+        """Доступ к AppSettings через Shell или синглтон."""
+        if self.shell and hasattr(self.shell, "settings") and self.shell.settings is not None:
+            return self.shell.settings
+        from tools.settings import get_app_settings
+        return get_app_settings()
+
     def switch_section(self, code: str) -> None:
         """Переключает раздел через Shell."""
         if self.shell and hasattr(self.shell, "switch_section"):

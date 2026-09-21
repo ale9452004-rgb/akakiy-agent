@@ -13,6 +13,7 @@
 5. Интеграция с Native Tool Calling, Confirmation Dialog и VoiceService.
 """
 
+import logging
 from datetime import datetime
 import math
 from pathlib import Path
@@ -28,6 +29,8 @@ PROJECT_ROOT = Path(r"c:\Akakiy agent")
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+logger = logging.getLogger(__name__)
+
 from tools.agent import Agent
 from tools.dispatcher import (
     get_confirmation_details_text,
@@ -36,6 +39,7 @@ from tools.dispatcher import (
 )
 from tools.household import get_household_manager
 from tools.memory import get_memory_manager
+from tools.settings import get_app_settings
 from tools.validation import validate_project
 from ui.neural_core import NeuralCore
 from ui.cloud import AkakiyCloud
@@ -154,8 +158,11 @@ class AkakiyGUI:
         set_confirmation_handler(self._on_confirmation_requested)
         set_action_observer(self._on_action_observed)
 
+        # Настройки приложения (персистентность в data/settings.json)
+        self.settings = get_app_settings()
+
         # Модульная система уведомлений и мониторинга напоминаний
-        self.notification_service = NotificationService(master=self.root)
+        self.notification_service = NotificationService(master=self.root, settings=self.settings)
         if self.household is not None:
             self.reminder_monitor = ReminderMonitor(
                 household=self.household,
@@ -929,6 +936,15 @@ class AkakiyGUI:
                 on_snooze=on_snooze,
                 reminder_id=f"rem_{rem_id}"
             )
+
+        # Озвучивание напоминания через существующий VoiceService/TTS (если включено в настройках)
+        speak_enabled = getattr(self.settings, "speak_reminders", True) if self.settings else True
+        if speak_enabled and self.voice and hasattr(self.voice, "tts") and self.voice.tts:
+            try:
+                speech_phrase = f"Напоминание: {rem_text}"
+                self.voice.tts.speak(speech_phrase)
+            except Exception as e:
+                logger.warning(f"Ошибка озвучивания напоминания #{rem_id}: {e}")
 
     def _on_hotkey_press(self):
         """Коллбэк нажатия глобального хоткея (вызывается из фонового потока)."""

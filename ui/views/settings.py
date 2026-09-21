@@ -22,6 +22,8 @@ class SettingsView(BaseView):
         super().__init__(master, shell=shell, **kwargs)
         self.lbl_val_res: tk.Label = None
         self.lbl_backup_res: tk.Label = None
+        self.btn_toggle_sound: tk.Button = None
+        self.btn_toggle_tts: tk.Button = None
         self.render()
 
     def render(self) -> None:
@@ -159,11 +161,182 @@ class SettingsView(BaseView):
             fg=self.FG_MUTED,
             bg=self.BG_CARD
         )
-        self.lbl_backup_res.pack(anchor="w", padx=20, pady=(0, 20))
+        self.lbl_backup_res.pack(anchor="w", padx=20, pady=(0, 16))
+
+        # 4. Секция уведомлений и звука
+        tk.Label(
+            panel,
+            text="УВЕДОМЛЕНИЯ И ЗВУК",
+            font=("Segoe UI", 11, "bold"),
+            fg=self.ACCENT_AMBER,
+            bg=self.BG_CARD
+        ).pack(anchor="w", padx=20, pady=(10, 8))
+
+        # Ряд 1: Звук уведомлений
+        row_sound = tk.Frame(panel, bg=self.BG_CARD)
+        row_sound.pack(fill="x", padx=20, pady=(0, 10))
+
+        sound_info = tk.Frame(row_sound, bg=self.BG_CARD)
+        sound_info.pack(side="left", fill="x", expand=True)
+
+        tk.Label(
+            sound_info,
+            text="Звук уведомлений",
+            font=("Segoe UI", 10, "bold"),
+            fg=self.FG_WHITE,
+            bg=self.BG_CARD
+        ).pack(anchor="w")
+
+        tk.Label(
+            sound_info,
+            text="Воспроизведение системного звука Windows при появлении уведомлений",
+            font=("Segoe UI", 9),
+            fg=self.FG_MUTED,
+            bg=self.BG_CARD
+        ).pack(anchor="w")
+
+        self.btn_toggle_sound = tk.Button(
+            row_sound,
+            text="",
+            font=("Segoe UI", 9, "bold"),
+            bd=1,
+            relief="solid",
+            padx=16,
+            pady=4,
+            cursor="hand2",
+            command=self.toggle_notification_sound
+        )
+        self.btn_toggle_sound.pack(side="right", padx=(10, 0))
+
+        # Ряд 2: Озвучивание напоминаний
+        row_tts = tk.Frame(panel, bg=self.BG_CARD)
+        row_tts.pack(fill="x", padx=20, pady=(0, 10))
+
+        tts_info = tk.Frame(row_tts, bg=self.BG_CARD)
+        tts_info.pack(side="left", fill="x", expand=True)
+
+        tk.Label(
+            tts_info,
+            text="Озвучивать напоминания (TTS)",
+            font=("Segoe UI", 10, "bold"),
+            fg=self.FG_WHITE,
+            bg=self.BG_CARD
+        ).pack(anchor="w")
+
+        tk.Label(
+            tts_info,
+            text="Произносить текст наступившего напоминания голосом через синтезатор речи",
+            font=("Segoe UI", 9),
+            fg=self.FG_MUTED,
+            bg=self.BG_CARD
+        ).pack(anchor="w")
+
+        self.btn_toggle_tts = tk.Button(
+            row_tts,
+            text="",
+            font=("Segoe UI", 9, "bold"),
+            bd=1,
+            relief="solid",
+            padx=16,
+            pady=4,
+            cursor="hand2",
+            command=self.toggle_speak_reminders
+        )
+        self.btn_toggle_tts.pack(side="right", padx=(10, 0))
+
+        # Ряд 3: Кнопка проверки звука
+        btn_test = tk.Button(
+            panel,
+            text="🔊 Проверить звук уведомления",
+            font=("Segoe UI", 9, "bold"),
+            bg="#21262d",
+            fg=self.FG_WHITE,
+            bd=1,
+            relief="solid",
+            padx=14,
+            pady=5,
+            cursor="hand2",
+            command=self.test_notification_sound
+        )
+        btn_test.pack(anchor="w", padx=20, pady=(0, 20))
+        _bind_hover(btn_test, "#21262d", "#30363d", self.FG_WHITE, self.FG_WHITE)
+
+        self._update_sound_buttons()
+
+    def _update_sound_buttons(self) -> None:
+        """Обновляет визуальное состояние кнопок-тумблеров звука и TTS."""
+        if not self.btn_toggle_sound or not self.btn_toggle_sound.winfo_exists():
+            return
+
+        sound_on = getattr(self.settings, "notification_sound", True)
+        if sound_on:
+            self.btn_toggle_sound.config(
+                text="[ ВКЛ ]",
+                bg="#112d1b",
+                fg=self.ACCENT_GREEN,
+                activebackground="#1b4d2e",
+                activeforeground=self.ACCENT_GREEN
+            )
+        else:
+            self.btn_toggle_sound.config(
+                text="[ ВЫКЛ ]",
+                bg="#21262d",
+                fg=self.FG_MUTED,
+                activebackground="#30363d",
+                activeforeground=self.FG_MUTED
+            )
+
+        if not self.btn_toggle_tts or not self.btn_toggle_tts.winfo_exists():
+            return
+
+        tts_on = getattr(self.settings, "speak_reminders", True)
+        if tts_on:
+            self.btn_toggle_tts.config(
+                text="[ ВКЛ ]",
+                bg="#112d1b",
+                fg=self.ACCENT_GREEN,
+                activebackground="#1b4d2e",
+                activeforeground=self.ACCENT_GREEN
+            )
+        else:
+            self.btn_toggle_tts.config(
+                text="[ ВЫКЛ ]",
+                bg="#21262d",
+                fg=self.FG_MUTED,
+                activebackground="#30363d",
+                activeforeground=self.FG_MUTED
+            )
+
+    def toggle_notification_sound(self) -> None:
+        """Переключает настройку системного звука уведомлений."""
+        cur = getattr(self.settings, "notification_sound", True)
+        self.settings.notification_sound = not cur
+        self.settings.save()
+        self._update_sound_buttons()
+        if self.shell and hasattr(self.shell, "_append_log"):
+            status_str = "включён" if self.settings.notification_sound else "выключен"
+            self.shell._append_log("SETTINGS", f"Звук уведомлений {status_str}.")
+
+    def toggle_speak_reminders(self) -> None:
+        """Переключает настройку озвучивания напоминаний через TTS."""
+        cur = getattr(self.settings, "speak_reminders", True)
+        self.settings.speak_reminders = not cur
+        self.settings.save()
+        self._update_sound_buttons()
+        if self.shell and hasattr(self.shell, "_append_log"):
+            status_str = "включено" if self.settings.speak_reminders else "выключено"
+            self.shell._append_log("SETTINGS", f"Озвучивание напоминаний {status_str}.")
+
+    def test_notification_sound(self) -> None:
+        """Тестовое воспроизведение системного звука Windows."""
+        from notifications.sound import play_system_sound
+        play_system_sound()
+        if self.shell and hasattr(self.shell, "_append_log"):
+            self.shell._append_log("AUDIO", "Тестовый звуковой сигнал воспроизведён.")
 
     def refresh(self) -> None:
         """Реактивное обновление экрана настроек (контракт BaseView)."""
-        pass
+        self._update_sound_buttons()
 
     def ui_export_data(self) -> Optional[dict]:
         """Экспорт пользовательских данных в выбранный пользователем JSON-файл."""

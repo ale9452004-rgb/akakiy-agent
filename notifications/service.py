@@ -10,7 +10,9 @@ from typing import Callable, Dict, List, Optional
 import uuid
 
 from notifications.models import NotificationAction, NotificationItem
+from notifications.sound import play_notification_sound
 from notifications.window import NotificationWindow
+from tools.settings import AppSettings, get_app_settings
 
 
 class NotificationService:
@@ -27,8 +29,9 @@ class NotificationService:
     STACK_GAP = 12
     MAX_VISIBLE = 4
 
-    def __init__(self, master: tk.Widget):
+    def __init__(self, master: tk.Widget, settings: Optional[AppSettings] = None):
         self.master = master
+        self.settings = settings if settings is not None else get_app_settings()
         self._active_windows: Dict[str, NotificationWindow] = {}
         self._order: List[str] = []
         self._lock = threading.RLock()
@@ -66,6 +69,10 @@ class NotificationService:
             self._active_windows[item.id] = win
 
             self._restack()
+
+            # Воспроизведение звука уведомления (если включено в настройках)
+            play_notification_sound(self.settings)
+
             return item.id
 
     def show_reminder(
