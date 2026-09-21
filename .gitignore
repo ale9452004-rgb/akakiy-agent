@@ -4,3 +4,5 @@ __pycache__/
 *.bak
 models/
 data/
+backups/
+*.backup.json

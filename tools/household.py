@@ -52,9 +52,18 @@ class HouseholdManager:
         except Exception as e:
             logger.warning(f"Не удалось создать директорию {self.storage_path.parent}: {e}")
 
+    def reload(self):
+        """Перечитывает данные с диска в память."""
+        self._load()
+
     def _load(self):
         with self._lock:
             if not self.storage_path.exists():
+                self.tasks = []
+                self.reminders = []
+                self.notes = []
+                self.lists = {}
+                self.counters = {"task": 0, "reminder": 0, "note": 0}
                 return
             try:
                 with open(self.storage_path, "r", encoding="utf-8") as f:

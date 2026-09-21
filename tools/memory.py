@@ -106,6 +106,10 @@ class MemoryManager:
         except Exception as e:
             logger.warning(f"Не удалось создать директорию памяти {self.storage_path.parent}: {e}")
 
+    def reload(self):
+        """Перечитывает долговременную память с диска."""
+        self.memories = self._load_memories()
+
     def _load_memories(self) -> List[Dict[str, Any]]:
         """Загружает долговременную память с диска."""
         if not self.storage_path.exists():

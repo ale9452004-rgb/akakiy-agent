@@ -77,8 +77,8 @@
   * [ui/views/notes.py](file:///c:/Akakiy%20agent/ui/views/notes.py): Модульный экран заметок с поиском (`NotesView`).
   * [ui/views/lists.py](file:///c:/Akakiy%20agent/ui/views/lists.py): Двухпанельный модульный экран списков (`ListsView`).
   * [ui/views/memory.py](file:///c:/Akakiy%20agent/ui/views/memory.py): Модульный экран долговременной памяти (`MemoryView`).
-  * [ui/views/settings.py](file:///c:/Akakiy%20agent/ui/views/settings.py): Модульный экран настроек и валидации (`SettingsView`).
-* [commands.py](file:///c:/Akakiy%20agent/commands.py): Вспомогательные быстрые команды и диспетчер CLI REPL (`show_status`, `show_files`, `read_file`, `handle_cli_command`, алиасы `:status`, `:files`, `:read`, `:help`, `:exit`).
+  * [ui/views/settings.py](file:///c:/Akakiy%20agent/ui/views/settings.py): Модульный экран настроек, валидации и резервного копирования (`SettingsView`, запуск валидации, экспорт и импорт пользовательских данных).
+* [commands.py](file:///c:/Akakiy%20agent/commands.py): Вспомогательные быстрые команды и диспетчер CLI REPL (`show_status`, `show_files`, `read_file`, `handle_cli_command`, алиасы `:status`, `:files`, `:read`, `:export`, `:import`, `:help`, `:exit`).
 
 ### 3.2. Голосовой слой (Voice UX)
 * [voice/service.py](file:///c:/Akakiy%20agent/voice/service.py): Координатор голосового сеанса (`VoiceService`). Запускает конвейер `listening -> thinking -> speaking -> listening`. Обеспечивает непрерывный Voice UX, реакцию на команды выхода («стоп», «отключись») и передачу событий в GUI.
@@ -127,6 +127,11 @@
   * Поддержка пакетного и относительного удаления (`_resolve_delete_targets`).
 * [tools/datetime_utils.py](file:///c:/Akakiy%20agent/tools/datetime_utils.py): Утилиты разбора и нормализации дат и времени.
   * Чистая функция `parse_reminder_time` (разбор ISO-дат, относительных смещений «через N минут/часов/дней», конструкций «завтра в HH:MM» и времени суток «HH:MM»).
+* [tools/backup.py](file:///c:/Akakiy%20agent/tools/backup.py): Модуль резервного копирования и восстановления данных (Backup & Restore).
+  * `export_data`: Экспорт бытовых сущностей (`household.json`) и памяти (`memory.json`) в единый версионированный JSON-файл (`akakiy_backup_version = 1`) с метаданными и статистикой.
+  * `import_data`: Транзакционный импорт с предварительными байтовыми снимками файлов в памяти, атомарной перезаписью, автоматическим откатом при сбоях и вызовом `reload()` у менеджеров.
+  * `validate_backup`: Проверка схемы, совместимости версий и типов данных до модификации локальных файлов.
+  * Защита от утечки и перезаписи: блокировка сохранения бэкапов внутри рабочего каталога `data/`.
 
 
 ### 3.5. Инструментальный слой (Tools Layer)

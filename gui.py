@@ -129,6 +129,7 @@ class AkakiyGUI:
         self._entry_item_text = None
         self.entry_mem = None
         self.lbl_val_res = None
+        self.lbl_backup_res = None
         self.tasks_list_frame = None
         self.rems_list_frame = None
         self.notes_list_frame = None
@@ -833,12 +834,21 @@ class AkakiyGUI:
         self.settings_view = SettingsView(self.workspace, shell=self)
         self.settings_view.pack(fill="both", expand=True)
         self.lbl_val_res = self.settings_view.lbl_val_res
+        self.lbl_backup_res = getattr(self.settings_view, "lbl_backup_res", None)
 
     def _ui_run_validation(self):
         if hasattr(self, "settings_view") and self.settings_view:
             res = self.settings_view.ui_run_validation(val_func=validate_project)
             self.lbl_val_res = self.settings_view.lbl_val_res
             return res
+
+    def _ui_export_data(self):
+        if hasattr(self, "settings_view") and self.settings_view:
+            return self.settings_view.ui_export_data()
+
+    def _ui_import_data(self):
+        if hasattr(self, "settings_view") and self.settings_view:
+            return self.settings_view.ui_import_data()
 
     # =========================================================================
     # Выполнение команд (Command Bar & Worker)

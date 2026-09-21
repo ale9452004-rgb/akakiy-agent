@@ -4,6 +4,7 @@ import requests
 
 
 from config import PROJECT_PATH
+from tools.backup import export_data, import_data
 
 
 def show_status():
@@ -43,6 +44,8 @@ def show_help():
     print("  :status, :s, статус      - показать статус системы")
     print("  :files, :ls, files       - список файлов проекта")
     print("  :read <файл>, :cat <файл> - просмотреть содержимое файла")
+    print("  :export [файл]           - экспортировать данные в JSON")
+    print("  :import <файл>           - импортировать данные из backup-файла")
     print("  :help, :h, помощь        - показать эту справку")
     print("  :exit, :quit, выход      - завершить работу")
     print("\nРабота с планами:")
@@ -176,5 +179,50 @@ def handle_cli_command(user_input: str) -> bool:
         if filename:
             _display_file(filename)
             return True
+
+    # 5. Экспорт данных
+    if first_token in (":export", ":экспорт", "export"):
+        target_file = parts[1].strip("'\"") if len(parts) > 1 else None
+        res = export_data(output_path=target_file)
+        if res.get("success"):
+            _safe_print(f"\n✓ {res.get('message')}")
+            _safe_print(f"Путь: {res.get('path')}")
+            stats = res.get("stats", {})
+            _safe_print(
+                f"Статистика: задач={stats.get('tasks_count')}, "
+                f"напоминаний={stats.get('reminders_count')}, "
+                f"заметок={stats.get('notes_count')}, "
+                f"списков={stats.get('lists_count')}, "
+                f"памяти={stats.get('memories_count')}"
+            )
+        else:
+            _safe_print(f"\n✗ Ошибка экспорта: {res.get('error')}")
+        return True
+
+    # 6. Импорт данных
+    if first_token in (":import", ":импорт"):
+        if len(parts) == 1:
+            _safe_print("\nИспользование: :import <путь_к_backup_файлу>")
+            return True
+
+        source_file = parts[1].strip("'\"")
+        if not source_file:
+            _safe_print("\nИспользование: :import <путь_к_backup_файлу>")
+            return True
+
+        res = import_data(input_path=source_file)
+        if res.get("success"):
+            _safe_print(f"\n✓ {res.get('message')}")
+            stats = res.get("stats", {})
+            _safe_print(
+                f"Статистика: задач={stats.get('tasks_count')}, "
+                f"напоминаний={stats.get('reminders_count')}, "
+                f"заметок={stats.get('notes_count')}, "
+                f"списков={stats.get('lists_count')}, "
+                f"памяти={stats.get('memories_count')}"
+            )
+        else:
+            _safe_print(f"\n✗ Ошибка импорта: {res.get('error')}")
+        return True
 
     return False

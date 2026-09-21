@@ -4,8 +4,10 @@
 
 import sys
 import tkinter as tk
+from tkinter import filedialog, messagebox
 from typing import Any, Callable, Optional
 
+from tools.backup import export_data, import_data
 from tools.validation import validate_project
 from ui.views.base import BaseView, _bind_hover
 
@@ -13,12 +15,13 @@ from ui.views.base import BaseView, _bind_hover
 class SettingsView(BaseView):
     """
     Экран настроек и системной диагностики (Settings).
-    Обеспечивает отображение конфигурации бэкенда, хранилищ данных и запуск валидации проекта.
+    Обеспечивает отображение конфигурации бэкенда, хранилищ данных, резервное копирование и валидацию.
     """
 
     def __init__(self, master: tk.Widget, shell: Any = None, **kwargs):
         super().__init__(master, shell=shell, **kwargs)
         self.lbl_val_res: tk.Label = None
+        self.lbl_backup_res: tk.Label = None
         self.render()
 
     def render(self) -> None:
@@ -107,16 +110,137 @@ class SettingsView(BaseView):
             panel,
             text="• Долговременная память: data/memory.json (изолировано)\n"
                  "• Бытовой слой: data/household.json (Tasks, Reminders, Notes, Lists)\n"
-                 "• Git Protection: data/ вне репозитория (.gitignore)",
+                 "• Резервное копирование: безопасный экспорт/импорт в JSON с валидацией",
             font=("Segoe UI", 9),
             fg=self.FG_MAIN,
             bg=self.BG_CARD,
             justify="left"
-        ).pack(anchor="w", padx=20, pady=(0, 20))
+        ).pack(anchor="w", padx=20, pady=(0, 12))
+
+        btn_box = tk.Frame(panel, bg=self.BG_CARD)
+        btn_box.pack(anchor="w", padx=20, pady=(0, 10))
+
+        btn_export = tk.Button(
+            btn_box,
+            text="⬆ Экспорт данных...",
+            font=("Segoe UI", 9, "bold"),
+            bg="#21262d",
+            fg=self.FG_WHITE,
+            bd=1,
+            relief="solid",
+            padx=14,
+            pady=6,
+            cursor="hand2",
+            command=self.ui_export_data
+        )
+        btn_export.pack(side="left", padx=(0, 10))
+        _bind_hover(btn_export, "#21262d", "#30363d", self.FG_WHITE, self.FG_WHITE)
+
+        btn_import = tk.Button(
+            btn_box,
+            text="⬇ Импорт данных...",
+            font=("Segoe UI", 9, "bold"),
+            bg="#21262d",
+            fg=self.FG_WHITE,
+            bd=1,
+            relief="solid",
+            padx=14,
+            pady=6,
+            cursor="hand2",
+            command=self.ui_import_data
+        )
+        btn_import.pack(side="left")
+        _bind_hover(btn_import, "#21262d", "#30363d", self.FG_WHITE, self.FG_WHITE)
+
+        self.lbl_backup_res = tk.Label(
+            panel,
+            text="",
+            font=("Segoe UI", 9),
+            fg=self.FG_MUTED,
+            bg=self.BG_CARD
+        )
+        self.lbl_backup_res.pack(anchor="w", padx=20, pady=(0, 20))
 
     def refresh(self) -> None:
         """Реактивное обновление экрана настроек (контракт BaseView)."""
         pass
+
+    def ui_export_data(self) -> Optional[dict]:
+        """Экспорт пользовательских данных в выбранный пользователем JSON-файл."""
+        file_path = filedialog.asksaveasfilename(
+            defaultextension=".json",
+            filetypes=[("JSON Backup", "*.json"), ("All Files", "*.*")],
+            title="Сохранить резервную копию Акакия"
+        )
+        if not file_path:
+            return None
+
+        res = export_data(
+            output_path=file_path,
+            household=self.household,
+            memory=self.memory
+        )
+
+        if not self.lbl_backup_res or not self.lbl_backup_res.winfo_exists():
+            return res
+
+        if res.get("success"):
+            self.lbl_backup_res.config(
+                text=f"✓ {res.get('message')}",
+                fg=self.ACCENT_GREEN
+            )
+            if self.shell and hasattr(self.shell, "_append_log"):
+                self.shell._append_log("BACKUP", res.get("message"))
+        else:
+            self.lbl_backup_res.config(
+                text=f"✗ {res.get('error')}",
+                fg=self.ACCENT_RED
+            )
+        return res
+
+    def ui_import_data(self) -> Optional[dict]:
+        """Импорт пользовательских данных из выбранного JSON-файла."""
+        file_path = filedialog.askopenfilename(
+            defaultextension=".json",
+            filetypes=[("JSON Backup", "*.json"), ("All Files", "*.*")],
+            title="Выберите файл резервной копии Акакия"
+        )
+        if not file_path:
+            return None
+
+        confirm = messagebox.askyesno(
+            "Подтверждение импорта",
+            f"Вы уверены, что хотите восстановить данные из файла:\n{file_path}?\n\n"
+            "Текущие задачи, напоминания, заметки, списки и память будут заменены."
+        )
+        if not confirm:
+            return None
+
+        res = import_data(
+            input_path=file_path,
+            household=self.household,
+            memory=self.memory
+        )
+
+        if not self.lbl_backup_res or not self.lbl_backup_res.winfo_exists():
+            return res
+
+        if res.get("success"):
+            self.lbl_backup_res.config(
+                text=f"✓ {res.get('message')}",
+                fg=self.ACCENT_GREEN
+            )
+            if self.shell:
+                if hasattr(self.shell, "_append_log"):
+                    self.shell._append_log("BACKUP", res.get("message"))
+                if hasattr(self.shell, "refresh_current_view"):
+                    self.shell.refresh_current_view()
+        else:
+            self.lbl_backup_res.config(
+                text=f"✗ {res.get('error')}",
+                fg=self.ACCENT_RED
+            )
+        return res
 
     def ui_run_validation(self, val_func: Optional[Callable[[], dict]] = None) -> dict:
         """Запуск проверки целостности проекта и вывод статуса."""
