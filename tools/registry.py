@@ -29,6 +29,7 @@ from tools.household import (
     delete_task,
     create_reminder,
     list_reminders,
+    complete_reminder,
     delete_reminder,
     check_due_reminders,
     create_note,
@@ -175,6 +176,11 @@ TOOLS = {
     "list_reminders": {
         "function": list_reminders,
         "description": "Показывает список активных или всех напоминаний.",
+        "requires_confirmation": False
+    },
+    "complete_reminder": {
+        "function": complete_reminder,
+        "description": "Отмечает напоминание выполненным по номеру (ID). Для повторяющихся напоминаний переносит время на следующий интервал.",
         "requires_confirmation": False
     },
     "delete_reminder": {

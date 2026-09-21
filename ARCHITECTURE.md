@@ -126,8 +126,10 @@
   * Атомарная запись и потокобезопасность.
   * Сущности: Задачи (Tasks), Напоминания (Reminders), Заметки (Notes), Списки (Lists).
   * Поддержка пакетного и относительного удаления (`_resolve_delete_targets`).
+  * Повторяющиеся напоминания: автоматический пересчет времени в `check_due_reminders()` и безопасное завершение через `complete_reminder()`.
 * [tools/datetime_utils.py](file:///c:/Akakiy%20agent/tools/datetime_utils.py): Утилиты разбора и нормализации дат и времени.
-  * Чистая функция `parse_reminder_time` (разбор ISO-дат, относительных смещений «через N минут/часов/дней», конструкций «завтра в HH:MM» и времени суток «HH:MM»).
+  * Чистая функция `parse_reminder_time` (разбор ISO-дат, относительных смещений «через N минут/часов/дней», конструкций «завтра в HH:MM», времени суток «HH:MM» и регулярных выражений повторения).
+  * Чистые функции повторения: `parse_repeat_rule` (разбор `daily`, `weekdays`, `weekly`, `every_N_hours`), `compute_next_reminder_time` (расчет следующей даты с учетом выходных и пропущенных интервалов), `format_repeat_rule` (человекочитаемый бейдж).
 * [tools/backup.py](file:///c:/Akakiy%20agent/tools/backup.py): Модуль резервного копирования и восстановления данных (Backup & Restore).
   * `export_data`: Экспорт бытовых сущностей (`household.json`) и памяти (`memory.json`) в единый версионированный JSON-файл (`akakiy_backup_version = 1`) с метаданными и статистикой.
   * `import_data`: Транзакционный импорт с предварительными байтовыми снимками файлов в памяти, атомарной перезаписью, автоматическим откатом при сбоях и вызовом `reload()` у менеджеров.
@@ -271,7 +273,7 @@ NotificationService.show_reminder()
    ├─ Добавление в стек и расчет координат (правый нижний угол)
    └─ _restack()
         │
-        ├─► Пользователь нажал «✓ Выполнено» ──► HouseholdManager.delete_reminder() -> refresh view
+        ├─► Пользователь нажал «✓ Выполнено» ──► HouseholdManager.complete_reminder() -> refresh view
         ├─► Пользователь нажал «⏰ Отложить»   ──► HouseholdManager.create_reminder("... через 10 минут") -> refresh view
         └─► Пользователь нажал «×» (Закрыть)   ──► Закрытие окна -> _restack() оставшихся
 ```

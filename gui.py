@@ -907,9 +907,12 @@ class AkakiyGUI:
 
         def on_complete():
             if self.household and rem_id is not None:
-                self.household.delete_reminder(rem_id)
+                res = self.household.complete_reminder(rem_id)
                 self.refresh_current_view()
-                self._append_log("DONE", f"Напоминание #{rem_id} выполнено.")
+                if res.get("rescheduled") or reminder.get("repeat"):
+                    self._append_log("DONE", f"Повторяющееся напоминание #{rem_id} выполнено.")
+                else:
+                    self._append_log("DONE", f"Напоминание #{rem_id} выполнено.")
 
         def on_snooze():
             if self.household:

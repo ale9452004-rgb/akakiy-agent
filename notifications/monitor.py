@@ -30,7 +30,7 @@ class ReminderMonitor:
 
         self._stop_event = threading.Event()
         self._thread: Optional[threading.Thread] = None
-        self._notified_ids: Set[int] = set()
+        self._notified_ids: Set[Any] = set()
         self._lock = threading.Lock()
 
     def start(self) -> None:
@@ -85,8 +85,16 @@ class ReminderMonitor:
         with self._lock:
             for rem in due_reminders:
                 rem_id = rem.get("id")
-                if rem_id is not None and rem_id not in self._notified_ids:
-                    self._notified_ids.add(rem_id)
+                if rem_id is None:
+                    continue
+
+                if rem.get("repeat"):
+                    dedup_key = (rem_id, rem.get("triggered_at") or rem.get("remind_at"))
+                else:
+                    dedup_key = rem_id
+
+                if dedup_key not in self._notified_ids:
+                    self._notified_ids.add(dedup_key)
                     dispatched.append(rem)
                     try:
                         self.on_reminder(rem)

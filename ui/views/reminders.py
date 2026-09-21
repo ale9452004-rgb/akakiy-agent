@@ -77,7 +77,7 @@ class RemindersView(BaseView):
 
         tk.Label(
             add_box,
-            text="Время (19:00 / завтра в 10:00):",
+            text="Время (19:00 / каждый день в 10:00 / каждые 2 ч):",
             font=("Segoe UI", 9, "bold"),
             fg=self.FG_WHITE,
             bg=self.BG_CARD
@@ -90,7 +90,7 @@ class RemindersView(BaseView):
             fg=self.FG_WHITE,
             bd=1,
             relief="solid",
-            width=18
+            width=22
         )
         self.entry_rem_time.pack(side="left", padx=6, pady=8)
 
@@ -163,6 +163,8 @@ class RemindersView(BaseView):
             ).pack(pady=40)
             return
 
+        from tools.datetime_utils import format_repeat_rule
+
         for r in reversed(rems):
             row = tk.Frame(self.rems_list_frame, bg="#13171f", bd=1, relief="solid")
             row.pack(fill="x", padx=16, pady=4)
@@ -184,13 +186,16 @@ class RemindersView(BaseView):
                 bg="#13171f"
             ).pack(side="left", padx=4)
 
-            tk.Label(
-                row,
-                text=f"Время: {r['remind_at']}",
-                font=("Consolas", 9),
-                fg=self.ACCENT_CYAN,
-                bg="#13171f"
-            ).pack(side="right", padx=16)
+            repeat_val = r.get("repeat")
+            if repeat_val:
+                rep_text = format_repeat_rule(repeat_val)
+                tk.Label(
+                    row,
+                    text=f"🔁 {rep_text}",
+                    font=("Segoe UI", 9, "italic"),
+                    fg="#a78bfa",
+                    bg="#13171f"
+                ).pack(side="left", padx=8)
 
             btn_del = tk.Button(
                 row,
@@ -204,9 +209,36 @@ class RemindersView(BaseView):
             )
             btn_del.pack(side="right", padx=8)
 
+            btn_done = tk.Button(
+                row,
+                text="✓",
+                font=("Segoe UI", 9, "bold"),
+                fg=self.ACCENT_GREEN,
+                bg="#13171f",
+                bd=0,
+                cursor="hand2",
+                command=lambda rid=r["id"]: self.ui_complete_reminder(rid)
+            )
+            btn_done.pack(side="right", padx=4)
+
+            tk.Label(
+                row,
+                text=f"Время: {r['remind_at']}",
+                font=("Consolas", 9),
+                fg=self.ACCENT_CYAN,
+                bg="#13171f"
+            ).pack(side="right", padx=12)
+
+    def ui_complete_reminder(self, reminder_id: Any) -> None:
+        """Отметка выполнения напоминания."""
+        if self.household:
+            self.household.complete_reminder(reminder_id)
+            self.refresh()
+
     def ui_delete_reminder(self, reminder_id: Any) -> None:
         """Удаление напоминания с подтверждением пользователя."""
         if messagebox.askyesno("Подтверждение", f"Удалить напоминание #{reminder_id}?"):
             if self.household:
                 self.household.delete_reminder(reminder_id)
                 self.refresh()
+

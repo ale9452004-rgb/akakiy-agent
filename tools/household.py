@@ -25,7 +25,12 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_HOUSEHOLD_FILE = PROJECT_PATH / "data" / "household.json"
 
-from tools.datetime_utils import parse_reminder_time
+from tools.datetime_utils import (
+    parse_reminder_time,
+    parse_repeat_rule,
+    compute_next_reminder_time,
+    format_repeat_rule
+)
 
 
 class HouseholdManager:
@@ -112,7 +117,7 @@ class HouseholdManager:
     # 1. Задачи (Tasks)
     # =========================================================================
 
-    def create_task(self, title: str) -> Dict[str, Any]:
+    def create_task(self, title: str, repeat: Optional[str] = None) -> Dict[str, Any]:
         """Создаёт новую бытовую задачу."""
         clean_title = str(title).strip() if title else ""
         if not clean_title:
@@ -126,7 +131,8 @@ class HouseholdManager:
                 "id": next_id,
                 "title": clean_title,
                 "completed": False,
-                "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "repeat": repeat or None
             }
             self.tasks.append(task)
             self._save()
@@ -301,15 +307,25 @@ class HouseholdManager:
     # 2. Напоминания (Reminders)
     # =========================================================================
 
-    def create_reminder(self, text: str, remind_at: str) -> Dict[str, Any]:
-        """Создаёт напоминание."""
+    def create_reminder(self, text: str, remind_at: str, repeat: Optional[str] = None) -> Dict[str, Any]:
+        """Создаёт напоминание (одноразовое или повторяющееся)."""
         clean_text = str(text).strip() if text else ""
         if not clean_text:
             return {"success": False, "error": "Текст напоминания не может быть пустым."}
 
-        ok, formatted_time, _ = parse_reminder_time(str(remind_at))
+        parsed_rule, sub_time = parse_repeat_rule(str(remind_at))
+        effective_repeat = repeat or parsed_rule
+        time_to_parse = sub_time if parsed_rule else str(remind_at)
+
+        ok, formatted_time, target_dt = parse_reminder_time(time_to_parse)
         if not ok:
             return {"success": False, "error": formatted_time}
+
+        now = datetime.now()
+        if effective_repeat == "weekdays" and target_dt:
+            while target_dt.weekday() >= 5 or target_dt <= now:
+                target_dt += timedelta(days=1)
+            formatted_time = target_dt.strftime("%Y-%m-%d %H:%M:%S")
 
         with self._lock:
             base_max = max([r.get("id", 0) for r in self.reminders], default=0)
@@ -319,14 +335,22 @@ class HouseholdManager:
                 "id": next_id,
                 "text": clean_text,
                 "remind_at": formatted_time,
-                "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                "triggered": False
+                "created_at": now.strftime("%Y-%m-%d %H:%M:%S"),
+                "triggered": False,
+                "repeat": effective_repeat
             }
             self.reminders.append(reminder)
             self._save()
+
+            if effective_repeat:
+                rep_lbl = format_repeat_rule(effective_repeat)
+                msg = f"Напоминание #{next_id} \"{clean_text}\" установлено на {formatted_time} (повтор: {rep_lbl})."
+            else:
+                msg = f"Напоминание #{next_id} \"{clean_text}\" установлено на {formatted_time}."
+
             return {
                 "success": True,
-                "message": f"Напоминание #{next_id} \"{clean_text}\" установлено на {formatted_time}.",
+                "message": msg,
                 "reminder": reminder
             }
 
@@ -348,13 +372,75 @@ class HouseholdManager:
             lines = ["Список напоминаний:"]
             for r in items:
                 status = " (сработало)" if r.get("triggered") else ""
-                lines.append(f"  • #{r['id']} [{r['remind_at']}]: {r['text']}{status}")
+                rep_badge = f" [повтор: {format_repeat_rule(r.get('repeat'))}]" if r.get("repeat") else ""
+                lines.append(f"  • #{r['id']} [{r['remind_at']}]{rep_badge}: {r['text']}{status}")
 
             return {
                 "success": True,
                 "reminders": items,
                 "message": "\n".join(lines)
             }
+
+    def complete_reminder(self, reminder_id: Union[int, str]) -> Dict[str, Any]:
+        """
+        Отмечает напоминание выполненным по ID, относительному положению или тексту.
+        - Для повторяющегося: если оно еще не сдвинуто или выполняется досрочно, рассчитывает следующее время.
+          Если уже было автоматически перенесено монитором при срабатывании, подтверждает выполнение.
+        - Для одноразового: удаляет из активных напоминаний.
+        """
+        with self._lock:
+            indices, err = self._resolve_delete_targets(reminder_id, self.reminders, "напоминание", "напоминаний")
+            if err or not indices:
+                return {"success": False, "error": err or f"Напоминание '{reminder_id}' не найдено."}
+
+            idx = indices[0]
+            target = self.reminders[idx]
+            repeat = target.get("repeat")
+
+            if repeat:
+                now_dt = datetime.now()
+                now_str = now_dt.strftime("%Y-%m-%d %H:%M:%S")
+
+                target_dt = None
+                try:
+                    target_dt = datetime.strptime(target.get("remind_at", ""), "%Y-%m-%d %H:%M:%S")
+                except Exception:
+                    pass
+
+                # Проверяем, было ли напоминание только что автоматически сдвинуто при срабатывании
+                already_auto_advanced = False
+                last_trig = target.get("last_triggered_at")
+                if last_trig:
+                    try:
+                        trig_dt = datetime.strptime(last_trig, "%Y-%m-%d %H:%M:%S")
+                        if (now_dt - trig_dt).total_seconds() < 600 and target_dt and target_dt > now_dt:
+                            already_auto_advanced = True
+                    except Exception:
+                        pass
+
+                if not already_auto_advanced:
+                    next_time, _ = compute_next_reminder_time(target.get("remind_at", ""), repeat, reference_dt=now_dt)
+                    target["remind_at"] = next_time
+
+                target["triggered"] = False
+                target["last_completed_at"] = now_str
+                self._save()
+                rep_lbl = format_repeat_rule(repeat)
+                return {
+                    "success": True,
+                    "message": f"Повторяющееся напоминание #{target['id']} \"{target['text']}\" выполнено. Следующее: {target['remind_at']} ({rep_lbl}).",
+                    "reminder": target,
+                    "rescheduled": True
+                }
+            else:
+                deleted = self.reminders.pop(idx)
+                self._save()
+                return {
+                    "success": True,
+                    "message": f"Напоминание #{deleted['id']} \"{deleted['text']}\" выполнено.",
+                    "reminder": deleted,
+                    "rescheduled": False
+                }
 
     def delete_reminder(self, reminder_id: Union[int, str]) -> Dict[str, Any]:
         """Удаляет одно или несколько напоминаний по ID, относительному положению или тексту."""
@@ -383,30 +469,51 @@ class HouseholdManager:
 
     def check_due_reminders(self, current_time: Optional[str] = None) -> Dict[str, Any]:
         """
-        Проверяет, какие напоминания наступили относительно current_time (по умолчанию сейчас),
-        помечает их сработавшими (triggered = True) и возвращает их.
+        Проверяет, какие напоминания наступили относительно current_time (по умолчанию сейчас).
+        Для одноразовых: помечает сработавшими (triggered = True).
+        Для повторяющихся: возвращает снимок сработавшего события и сразу рассчитывает следующее время remind_at.
         """
         with self._lock:
             if current_time:
                 try:
                     now_str = current_time.strip()
+                    now_dt = datetime.strptime(now_str, "%Y-%m-%d %H:%M:%S")
                 except Exception:
                     now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    now_dt = datetime.now()
             else:
-                now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                now_dt = datetime.now()
+                now_str = now_dt.strftime("%Y-%m-%d %H:%M:%S")
 
             due = []
             for r in self.reminders:
                 if not r.get("triggered") and r.get("remind_at", "") <= now_str:
-                    r["triggered"] = True
-                    r["triggered_at"] = now_str
-                    due.append(r)
+                    repeat = r.get("repeat")
+                    if repeat:
+                        snapshot = dict(r)
+                        snapshot["triggered"] = True
+                        snapshot["triggered_at"] = now_str
+                        due.append(snapshot)
+
+                        next_time, _ = compute_next_reminder_time(
+                            r.get("remind_at", ""),
+                            repeat,
+                            reference_dt=now_dt
+                        )
+                        r["remind_at"] = next_time
+                        r["triggered"] = False
+                        r["last_triggered_at"] = now_str
+                    else:
+                        r["triggered"] = True
+                        r["triggered_at"] = now_str
+                        due.append(r)
 
             if due:
                 self._save()
                 lines = [f"Наступили напоминания ({len(due)}):"]
                 for r in due:
-                    lines.append(f"  🔔 #{r['id']}: {r['text']} (время: {r['remind_at']})")
+                    rep_badge = f" [повтор: {format_repeat_rule(r.get('repeat'))}]" if r.get("repeat") else ""
+                    lines.append(f"  🔔 #{r['id']}: {r['text']} (время: {r['remind_at']}{rep_badge})")
                 return {
                     "success": True,
                     "due_count": len(due),
@@ -420,6 +527,7 @@ class HouseholdManager:
                 "reminders": [],
                 "message": "Наступивших напоминаний нет."
             }
+
 
     # =========================================================================
     # 3. Заметки (Notes)
@@ -728,8 +836,8 @@ def reset_household_manager() -> None:
 
 
 # Обертки инструментов для tools.registry:
-def create_task(title: str) -> Dict[str, Any]:
-    return get_household_manager().create_task(title=title)
+def create_task(title: str, repeat: Optional[str] = None) -> Dict[str, Any]:
+    return get_household_manager().create_task(title=title, repeat=repeat)
 
 def list_tasks(status: str = "all") -> Dict[str, Any]:
     return get_household_manager().list_tasks(status=status)
@@ -740,11 +848,14 @@ def complete_task(task_id: Union[int, str]) -> Dict[str, Any]:
 def delete_task(task_id: Union[int, str]) -> Dict[str, Any]:
     return get_household_manager().delete_task(task_id=task_id)
 
-def create_reminder(text: str, remind_at: str) -> Dict[str, Any]:
-    return get_household_manager().create_reminder(text=text, remind_at=remind_at)
+def create_reminder(text: str, remind_at: str, repeat: Optional[str] = None) -> Dict[str, Any]:
+    return get_household_manager().create_reminder(text=text, remind_at=remind_at, repeat=repeat)
 
 def list_reminders(include_triggered: bool = False) -> Dict[str, Any]:
     return get_household_manager().list_reminders(include_triggered=include_triggered)
+
+def complete_reminder(reminder_id: Union[int, str]) -> Dict[str, Any]:
+    return get_household_manager().complete_reminder(reminder_id=reminder_id)
 
 def delete_reminder(reminder_id: Union[int, str]) -> Dict[str, Any]:
     return get_household_manager().delete_reminder(reminder_id=reminder_id)

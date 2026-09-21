@@ -67,8 +67,9 @@ class CommandRouter:
         self.note_del_p2 = re.compile(r"^(?:удали|удалить|сотри)\s+(?:все\s+)?(последн(?:юю|ие|их|яя)(?:\s+(?:\d+|[а-яё]+))?)\s+заметк[иа-я]*$", re.IGNORECASE)
 
         # 4. Бытовые команды: Напоминания
-        self.rem_create_p = re.compile(r"^(?:напомни|создай\s+напоминание|новое\s+напоминание)\s+(.+?)\s+((?:в|через|завтра)\s+.+)$", re.IGNORECASE)
+        self.rem_create_p = re.compile(r"^(?:напомни|создай\s+напоминание|новое\s+напоминание)\s+(.+?)\s+((?:в|через|завтра|каждый|каждую|каждые|по\s+будням|ежедневно)\s+.+)$", re.IGNORECASE)
         self.rem_list_exact = {"покажи напоминания", "список напоминаний", "мои напоминания", "напоминания", "показать напоминания"}
+        self.rem_done_p = re.compile(r"^(?:выполни|отметь\s+(?:выполненным|сделанным)|закрой|сделай)\s+напоминани[ея]?\s+([#№]?\d+|.+)$", re.IGNORECASE)
         self.rem_del_p1 = re.compile(r"^(?:удали|удалить|сотри)\s+напоминани[ея]?\s+(.+)$", re.IGNORECASE)
         self.rem_del_p2 = re.compile(r"^(?:удали|удалить|сотри)\s+(?:все\s+)?(последн(?:ее|ие|их)(?:\s+(?:\d+|[а-яё]+))?)\s+напоминан[иеа-я]*$", re.IGNORECASE)
 
@@ -311,6 +312,10 @@ class CommandRouter:
 
         if normalized in self.rem_list_exact:
             return {"tool": "list_reminders", "arguments": {}}
+
+        rem_done_m = self.rem_done_p.match(raw_clean)
+        if rem_done_m:
+            return {"tool": "complete_reminder", "arguments": {"reminder_id": rem_done_m.group(1).strip()}}
 
         rem_del_m = self.rem_del_p1.match(raw_clean) or self.rem_del_p2.match(raw_clean)
         if rem_del_m:
