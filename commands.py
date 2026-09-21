@@ -46,6 +46,7 @@ def show_help():
     print("  :read <файл>, :cat <файл> - просмотреть содержимое файла")
     print("  :export [файл]           - экспортировать данные в JSON")
     print("  :import <файл>           - импортировать данные из backup-файла")
+    print("  :brief, :today, :сводка   - дневной брифинг (сводка на сегодня)")
     print("  :help, :h, помощь        - показать эту справку")
     print("  :exit, :quit, выход      - завершить работу")
     print("\nРабота с планами:")
@@ -223,6 +224,13 @@ def handle_cli_command(user_input: str) -> bool:
             )
         else:
             _safe_print(f"\n✗ Ошибка импорта: {res.get('error')}")
+        return True
+
+    # 7. Дневной брифинг
+    if cmd_lower in (":brief", ":сводка", ":today", ":брифинг"):
+        from tools.daily_briefing import get_daily_briefing
+        res = get_daily_briefing()
+        _safe_print(f"\n{res.get('text', '')}")
         return True
 
     return False

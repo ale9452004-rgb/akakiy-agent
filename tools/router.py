@@ -108,6 +108,23 @@ class CommandRouter:
         self.plan_get_exact = {"покажи план", "текущий план", "показать план"}
         self.plan_clear_exact = {"очисти план", "удали план", "сбрось план"}
 
+        # 8. Дневной брифинг (Daily Briefing)
+        self.briefing_exact = {
+            "что у меня сегодня",
+            "что на сегодня",
+            "план на день",
+            "план на сегодня",
+            "сводка дня",
+            "сводка на сегодня",
+            "дневной брифинг",
+            "брифинг на сегодня",
+            "что сегодня",
+        }
+        self.briefing_pattern = re.compile(
+            r"^(?:акакий[,\s]+)?(?:что\s+(?:у\s+меня\s+)?(?:запланировано\s+)?на\s+сегодня|какие\s+планы\s+на\s+сегодня|что\s+по\s+планам\s+на\s+сегодня)\??$",
+            re.IGNORECASE
+        )
+
     def match_memory(self, user_input: str) -> Optional[Dict[str, Any]]:
         """
         Проверяет, является ли запрос детерминированной командой памяти.
@@ -208,6 +225,15 @@ class CommandRouter:
         raw_trimmed = user_input.strip()
         raw_clean = raw_trimmed.rstrip(".,!?;:")
         normalized = raw_clean.lower()
+
+        # =================================================
+        # 0. Дневной брифинг (Daily Briefing)
+        # =================================================
+        if normalized in self.briefing_exact or self.briefing_pattern.match(raw_clean):
+            return {
+                "tool": "daily_briefing",
+                "arguments": {}
+            }
 
         # =================================================
         # 1. Поиск конкретного файла

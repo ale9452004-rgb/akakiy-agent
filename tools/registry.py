@@ -43,6 +43,7 @@ from tools.household import (
     delete_list_item,
     delete_list
 )
+from tools.daily_briefing import daily_briefing
 
 
 TOOLS = {
@@ -242,6 +243,11 @@ TOOLS = {
         "function": delete_list,
         "description": "Удаляет указанный список целиком со всеми пунктами.",
         "requires_confirmation": True
+    },
+    "daily_briefing": {
+        "function": daily_briefing,
+        "description": "Формирует структурированную сводку дня (задачи, напоминания, повторяющиеся напоминания, списки).",
+        "requires_confirmation": False
     }
 }
 
@@ -582,6 +588,10 @@ TOOL_PARAMETERS = {
             }
         },
         "required": ["name"]
+    },
+    "daily_briefing": {
+        "properties": {},
+        "required": []
     }
 }
 

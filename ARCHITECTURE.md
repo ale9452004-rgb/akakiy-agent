@@ -70,16 +70,16 @@
 * [ui/neural_core.py](file:///c:/Akakiy%20agent/ui/neural_core.py): UI-компонент Neural Core. Процедурная 3D-проекция пульсирующей нейросферы на `tk.Canvas`. Отражает состояния (`idle`, `thinking`, `working`, `listening`, `speaking`, `error`) и реагирует на реальную громкость речи (RMS аудио).
 * [ui/views/](file:///c:/Akakiy%20agent/ui/views/): Пакет модульных экранов рабочего пространства (Main Workspace):
   * [ui/views/base.py](file:///c:/Akakiy%20agent/ui/views/base.py): Базовый класс `BaseView(tk.Frame)` с единым контрактом `render()` / `refresh()`, темой оформления и доступом к сервисам через Shell.
-  * [ui/views/home.py](file:///c:/Akakiy%20agent/ui/views/home.py): Модульный экран главной сводки (Dashboard Hub) с 3D Neural Core и сводными карточками задач, напоминаний, списков и заметок (`HomeView`).
-  * [ui/views/chat.py](file:///c:/Akakiy%20agent/ui/views/chat.py): Двухколоночный модульный экран диалога с ассистентом и системным логом инструментов (`ChatView`).
-  * [ui/views/tasks.py](file:///c:/Akakiy%20agent/ui/views/tasks.py): Модульный экран управления задачами (`TasksView`, строка поиска, пагинация, создание, переключение статуса и удаление).
-  * [ui/views/reminders.py](file:///c:/Akakiy%20agent/ui/views/reminders.py): Модульный экран управления напоминаниями (`RemindersView`).
-  * [ui/views/notes.py](file:///c:/Akakiy%20agent/ui/views/notes.py): Модульный экран заметок (`NotesView`, строка поиска, пагинация, создание и удаление).
-  * [ui/views/lists.py](file:///c:/Akakiy%20agent/ui/views/lists.py): Двухпанельный модульный экран списков (`ListsView`).
-  * [ui/views/memory.py](file:///c:/Akakiy%20agent/ui/views/memory.py): Модульный экран долговременной памяти (`MemoryView`).
+  * [ui/views/home.py](file:///c:/Akakiy%20agent/ui/views/home.py): Модульный экран дашборда (`HomeView`, приветствие, сводка «Сегодня» с кнопкой «⚡ Сводка дня», 3D Neural Core, быстрые карточки задач, напоминаний, списков и заметок).
+  * [ui/views/chat.py](file:///c:/Akakiy%20agent/ui/views/chat.py): Модульный экран диалога (`ChatView`, двухколоночный чат с Акакием и логом рассуждений агента).
+  * [ui/views/tasks.py](file:///c:/Akakiy%20agent/ui/views/tasks.py): Модульный экран задач (`TasksView`, фильтрация поиска, пагинация, создание, выполнение, удаление).
+  * [ui/views/reminders.py](file:///c:/Akakiy%20agent/ui/views/reminders.py): Модульный экран напоминаний (`RemindersView`, создание разовых и повторяющихся правил, бейджи регулярности, отметка выполнения, удаление).
+  * [ui/views/notes.py](file:///c:/Akakiy%20agent/ui/views/notes.py): Модульный экран заметок (`NotesView`, фильтрация поиска, пагинация, создание, просмотр, удаление).
+  * [ui/views/lists.py](file:///c:/Akakiy%20agent/ui/views/lists.py): Модульный экран списков (`ListsView`, просмотр, создание, чекбоксы пунктов, удаление).
+  * [ui/views/memory.py](file:///c:/Akakiy%20agent/ui/views/memory.py): Модульный экран памяти (`MemoryView`, ручное добавление, поиск по воспоминаниям, удаление фактов).
   * [ui/views/settings.py](file:///c:/Akakiy%20agent/ui/views/settings.py): Модульный экран настроек, валидации и резервного копирования (`SettingsView`, запуск валидации, экспорт и импорт пользовательских данных).
 * [ui/pagination.py](file:///c:/Akakiy%20agent/ui/pagination.py): Переиспользуемый UI-механизм фильтрации и пагинации (`PaginationModel`, `PaginationBar`, `PagedListController`).
-* [commands.py](file:///c:/Akakiy%20agent/commands.py): Вспомогательные быстрые команды и диспетчер CLI REPL (`show_status`, `show_files`, `read_file`, `handle_cli_command`, алиасы `:status`, `:files`, `:read`, `:export`, `:import`, `:help`, `:exit`).
+* [commands.py](file:///c:/Akakiy%20agent/commands.py): Вспомогательные быстрые команды и диспетчер CLI REPL (`show_status`, `show_files`, `read_file`, `handle_cli_command`, алиасы `:status`, `:files`, `:read`, `:export`, `:import`, `:brief`, `:today`, `:help`, `:exit`).
 
 ### 3.2. Голосовой слой (Voice UX)
 * [voice/service.py](file:///c:/Akakiy%20agent/voice/service.py): Координатор голосового сеанса (`VoiceService`). Запускает конвейер `listening -> thinking -> speaking -> listening`. Обеспечивает непрерывный Voice UX, реакцию на команды выхода («стоп», «отключись») и передачу событий в GUI.
@@ -135,11 +135,14 @@
   * `import_data`: Транзакционный импорт с предварительными байтовыми снимками файлов в памяти, атомарной перезаписью, автоматическим откатом при сбоях и вызовом `reload()` у менеджеров.
   * `validate_backup`: Проверка схемы, совместимости версий и типов данных до модификации локальных файлов.
   * Защита от утечки и перезаписи: блокировка сохранения бэкапов внутри рабочего каталога `data/`.
-
+* [tools/daily_briefing.py](file:///c:/Akakiy%20agent/tools/daily_briefing.py): Модуль дневного брифинга («Что у меня сегодня?»).
+  * Строго read-only агрегатор данных: активные задачи (с выделением просроченных), напоминания на сегодня, регулярные напоминания (daily, weekdays, weekly, interval hours) и активные списки с количеством незавершённых пунктов.
+  * Детерминированная сборка сводки без обращения к LLM с правильными грамматическими склонениями числительных (`pluralize_ru`).
 
 ### 3.5. Инструментальный слой (Tools Layer)
-* [tools/registry.py](file:///c:/Akakiy%20agent/tools/registry.py): Центральный реестр `TOOLS` (23 зарегистрированных инструмента) с описаниями, схемами параметров и флагами подтверждения `requires_confirmation`.
+* [tools/registry.py](file:///c:/Akakiy%20agent/tools/registry.py): Центральный реестр `TOOLS` (24 зарегистрированных инструмента) с описаниями, схемами параметров и флагами подтверждения `requires_confirmation`.
 * [tools/dispatcher.py](file:///c:/Akakiy%20agent/tools/dispatcher.py): Функция `dispatch()` — вызов инструментов по имени с перехватом подтверждений через коллбэк.
+* [tools/daily_briefing.py](file:///c:/Akakiy%20agent/tools/daily_briefing.py): `daily_briefing` — сводка дня.
 * [tools/files.py](file:///c:/Akakiy%20agent/tools/files.py): `list_files`, `find_file`, `read_file`, `write_file`, `edit_file`, `search_files`.
 * [tools/terminal.py](file:///c:/Akakiy%20agent/tools/terminal.py): Безопасное исполнение команд PowerShell `run_command`.
 * [tools/git.py](file:///c:/Akakiy%20agent/tools/git.py): `git_status`, `git_diff`, `git_commit`, `git_log`, `git_push`.

@@ -54,13 +54,34 @@ class HomeView(BaseView):
         today_box = tk.Frame(welcome_box, bg="#13171f", bd=1, relief="solid")
         today_box.pack(fill="x", padx=24, pady=(0, 20))
 
+        today_header = tk.Frame(today_box, bg="#13171f")
+        today_header.pack(fill="x", padx=16, pady=(12, 6))
+
         tk.Label(
-            today_box,
+            today_header,
             text="📅  СВОДКА «СЕГОДНЯ»",
             font=("Segoe UI", 10, "bold"),
             fg=self.ACCENT_CYAN,
             bg="#13171f"
-        ).pack(anchor="w", padx=16, pady=(12, 6))
+        ).pack(side="left")
+
+        btn_brief = tk.Button(
+            today_header,
+            text="⚡ Сводка дня",
+            font=("Segoe UI", 8, "bold"),
+            bg="#1f242c",
+            fg=self.ACCENT_AMBER,
+            activebackground="#2a323d",
+            activeforeground="#fff",
+            bd=1,
+            relief="solid",
+            cursor="hand2",
+            padx=8,
+            pady=2,
+            command=self.ui_show_daily_briefing
+        )
+        btn_brief.pack(side="right")
+        self.bind_hover(btn_brief, "#1f242c", "#2a323d")
 
         pending_tasks = len(self.household.list_tasks(status="pending")["tasks"]) if self.household else 0
         due_reminders = self.household.check_due_reminders()["due_count"] if self.household else 0
@@ -301,6 +322,23 @@ class HomeView(BaseView):
         if self.household:
             self.household.complete_task(task_id)
         self.refresh()
+
+    def ui_show_daily_briefing(self) -> None:
+        """Отображает структурированную сводку дня в окне и озвучивает, если активен голос."""
+        from tkinter import messagebox
+        from tools.daily_briefing import get_daily_briefing
+
+        briefing = get_daily_briefing(self.household)
+        text = briefing.get("text", "")
+
+        # Безопасная озвучка, если VoiceService инициализирован и активен
+        if self.voice and hasattr(self.voice, "speak_phrase") and getattr(self.voice, "is_running", False):
+            try:
+                self.voice.speak_phrase(text)
+            except Exception:
+                pass
+
+        messagebox.showinfo("⚡ Сводка дня", text)
 
     def refresh(self) -> None:
         """Реактивное обновление дашборда."""

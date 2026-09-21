@@ -117,7 +117,7 @@ class HouseholdManager:
     # 1. Задачи (Tasks)
     # =========================================================================
 
-    def create_task(self, title: str, repeat: Optional[str] = None) -> Dict[str, Any]:
+    def create_task(self, title: str, repeat: Optional[str] = None, due_date: Optional[str] = None) -> Dict[str, Any]:
         """Создаёт новую бытовую задачу."""
         clean_title = str(title).strip() if title else ""
         if not clean_title:
@@ -132,7 +132,8 @@ class HouseholdManager:
                 "title": clean_title,
                 "completed": False,
                 "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                "repeat": repeat or None
+                "repeat": repeat or None,
+                "due_date": str(due_date).strip() if due_date else None
             }
             self.tasks.append(task)
             self._save()
@@ -836,8 +837,8 @@ def reset_household_manager() -> None:
 
 
 # Обертки инструментов для tools.registry:
-def create_task(title: str, repeat: Optional[str] = None) -> Dict[str, Any]:
-    return get_household_manager().create_task(title=title, repeat=repeat)
+def create_task(title: str, repeat: Optional[str] = None, due_date: Optional[str] = None) -> Dict[str, Any]:
+    return get_household_manager().create_task(title=title, repeat=repeat, due_date=due_date)
 
 def list_tasks(status: str = "all") -> Dict[str, Any]:
     return get_household_manager().list_tasks(status=status)
