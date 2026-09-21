@@ -120,6 +120,7 @@ class AkakiyGUI:
         self.chat_text = None
         self.log_text = None
         self.entry_task = None
+        self.entry_task_search = None
         self.entry_rem_text = None
         self.entry_rem_time = None
         self.entry_note_search = None
@@ -671,6 +672,7 @@ class AkakiyGUI:
         self.tasks_view = TasksView(self.workspace, shell=self)
         self.tasks_view.pack(fill="both", expand=True)
         self.entry_task = self.tasks_view.entry_task
+        self.entry_task_search = getattr(self.tasks_view, "entry_task_search", None)
         self.tasks_list_frame = self.tasks_view.tasks_list_frame
 
     def _ui_create_task(self):

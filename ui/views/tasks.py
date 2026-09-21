@@ -4,21 +4,26 @@
 
 import tkinter as tk
 from tkinter import messagebox
-from typing import Any
+from typing import Any, Dict, Optional
 
+from ui.pagination import PagedListController, PaginationBar
 from ui.views.base import BaseView, _bind_hover
 
 
 class TasksView(BaseView):
     """
     Экран управления бытовыми задачами (Tasks).
-    Обеспечивает создание, просмотр, переключение статуса и удаление задач.
+    Обеспечивает создание, просмотр, переключение статуса, поиск/фильтрацию,
+    пагинацию и удаление задач.
     """
 
     def __init__(self, master: tk.Widget, shell: Any = None, **kwargs):
         super().__init__(master, shell=shell, **kwargs)
-        self.entry_task: tk.Entry = None
-        self.tasks_list_frame: tk.Frame = None
+        self.entry_task: Optional[tk.Entry] = None
+        self.entry_task_search: Optional[tk.Entry] = None
+        self.tasks_list_frame: Optional[tk.Frame] = None
+        self.pagination_bar: Optional[PaginationBar] = None
+        self.paged_controller: Optional[PagedListController] = None
         self.render()
 
     def render(self) -> None:
@@ -36,6 +41,30 @@ class TasksView(BaseView):
             fg=self.FG_WHITE,
             bg=self.BG_MAIN
         ).pack(side="left")
+
+        # Поиск / фильтрация задач
+        search_box = tk.Frame(header_row, bg=self.BG_MAIN)
+        search_box.pack(side="right")
+
+        tk.Label(
+            search_box,
+            text="Поиск:",
+            font=("Segoe UI", 9),
+            fg=self.FG_MUTED,
+            bg=self.BG_MAIN
+        ).pack(side="left", padx=4)
+
+        self.entry_task_search = tk.Entry(
+            search_box,
+            font=("Segoe UI", 10),
+            bg=self.BG_CARD,
+            fg=self.FG_WHITE,
+            width=20,
+            bd=1,
+            relief="solid"
+        )
+        self.entry_task_search.pack(side="left", padx=4)
+        self.entry_task_search.bind("<KeyRelease>", lambda e: self._on_search_changed())
 
         # Форма добавления задачи
         add_box = tk.Frame(self, bg=self.BG_CARD, bd=1, relief="solid")
@@ -79,7 +108,94 @@ class TasksView(BaseView):
         self.tasks_list_frame = tk.Frame(self, bg=self.BG_CARD, bd=1, relief="solid")
         self.tasks_list_frame.pack(fill="both", expand=True)
 
+        # Панель пагинации
+        self.pagination_bar = PaginationBar(self, bg=self.BG_MAIN)
+        self.pagination_bar.pack(fill="x", pady=(8, 0))
+
+        # Инициализация контроллера пагинации
+        self.paged_controller = PagedListController[Dict[str, Any]](
+            content_frame=self.tasks_list_frame,
+            pagination_bar=self.pagination_bar,
+            render_item=self._render_task_item,
+            filter_fn=self._filter_task,
+            page_size=8,
+            empty_text="Задач пока нет.",
+            no_results_text="Задач по запросу не найдено.",
+            empty_bg=self.BG_CARD,
+            empty_fg=self.FG_MUTED,
+        )
+
         self.refresh()
+
+    def _filter_task(self, task: Dict[str, Any], query: str) -> bool:
+        """Предикат фильтрации задачи по тексту или номеру #id."""
+        q = query.strip().lower()
+        if not q:
+            return True
+        clean_q = q.lstrip("#")
+        title = str(task.get("title", "")).lower()
+        task_id = str(task.get("id", ""))
+        return q in title or clean_q == task_id or f"#{task_id}" == q
+
+    def _on_search_changed(self) -> None:
+        """Обработка ввода в строку поиска."""
+        if not self.paged_controller:
+            return
+        query = self.entry_task_search.get().strip() if self.entry_task_search else ""
+        self.paged_controller.set_filter(query)
+
+    def _render_task_item(self, parent: tk.Widget, t: Dict[str, Any]) -> None:
+        """Отрисовка одной строки задачи."""
+        row = tk.Frame(parent, bg="#13171f", bd=1, relief="solid")
+        row.pack(fill="x", padx=16, pady=4)
+
+        # Чекбокс
+        is_done = t.get("completed", False)
+        btn_txt = "☑" if is_done else "☐"
+        btn_color = self.ACCENT_GREEN if is_done else self.FG_MUTED
+
+        chk = tk.Button(
+            row,
+            text=btn_txt,
+            font=("Segoe UI", 12),
+            fg=btn_color,
+            bg="#13171f",
+            bd=0,
+            cursor="hand2",
+            command=lambda tid=t["id"]: self.ui_toggle_task(tid)
+        )
+        chk.pack(side="left", padx=12, pady=8)
+
+        t_fg = self.FG_MUTED if is_done else self.FG_WHITE
+        tk.Label(
+            row,
+            text=f"#{t['id']} {t['title']}",
+            font=("Segoe UI", 10),
+            fg=t_fg,
+            bg="#13171f"
+        ).pack(side="left", padx=4)
+
+        # Дата
+        tk.Label(
+            row,
+            text=t.get("created_at", ""),
+            font=("Consolas", 8),
+            fg=self.FG_DIM,
+            bg="#13171f"
+        ).pack(side="right", padx=12)
+
+        # Кнопка удаления
+        btn_del = tk.Button(
+            row,
+            text="✕",
+            font=("Segoe UI", 9),
+            fg=self.ACCENT_RED,
+            bg="#13171f",
+            bd=0,
+            cursor="hand2",
+            command=lambda tid=t["id"]: self.ui_delete_task(tid)
+        )
+        btn_del.pack(side="right", padx=8)
 
     def ui_create_task(self) -> None:
         """Создание новой задачи из поля ввода."""
@@ -96,10 +212,9 @@ class TasksView(BaseView):
         if not self.tasks_list_frame or not self.tasks_list_frame.winfo_exists():
             return
 
-        for w in self.tasks_list_frame.winfo_children():
-            w.destroy()
-
         if not self.household:
+            for w in self.tasks_list_frame.winfo_children():
+                w.destroy()
             tk.Label(
                 self.tasks_list_frame,
                 text="Сервис задач недоступен.",
@@ -107,70 +222,15 @@ class TasksView(BaseView):
                 fg=self.FG_MUTED,
                 bg=self.BG_CARD
             ).pack(pady=40)
+            if self.pagination_bar:
+                self.pagination_bar.update_state(self.paged_controller.model)
             return
 
         tasks = self.household.list_tasks(status="all")["tasks"]
-        if not tasks:
-            tk.Label(
-                self.tasks_list_frame,
-                text="Задач пока нет.",
-                font=("Segoe UI", 11),
-                fg=self.FG_MUTED,
-                bg=self.BG_CARD
-            ).pack(pady=40)
-            return
-
-        for t in reversed(tasks):
-            row = tk.Frame(self.tasks_list_frame, bg="#13171f", bd=1, relief="solid")
-            row.pack(fill="x", padx=16, pady=4)
-
-            # Чекбокс
-            is_done = t.get("completed", False)
-            btn_txt = "☑" if is_done else "☐"
-            btn_color = self.ACCENT_GREEN if is_done else self.FG_MUTED
-
-            chk = tk.Button(
-                row,
-                text=btn_txt,
-                font=("Segoe UI", 12),
-                fg=btn_color,
-                bg="#13171f",
-                bd=0,
-                cursor="hand2",
-                command=lambda tid=t["id"]: self.ui_toggle_task(tid)
-            )
-            chk.pack(side="left", padx=12, pady=8)
-
-            t_fg = self.FG_MUTED if is_done else self.FG_WHITE
-            tk.Label(
-                row,
-                text=f"#{t['id']} {t['title']}",
-                font=("Segoe UI", 10),
-                fg=t_fg,
-                bg="#13171f"
-            ).pack(side="left", padx=4)
-
-            # Дата
-            tk.Label(
-                row,
-                text=t.get("created_at", ""),
-                font=("Consolas", 8),
-                fg=self.FG_DIM,
-                bg="#13171f"
-            ).pack(side="right", padx=12)
-
-            # Кнопка удаления
-            btn_del = tk.Button(
-                row,
-                text="✕",
-                font=("Segoe UI", 9),
-                fg=self.ACCENT_RED,
-                bg="#13171f",
-                bd=0,
-                cursor="hand2",
-                command=lambda tid=t["id"]: self.ui_delete_task(tid)
-            )
-            btn_del.pack(side="right", padx=8)
+        query = self.entry_task_search.get().strip() if self.entry_task_search else ""
+        if self.paged_controller:
+            self.paged_controller.model.set_filter(query)
+            self.paged_controller.set_items(list(reversed(tasks)))
 
     def ui_toggle_task(self, task_id: Any) -> None:
         """Отметка задачи как выполненной."""

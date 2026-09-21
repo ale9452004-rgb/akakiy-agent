@@ -72,12 +72,13 @@
   * [ui/views/base.py](file:///c:/Akakiy%20agent/ui/views/base.py): Базовый класс `BaseView(tk.Frame)` с единым контрактом `render()` / `refresh()`, темой оформления и доступом к сервисам через Shell.
   * [ui/views/home.py](file:///c:/Akakiy%20agent/ui/views/home.py): Модульный экран главной сводки (Dashboard Hub) с 3D Neural Core и сводными карточками задач, напоминаний, списков и заметок (`HomeView`).
   * [ui/views/chat.py](file:///c:/Akakiy%20agent/ui/views/chat.py): Двухколоночный модульный экран диалога с ассистентом и системным логом инструментов (`ChatView`).
-  * [ui/views/tasks.py](file:///c:/Akakiy%20agent/ui/views/tasks.py): Модульный экран управления задачами (`TasksView`).
+  * [ui/views/tasks.py](file:///c:/Akakiy%20agent/ui/views/tasks.py): Модульный экран управления задачами (`TasksView`, строка поиска, пагинация, создание, переключение статуса и удаление).
   * [ui/views/reminders.py](file:///c:/Akakiy%20agent/ui/views/reminders.py): Модульный экран управления напоминаниями (`RemindersView`).
-  * [ui/views/notes.py](file:///c:/Akakiy%20agent/ui/views/notes.py): Модульный экран заметок с поиском (`NotesView`).
+  * [ui/views/notes.py](file:///c:/Akakiy%20agent/ui/views/notes.py): Модульный экран заметок (`NotesView`, строка поиска, пагинация, создание и удаление).
   * [ui/views/lists.py](file:///c:/Akakiy%20agent/ui/views/lists.py): Двухпанельный модульный экран списков (`ListsView`).
   * [ui/views/memory.py](file:///c:/Akakiy%20agent/ui/views/memory.py): Модульный экран долговременной памяти (`MemoryView`).
   * [ui/views/settings.py](file:///c:/Akakiy%20agent/ui/views/settings.py): Модульный экран настроек, валидации и резервного копирования (`SettingsView`, запуск валидации, экспорт и импорт пользовательских данных).
+* [ui/pagination.py](file:///c:/Akakiy%20agent/ui/pagination.py): Переиспользуемый UI-механизм фильтрации и пагинации (`PaginationModel`, `PaginationBar`, `PagedListController`).
 * [commands.py](file:///c:/Akakiy%20agent/commands.py): Вспомогательные быстрые команды и диспетчер CLI REPL (`show_status`, `show_files`, `read_file`, `handle_cli_command`, алиасы `:status`, `:files`, `:read`, `:export`, `:import`, `:help`, `:exit`).
 
 ### 3.2. Голосовой слой (Voice UX)
