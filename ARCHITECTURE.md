@@ -34,8 +34,9 @@
 │   Agent (tools/agent.py) ◄─────────┼─────────► ContextManager           │
 │   ├─ choose_tool (fast-path <1ms)  │           (tools/context.py)       │
 │   ├─ SkillRegistry (skills/)       │           ├─ Sliding Window        │
-│   ├─ Planner & PlanExecutor        │           ├─ Prompt Injection      │
-│   └─ Teamwork (tools/teamwork.py)  │           └─ Contextual Memories   │
+│   ├─ SubAgents (tools/agents/)     │           ├─ Prompt Injection      │
+│   ├─ Planner & PlanExecutor        │           └─ Contextual Memories   │
+│   └─ Teamwork (tools/teamwork.py)  │                                    │
 └──────────────────┬─────────────────┴──────────────────┬─────────────────┘
                    │                                    │
 ┌──────────────────▼──────────────────┐ ┌───────────────▼─────────────────┐
@@ -112,6 +113,12 @@
 * [tools/teamwork.py](file:///c:/Akakiy%20agent/tools/teamwork.py): Teamwork Preview — координация виртуальных ролей (Researcher, Architect, Implementer, Reviewer) для сложных задач.
 * [tools/edit_preparer.py](file:///c:/Akakiy%20agent/tools/edit_preparer.py): Класс `EditPreparer` — подготовка точечных диффов и хирургических замен в коде на базе AST.
 * [tools/summary.py](file:///c:/Akakiy%20agent/tools/summary.py): Форматирование агрегированных итоговых сводок выполнения плана.
+* [tools/agents/](file:///c:/Akakiy%20agent/tools/agents): Архитектура специализированных Sub-Agent'ов (Sub-Agents Foundation).
+  * `SubAgent` (`tools/agents/base.py`): Базовый абстрактный контракт независимого агента с методом `run(context: AgentContext) -> AgentResult` и валидацией контекста.
+  * `AgentContext` (`tools/agents/context.py`): Изолированный контекст задачи (`task`, `files`, `previous_results`, `metadata`, `parent_agent`).
+  * `AgentResult` (`tools/agents/result.py`): Унифицированный результат (`success`, `message`, `created_files`, `data`, `error`) с фабриками `ok`/`fail` и обратной совместимостью через dict-like интерфейс.
+  * `AgentRegistry` (`tools/agents/registry.py`): Потокобезопасный реестр с поиском, динамическим включением/отключением и синглтоном `get_agent_registry()`.
+  * `EchoAgent` (`tools/agents/echo.py`): Эталонный тестовый Sub-Agent для отладки передачи контекста, генерации файлов и симуляции сбоев.
 
 ### 3.4. Слой данных и памяти (Data Layer)
 * [tools/memory.py](file:///c:/Akakiy%20agent/tools/memory.py): Долговременная память (`MemoryManager`).

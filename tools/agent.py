@@ -22,6 +22,7 @@ from skills.registry import get_skill_registry
 from tools.edit_preparer import EditPreparer
 from tools.summary import format_task_summary
 from tools.router import CommandRouter, get_router
+from tools.agents import AgentContext, AgentResult, get_agent_registry
 
 class Agent:
     """
@@ -31,16 +32,18 @@ class Agent:
     - понимание запроса пользователя;
     - выбор инструмента и навыка;
     - создание и выполнение планов;
+    - координацию специализированных под-агентов (Sub-Agents);
     - подготовку изменений файлов;
     - координацию единого контекста диалога и памяти.
     """
 
-    def __init__(self, memory_manager=None, context_manager=None, ai_client=None, skill_registry=None, router=None):
+    def __init__(self, memory_manager=None, context_manager=None, ai_client=None, skill_registry=None, router=None, agent_registry=None):
         mem = memory_manager or get_memory_manager()
         self.context_manager = context_manager or ContextManager(memory_manager=mem)
         self.ai = ai_client or OllamaClient()
         self.skill_registry = skill_registry or get_skill_registry()
         self.router = router or CommandRouter()
+        self.agent_registry = agent_registry or get_agent_registry()
         self.edit_preparer = EditPreparer(self.ai)
         self.planner = Planner(context_manager=self.context_manager, ai_client=self.ai)
         self.executor = PlanExecutor(self)
@@ -273,6 +276,40 @@ class Agent:
             exec_result=exec_result,
             research_info=research_info
         )
+
+    def run_subagent(
+        self,
+        name: str,
+        task: str = "",
+        files=None,
+        context=None,
+        **kwargs
+    ) -> AgentResult:
+        """
+        Запускает зарегистрированный специализированный SubAgent по имени.
+
+        Если передан готовый context (AgentContext), используется он.
+        Иначе формируется новый AgentContext(task=task, files=files, metadata=kwargs, parent_agent=self).
+        """
+        if not isinstance(name, str) or not name.strip():
+            return AgentResult.fail("Не указано имя sub-agent'а.")
+
+        agent = self.agent_registry.get(name.strip())
+        if agent is None:
+            return AgentResult.fail(f"Sub-agent '{name}' не найден в реестре.")
+
+        if context is None:
+            context = AgentContext(
+                task=task,
+                files=files or [],
+                metadata=kwargs,
+                parent_agent=self
+            )
+        else:
+            if not getattr(context, "parent_agent", None):
+                context.parent_agent = self
+
+        return agent.run(context)
 
     def run_single_correction(self, errors):
         """

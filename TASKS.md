@@ -6,9 +6,9 @@
 
 ## 1. Текущий статус проекта
 
-* **Текущая версия**: Акакий 2.0 (Desktop Hub + Voice UX + Household Assistant + Memory + Core Dev Tools + Notifications + Fast CLI REPL + Global Push-to-Talk + Backup & Restore + UI Filter & Pagination (Tasks, Notes, Memory, Lists) + Recurring Reminders & Tasks + Daily Briefing + Audio Notifications & Settings).
-* **Состояние кодовой базы**: Стабильное, все тесты пройдены (`90` файлов валидированы, 299 тестов в `tests/` успешны, 0 синтаксических ошибок).
-* **Последний этап**: Расширение фильтрации и пагинации на MemoryView и ListsView.
+* **Текущая версия**: Акакий 2.0 (Desktop Hub + Voice UX + Household Assistant + Memory + Core Dev Tools + Notifications + Fast CLI REPL + Global Push-to-Talk + Backup & Restore + UI Filter & Pagination (Tasks, Notes, Memory, Lists) + Recurring Reminders & Tasks + Daily Briefing + Audio Notifications & Settings + Sub-Agent Architecture Foundation).
+* **Состояние кодовой базы**: Стабильное, все тесты пройдены (`97` файлов валидированы, 329 тестов в `tests/` успешны, 0 синтаксических ошибок).
+* **Последний этап**: Создание первого этапа расширяемой архитектуры специализированных Sub-Agent'ов (`tools/agents/`).
 * **Ветка**: `master`, синхронизирована с `origin/master`.
 
 ---
@@ -173,9 +173,17 @@
   * Интеграция звука в `NotificationService.notify()`: при отображении каждого нового всплывающего окна воспроизводится системный звук (если включен в настройках).
   * Интеграция голосового оповещения в `AkakiyGUI._handle_reminder_due()`: при наступлении напоминания текст озвучивается через существующий экземпляр `self.voice.tts.speak()` (если `speak_reminders=True`) без создания дублирующего голосового пайплайна.
   * В `SettingsView` добавлена интерактивная секция «УВЕДОМЛЕНИЯ И ЗВУК» с тумблерами «Звук уведомлений» и «Озвучивать напоминания (TTS)», мгновенным сохранением состояния и кнопкой проверки звукового сигнала.
-  * В `BaseView` добавлено свойство `settings` для унифицированного доступа к настройкам из любого экрана.
-  * Создан специализированный набор тестов `tests/test_audio_notifications.py` (15 тестов, 100% pass, всего 289 тестов в `tests/`).
+* [x] **Архитектура специализированных Sub-Agent'ов (Этап 1: Foundation)**:
+  * Создан независимый пакет `tools/agents/` без внешних зависимостей.
+  * Реализован базовый абстрактный контракт `SubAgent` (`tools/agents/base.py`) с валидацией контекста и обязательным методом `run(context: AgentContext) -> AgentResult`.
+  * Реализован контейнер `AgentContext` (`tools/agents/context.py`) для изолированной передачи задачи, списка файлов, результатов предыдущих шагов, метаданных и ссылки на родительский агент.
+  * Реализован стандартизированный контейнер `AgentResult` (`tools/agents/result.py`) со статусом `success`, сообщением, списком созданных файлов (`created_files`), структурированными данными (`data`), ошибкой (`error`), фабричными методами `ok`/`fail` и dict-like совместимостью.
+  * Реализован потокобезопасный `AgentRegistry` (`tools/agents/registry.py`) с регистрацией, поиском, динамическим включением/отключением (`enable`/`disable`) и синглтоном `get_agent_registry()`.
+  * Реализован эталонный тестовый Sub-Agent `EchoAgent` (`tools/agents/echo.py`) с эхо-обработкой контекста, mock-генерацией файлов и эмуляцией сбоев.
+  * Минимальная обратная интеграция с `Agent` (`tools/agent.py`): регистрация `agent_registry` в `__init__`, фасадный метод `Agent.run_subagent()`. Существующие методы `process`, `execute_tool`, `create_plan` не затронуты.
+  * Создан специализированный тестовый набор `tests/test_subagents_architecture.py` (30 тестов, 100% pass, всего 329 тестов в `tests/`).
 * [ ] **Интеграционные E2E тесты с виртуальным микрофоном**:
   * Реализовать тестовый сценарий, прогоняющий синтезированные аудиофайлы (WAV) через живой конвейер `VoiceService` с проверкой реакции GUI.
 * [ ] **Очистка устаревших бэкап-файлов `*.bak` в корне**:
   * Согласовать с пользователем удаление временных скриптов и резервных копий (`*.bak`) из корня репозитория.
+
