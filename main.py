@@ -169,6 +169,25 @@ def main():
 
                 continue
 
+            # =============================================
+            # Генерация изображений (Image Sub-Agent)
+            # =============================================
+
+            elif result["type"] == "image":
+
+                print("\nАкакий:")
+                answer = result.get("answer") or ""
+                print(answer)
+
+                created_files = result.get("created_files") or []
+                if not created_files and hasattr(result.get("result"), "created_files"):
+                    created_files = result["result"].created_files
+
+                if created_files:
+                    print(f"\nФайл сохранён: {created_files[0]}")
+
+                continue
+
         except Exception as error:
 
             print(

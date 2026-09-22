@@ -6,9 +6,9 @@
 
 ## 1. Текущий статус проекта
 
-* **Текущая версия**: Акакий 2.0 (Desktop Hub + Voice UX + Household Assistant + Memory + Core Dev Tools + Notifications + Fast CLI REPL + Global Push-to-Talk + Backup & Restore + UI Filter & Pagination + Recurring Reminders & Tasks + Daily Briefing + Audio Notifications & Settings + Sub-Agent Foundation + ImageAgent v1 + VRAM Manager v1).
-* **Состояние кодовой базы**: Стабильное, все тесты пройдены (355 тестов в `tests/`: 353 unit-теста успешны, 2 интеграционных пропущены по умолчанию; 0 синтаксических ошибок).
-* **Последний этап**: Разработка и интеграция VRAM Manager v1 (`tools/vram.py`) с выгрузкой Ollama и очисткой ComfyUI.
+* **Текущая версия**: Акакий 2.0 (Desktop Hub + Voice UX + Household Assistant + Memory + Core Dev Tools + Notifications + Fast CLI REPL + Global Push-to-Talk + Backup & Restore + UI Filter & Pagination + Recurring Reminders & Tasks + Daily Briefing + Audio Notifications & Settings + Sub-Agent Foundation + ImageAgent v1 + VRAM Manager v1 + Image Request Routing).
+* **Состояние кодовой базы**: Стабильное, все тесты пройдены (362 теста в `tests/`: 360 unit-тестов успешны, 2 интеграционных пропущены по умолчанию; 0 синтаксических ошибок в 1022 Python-файлах).
+* **Последний этап**: Пользовательский сценарий генерации изображений: маршрутизация запросов `Agent.process()` / `CommandRouter` $\to$ `ImageAgent`.
 * **Ветка**: `master`, синхронизирована с `origin/master`.
 
 ---
@@ -201,6 +201,15 @@
   * Создан модульный тестовый набор `tests/test_vram_manager.py` (12 unit-тестов с mock HTTP/GPU, 100% pass).
   * Создан сквозной интеграционный тест `tests/test_image_vram_integration.py` (`RUN_IMAGE_VRAM_INTEGRATION=1`): реальная проверка полного жизненного цикла на RTX 4070 (Ollama load -> unload -> ComfyUI gen -> /free -> Ollama reload).
   * Всего 355 тестов в `tests/` (353 unit pass + 2 integration skip by default).
+* [x] **Маршрутизация пользовательских запросов к ImageAgent (Image Request Routing)**:
+  * В `CommandRouter` (`tools/router.py`) добавлены шаблоны распознавания естественных запросов на генерацию изображений («создай изображение...», «нарисуй...», «сгенерируй картинку...», «сделай фото...», «изобрази...») с поддержкой вежливых форм («пожалуйста»), обращения («Акакий») и извлечением чистого текстового промпта без служебных префиксов.
+  * Детерминированная проверка в `CommandRouter.route()` с возвратом `type: "image"` без вызова LLM (< 1 мс).
+  * Исключены ложные срабатывания (вопросы «что такое изображение?», бытовые команды «создай заметку купить картину», создание планов «создай план...»).
+  * В `Agent.process()` (`tools/agent.py`) добавлен маршрут `route_type == "image"` с вызовом `self.run_subagent("image", task=prompt)`, фиксацией хода диалога в едином `ContextManager` и возвратом структурированного `resp` (`answer`, `result`, `created_files`, `success`).
+  * При недоступности ComfyUI или ошибке генерации возвращается корректный `AgentResult.fail()` без необработанных исключений и падений.
+  * В `main.py` добавлено чистое CLI-отображение для `result["type"] == "image"` с выводом пути к сохранённому файлу PNG.
+  * Создан модульный тестовый набор `tests/test_image_routing.py` (7 тестов: 13 позитивных паттернов, 10 негативных проверок, latency < 1 мс, flow успеха и ошибки, регистры и пунктуация, 100% pass).
+  * Всего 362 теста в `tests/` (360 unit pass + 2 integration skip by default).
 * [ ] **Интеграционные E2E тесты с виртуальным микрофоном**:
   * Реализовать тестовый сценарий, прогоняющий синтезированные аудиофайлы (WAV) через живой конвейер `VoiceService` с проверкой реакции GUI.
 * [ ] **Очистка устаревших бэкап-файлов `*.bak` в корне**:

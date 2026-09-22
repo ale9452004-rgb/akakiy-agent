@@ -518,6 +518,30 @@ class Agent:
                 self._record_interaction(user_input, resp)
                 return resp
 
+        # 1.3. Генерация изображений (Image Sub-Agent Fast-Path)
+        if route_type == "image":
+            prompt = route.get("prompt", "")
+            subagent_res = self.run_subagent("image", task=prompt)
+            if subagent_res.success:
+                answer = subagent_res.message
+            else:
+                err_detail = subagent_res.error or subagent_res.message or "Неизвестная ошибка"
+                answer = f"Ошибка генерации изображения: {err_detail}"
+
+            resp = {
+                "type": "image",
+                "tool": "image",
+                "result": subagent_res,
+                "answer": answer,
+                "success": subagent_res.success,
+                "created_files": list(subagent_res.created_files),
+            }
+            if not subagent_res.success:
+                resp["error"] = subagent_res.error or subagent_res.message
+
+            self._record_interaction(user_input, answer, tool_name="image")
+            return resp
+
         # 2. Teamwork Preview для сложных многошаговых задач
         if self.teamwork.is_complex_task(user_input):
             execution_result = self.teamwork.run(user_input)

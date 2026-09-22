@@ -125,6 +125,16 @@ class CommandRouter:
             re.IGNORECASE
         )
 
+        # 9. Генерация изображений (Image Generation)
+        self.image_with_noun_p = re.compile(
+            r"^(?:акакий[,\s]+)?(?:пожалуйста[,\s]+)?(?:создай|создайте|создать|сгенерируй|сгенерируйте|сгенерировать|сделай|сделайте|сделать|нарисуй|нарисуйте|нарисовать|изобрази|изобразите|изобразить|отрисуй|отрисуйте|отрисовать)(?:\s+мне)?(?:[,\s]+пожалуйста)?\s+(?:изображение|изображения|картинку|картинки|рисунок|рисунки|иллюстрацию|иллюстрации|арт|арты|фото|фотографию|фотографии)(?:\s*:\s*|[,\s]+)(.+)$",
+            re.IGNORECASE
+        )
+        self.image_draw_verb_p = re.compile(
+            r"^(?:акакий[,\s]+)?(?:пожалуйста[,\s]+)?(?:нарисуй|нарисуйте|нарисовать|изобрази|изобразите|изобразить|отрисуй|отрисуйте|отрисовать)(?:\s+мне)?(?:[,\s]+пожалуйста)?(?:\s*:\s*|[,\s]+)(.+)$",
+            re.IGNORECASE
+        )
+
     def match_memory(self, user_input: str) -> Optional[Dict[str, Any]]:
         """
         Проверяет, является ли запрос детерминированной командой памяти.
@@ -214,6 +224,37 @@ class CommandRouter:
             return {
                 "action": "clear"
             }
+
+        return None
+
+    def match_image(self, user_input: str) -> Optional[Dict[str, Any]]:
+        """
+        Проверяет, является ли запрос командой генерации изображения.
+        Возвращает dict с action='generate' и извлечённым чистым prompt, либо None.
+        """
+        raw_trimmed = user_input.strip()
+        if not raw_trimmed:
+            return None
+
+        # 1. Паттерн с глаголом создания и объектом (изображение, картинка, арт и т.д.)
+        m = self.image_with_noun_p.match(raw_trimmed)
+        if m:
+            clean_prompt = m.group(1).strip().lstrip(":").strip().strip(".,;:!?")
+            if len(clean_prompt) >= 2:
+                return {
+                    "action": "generate",
+                    "prompt": clean_prompt
+                }
+
+        # 2. Паттерн с глаголом рисования без явного существительного (нарисуй ..., изобрази ...)
+        m = self.image_draw_verb_p.match(raw_trimmed)
+        if m:
+            clean_prompt = m.group(1).strip().lstrip(":").strip().strip(".,;:!?")
+            if len(clean_prompt) >= 2:
+                return {
+                    "action": "generate",
+                    "prompt": clean_prompt
+                }
 
         return None
 
@@ -423,7 +464,15 @@ class CommandRouter:
                 "arguments": tool_res.get("arguments", {})
             }
 
-        # 4. Естественный язык / сложные запросы -> Native Tool Calling
+        # 4. Проверяем генерацию изображений (Image Sub-Agent Fast-Path)
+        image_route = self.match_image(raw_trimmed)
+        if image_route:
+            return {
+                "type": "image",
+                **image_route
+            }
+
+        # 5. Естественный язык / сложные запросы -> Native Tool Calling
         return {
             "type": None,
             "tool": None,
