@@ -6,9 +6,9 @@
 
 ## 1. Текущий статус проекта
 
-* **Текущая версия**: Акакий 2.0 (Desktop Hub + Voice UX + Household Assistant + Memory + Core Dev Tools + Notifications + Fast CLI REPL + Global Push-to-Talk + Backup & Restore + UI Filter & Pagination + Recurring Reminders & Tasks + Daily Briefing + Audio Notifications & Settings + Sub-Agent Foundation + ImageAgent v1).
-* **Состояние кодовой базы**: Стабильное, все тесты пройдены (342 теста в `tests/`: 341 unit-тест успешен, 1 интеграционный пропущен по умолчанию; 0 синтаксических ошибок).
-* **Последний этап**: Подключение ImageAgent v1 к изолированному ComfyUI Worker (`tools/agents/image.py`).
+* **Текущая версия**: Акакий 2.0 (Desktop Hub + Voice UX + Household Assistant + Memory + Core Dev Tools + Notifications + Fast CLI REPL + Global Push-to-Talk + Backup & Restore + UI Filter & Pagination + Recurring Reminders & Tasks + Daily Briefing + Audio Notifications & Settings + Sub-Agent Foundation + ImageAgent v1 + VRAM Manager v1).
+* **Состояние кодовой базы**: Стабильное, все тесты пройдены (355 тестов в `tests/`: 353 unit-теста успешны, 2 интеграционных пропущены по умолчанию; 0 синтаксических ошибок).
+* **Последний этап**: Разработка и интеграция VRAM Manager v1 (`tools/vram.py`) с выгрузкой Ollama и очисткой ComfyUI.
 * **Ветка**: `master`, синхронизирована с `origin/master`.
 
 ---
@@ -191,6 +191,16 @@
   * Создан модульный тестовый набор `tests/test_image_agent.py` (12 unit-тестов с mock HTTP, 100% pass).
   * Создан интеграционный тест `tests/test_image_agent_integration.py` (валидация реальной генерации на RTX 4070 Laptop GPU, 9.17с, валидация PNG через `struct` без внешних зависимостей).
   * Всего 342 теста в `tests/` (341 unit pass + 1 integration skip by default).
+* [x] **VRAM Manager v1 (GPU Memory Orchestration)**:
+  * Создан инфраструктурный менеджер `VRAMManager` (`tools/vram.py`) для бесконфликтного разделения видеопамяти GPU (8 GB) между Ollama (`qwen3:8b`) и ComfyUI (`sdxl_lightning_4step`).
+  * Мониторинг VRAM через `nvidia-smi` (`get_gpu_stats()`) без тяжелых сторонних библиотек.
+  * Безопасная выгрузка Ollama через `POST /api/generate` с `keep_alive: 0` (высвобождает ~5.5 GB VRAM перед генерацией).
+  * Освобождение памяти ComfyUI через `POST /free` (`unload_models: true, free_memory: true`).
+  * Контекстный менеджер `image_generation_session()` с гарантией очистки в `finally`.
+  * Интеграция с `ImageAgent`: безопасная предварительная выгрузка Ollama, гарантированный `/free` в блоке `finally` даже при ошибках генерации, защита созданного PNG от потери при сбоях очистки.
+  * Создан модульный тестовый набор `tests/test_vram_manager.py` (12 unit-тестов с mock HTTP/GPU, 100% pass).
+  * Создан сквозной интеграционный тест `tests/test_image_vram_integration.py` (`RUN_IMAGE_VRAM_INTEGRATION=1`): реальная проверка полного жизненного цикла на RTX 4070 (Ollama load -> unload -> ComfyUI gen -> /free -> Ollama reload).
+  * Всего 355 тестов в `tests/` (353 unit pass + 2 integration skip by default).
 * [ ] **Интеграционные E2E тесты с виртуальным микрофоном**:
   * Реализовать тестовый сценарий, прогоняющий синтезированные аудиофайлы (WAV) через живой конвейер `VoiceService` с проверкой реакции GUI.
 * [ ] **Очистка устаревших бэкап-файлов `*.bak` в корне**:

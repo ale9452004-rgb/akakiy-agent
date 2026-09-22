@@ -181,12 +181,20 @@
   * Поддерживает типовые бейджи (Reminder, Info, Warning, Success, Error) и кнопки действий (`✓ Выполнено`, `⏰ Отложить`).
 * [notifications/models.py](file:///c:/Akakiy%20agent/notifications/models.py): Модели данных `NotificationItem` и `NotificationAction`.
 
-### 3.7. Изолированные внешние воркеры (External Local Workers)
+### 3.7. Управление VRAM и изолированные воркеры (GPU & External Workers)
+* **VRAMManager** (`tools/vram.py`):
+  * Централизованный инфраструктурный менеджер координации видеопамяти GPU (RTX 4070 Laptop GPU 8 GB VRAM).
+  * Безопасная выгрузка Ollama (`qwen3:8b`) через API `/api/generate` с параметром `keep_alive: 0` (высвобождает ~5.5 GB VRAM перед запуском генерации).
+  * Освобождение видеопамяти ComfyUI через POST `/free` (`unload_models: true, free_memory: true`).
+  * Сбор статистики VRAM через стандартный `nvidia-smi` без внешних библиотек.
+  * Гарантированное освобождение видеопамяти в блоке `finally` даже при сбоях инференса.
+  * Контекстный менеджер `image_generation_session()` для безопасных изолированных сессий.
+  * Штатная отложенная перезагрузка Ollama при следующем обращении пользователя.
 * **ComfyUI Image Worker** (`workers/comfyui/`):
   * Автономный локальный HTTP-сервис генерации изображений (`127.0.0.1:8188`).
   * Полностью изолирован: собственное виртуальное окружение и зависимости PyTorch CUDA, не влияющие на основной `.venv` Акакия.
   * Каталог `workers/` и результаты генерации `data/generated/` исключены из Git (`.gitignore`).
-  * Использует чекпоинт `sdxl_lightning_4step.safetensors` для быстрого синтеза изображений (1024x1024, 4 шага, ~9.1 с на RTX 4070 Laptop GPU 8 GB VRAM).
+  * Использует чекпоинт `sdxl_lightning_4step.safetensors` для быстрого синтеза изображений (1024x1024, 4 шага, ~9.1-13.7 с на RTX 4070 Laptop GPU 8 GB VRAM).
 
 ---
 
@@ -303,7 +311,7 @@ NotificationService.show_reminder()
          └─► Пользователь нажал «×» (Закрыть)   ──► Закрытие окна -> _restack() оставшихся
 ```
 
-### Поток 4: Генерация изображений через Sub-Agent (ImageAgent)
+### Поток 4: Генерация изображений через Sub-Agent и VRAM Manager (ImageAgent)
 ```
 Пользователь / Агент
    │
@@ -311,6 +319,11 @@ NotificationService.show_reminder()
 Agent.run_subagent("image", task="описание картинки")
    │
    ├─► ImageAgent.run(AgentContext)
+   │      │
+   │      ├─► VRAMManager.prepare_for_image_generation()
+   │      │      ├─ Замер начальной VRAM (nvidia-smi)
+   │      │      ├─ POST http://localhost:11434/api/generate {"keep_alive": 0} (выгрузка Ollama)
+   │      │      └─ Замер VRAM после выгрузки (~1.3 GB used, ~6.5 GB free)
    │      │
    │      ├─► ComfyUIClient.queue_prompt(workflow) ──► HTTP POST /prompt (127.0.0.1:8188)
    │      │
@@ -320,10 +333,12 @@ Agent.run_subagent("image", task="описание картинки")
    │      │
    │      ├─► Сохранение в data/generated/images/img_<timestamp>_<uuid>.png
    │      │
-   │      └─► Очистка VRAM ─────────────────────────► HTTP POST /free
+   │      └─► finally: VRAMManager.restore_after_image_generation()
+   │             ├─ POST http://127.0.0.1:8188/free {"unload_models": true, "free_memory": true}
+   │             └─ Замер финальной VRAM после очистки
    │
    ▼
-AgentResult(success=True, created_files=[...], data={prompt_id, filename, ...})
+AgentResult(success=True, created_files=[...], data={prompt_id, filename, vram_prepare, vram_restore, ...})
 ```
 
 ---

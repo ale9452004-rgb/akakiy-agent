@@ -19,6 +19,7 @@ from tools.agents.registry import (
 )
 from tools.agents.echo import EchoAgent
 from tools.agents.image import ImageAgent, ComfyUIClient
+from tools.vram import VRAMManager, get_vram_manager, reset_vram_manager
 
 __all__ = [
     "SubAgent",
@@ -30,4 +31,8 @@ __all__ = [
     "EchoAgent",
     "ImageAgent",
     "ComfyUIClient",
+    "VRAMManager",
+    "get_vram_manager",
+    "reset_vram_manager",
 ]
+

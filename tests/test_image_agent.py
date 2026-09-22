@@ -28,9 +28,20 @@ class TestImageAgentUnit(unittest.TestCase):
         reset_agent_registry()
         self.temp_dir = tempfile.TemporaryDirectory()
         self.output_dir = Path(self.temp_dir.name)
+        self.mock_vram = MagicMock()
+        self.mock_vram.prepare_for_image_generation.return_value = {
+            "success": True,
+            "gpu_initial": {"used": 1000, "free": 7000, "total": 8000},
+            "ollama_unload": {"success": True, "unloaded": True}
+        }
+        self.mock_vram.restore_after_image_generation.return_value = {
+            "success": True,
+            "comfyui_free": {"success": True}
+        }
         self.agent = ImageAgent(
             output_dir=str(self.output_dir),
-            timeout=5
+            timeout=5,
+            vram_manager=self.mock_vram
         )
 
     def tearDown(self):
