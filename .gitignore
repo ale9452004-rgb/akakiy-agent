@@ -6,3 +6,4 @@ models/
 data/
 backups/
 *.backup.json
+workers/
