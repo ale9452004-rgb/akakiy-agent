@@ -112,9 +112,11 @@ _registry_lock = threading.RLock()
 def _init_default_registry() -> AgentRegistry:
     """Создаёт реестр и регистрирует стандартных агентов."""
     from tools.agents.echo import EchoAgent
+    from tools.agents.image import ImageAgent
 
     reg = AgentRegistry()
     reg.register(EchoAgent())
+    reg.register(ImageAgent())
     return reg
 
 

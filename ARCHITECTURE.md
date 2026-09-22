@@ -119,6 +119,7 @@
   * `AgentResult` (`tools/agents/result.py`): Унифицированный результат (`success`, `message`, `created_files`, `data`, `error`) с фабриками `ok`/`fail` и обратной совместимостью через dict-like интерфейс.
   * `AgentRegistry` (`tools/agents/registry.py`): Потокобезопасный реестр с поиском, динамическим включением/отключением и синглтоном `get_agent_registry()`.
   * `EchoAgent` (`tools/agents/echo.py`): Эталонный тестовый Sub-Agent для отладки передачи контекста, генерации файлов и симуляции сбоев.
+  * `ImageAgent` (`tools/agents/image.py`): Специализированный Sub-Agent генерации изображений через изолированный HTTP Worker на базе ComfyUI (`127.0.0.1:8188`, SDXL-Lightning 4-step). Предоставляет `ComfyUIClient` на стандартной библиотеке Python с получением бинарных данных PNG через `/view`, безопасным сохранением в `data/generated/images/` и освобождением VRAM через `/free`.
 
 ### 3.4. Слой данных и памяти (Data Layer)
 * [tools/memory.py](file:///c:/Akakiy%20agent/tools/memory.py): Долговременная память (`MemoryManager`).
@@ -179,6 +180,13 @@
   * Выполнено в фирменном тёмном стиле Акакия (карточка `#161b22`, рамка `#30363d`, кнопка закрытия `×`).
   * Поддерживает типовые бейджи (Reminder, Info, Warning, Success, Error) и кнопки действий (`✓ Выполнено`, `⏰ Отложить`).
 * [notifications/models.py](file:///c:/Akakiy%20agent/notifications/models.py): Модели данных `NotificationItem` и `NotificationAction`.
+
+### 3.7. Изолированные внешние воркеры (External Local Workers)
+* **ComfyUI Image Worker** (`workers/comfyui/`):
+  * Автономный локальный HTTP-сервис генерации изображений (`127.0.0.1:8188`).
+  * Полностью изолирован: собственное виртуальное окружение и зависимости PyTorch CUDA, не влияющие на основной `.venv` Акакия.
+  * Каталог `workers/` и результаты генерации `data/generated/` исключены из Git (`.gitignore`).
+  * Использует чекпоинт `sdxl_lightning_4step.safetensors` для быстрого синтеза изображений (1024x1024, 4 шага, ~9.1 с на RTX 4070 Laptop GPU 8 GB VRAM).
 
 ---
 
@@ -290,9 +298,32 @@ NotificationService.show_reminder()
    ├─ Добавление в стек и расчет координат (правый нижний угол)
    └─ _restack()
         │
-        ├─► Пользователь нажал «✓ Выполнено» ──► HouseholdManager.complete_reminder() -> refresh view
-        ├─► Пользователь нажал «⏰ Отложить»   ──► HouseholdManager.create_reminder("... через 10 минут") -> refresh view
-        └─► Пользователь нажал «×» (Закрыть)   ──► Закрытие окна -> _restack() оставшихся
+         ├─► Пользователь нажал «✓ Выполнено» ──► HouseholdManager.complete_reminder() -> refresh view
+         ├─► Пользователь нажал «⏰ Отложить»   ──► HouseholdManager.create_reminder("... через 10 минут") -> refresh view
+         └─► Пользователь нажал «×» (Закрыть)   ──► Закрытие окна -> _restack() оставшихся
+```
+
+### Поток 4: Генерация изображений через Sub-Agent (ImageAgent)
+```
+Пользователь / Агент
+   │
+   ▼
+Agent.run_subagent("image", task="описание картинки")
+   │
+   ├─► ImageAgent.run(AgentContext)
+   │      │
+   │      ├─► ComfyUIClient.queue_prompt(workflow) ──► HTTP POST /prompt (127.0.0.1:8188)
+   │      │
+   │      ├─► Опрос статуса и истории ──────────────► HTTP GET /history/{prompt_id}
+   │      │
+   │      ├─► Загрузка байтов изображения ──────────► HTTP GET /view (бинарный PNG)
+   │      │
+   │      ├─► Сохранение в data/generated/images/img_<timestamp>_<uuid>.png
+   │      │
+   │      └─► Очистка VRAM ─────────────────────────► HTTP POST /free
+   │
+   ▼
+AgentResult(success=True, created_files=[...], data={prompt_id, filename, ...})
 ```
 
 ---

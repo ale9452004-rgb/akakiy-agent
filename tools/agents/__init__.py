@@ -18,6 +18,7 @@ from tools.agents.registry import (
     reset_agent_registry
 )
 from tools.agents.echo import EchoAgent
+from tools.agents.image import ImageAgent, ComfyUIClient
 
 __all__ = [
     "SubAgent",
@@ -27,4 +28,6 @@ __all__ = [
     "get_agent_registry",
     "reset_agent_registry",
     "EchoAgent",
+    "ImageAgent",
+    "ComfyUIClient",
 ]

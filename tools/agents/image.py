@@ -1,0 +1,419 @@
+"""
+Модуль специализированного Sub-Agent'а генерации изображений (ImageAgent).
+
+Обеспечивает:
+- подключение к локальному изолированному ComfyUI Worker по HTTP API;
+- формирование валидного графа workflow для модели SDXL-Lightning 4-step;
+- передачу задачи из AgentContext (prompt, negative_prompt, seed, steps, resolution);
+- надёжное получение результата через ComfyUI API /view;
+- сохранение готовых файлов в директорию data/generated/images/ с безопасными уникальными именами;
+- возврат стандартизированного AgentResult с created_files;
+- надёжную обработку ошибок (недоступность сервера, таймауты, сбои воркера) без исключений наружу.
+"""
+
+from datetime import datetime
+import json
+import os
+from pathlib import Path
+import random
+import time
+from typing import Any, Dict, List, Optional
+import uuid
+
+import requests
+
+from config import PROJECT_PATH
+from tools.agents.base import SubAgent
+from tools.agents.context import AgentContext
+from tools.agents.result import AgentResult
+
+
+class ComfyUIClient:
+    """
+    Легковесный HTTP-клиент для взаимодействия с локальным ComfyUI Worker.
+    """
+
+    def __init__(self, base_url: str = "http://127.0.0.1:8188", timeout: int = 60):
+        self.base_url = base_url.rstrip("/")
+        self.timeout = timeout
+
+    def is_available(self) -> bool:
+        """Проверяет доступность ComfyUI сервера."""
+        try:
+            resp = requests.get(f"{self.base_url}/system_stats", timeout=3)
+            return resp.status_code == 200
+        except Exception:
+            return False
+
+    def queue_prompt(self, workflow: Dict[str, Any], client_id: Optional[str] = None) -> Dict[str, Any]:
+        """
+        Отправляет JSON workflow в очередь генерации ComfyUI (/prompt).
+        Возвращает ответ сервера с prompt_id.
+        """
+        payload: Dict[str, Any] = {"prompt": workflow}
+        if client_id:
+            payload["client_id"] = client_id
+
+        resp = requests.post(
+            f"{self.base_url}/prompt",
+            json=payload,
+            timeout=10
+        )
+        if resp.status_code != 200:
+            raise RuntimeError(
+                f"ComfyUI вернул ошибку при постановке задачи: HTTP {resp.status_code} - {resp.text}"
+            )
+        return resp.json()
+
+    def get_history(self, prompt_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Получает статус и результаты выполнения задачи (/history/{prompt_id}).
+        """
+        resp = requests.get(
+            f"{self.base_url}/history/{prompt_id}",
+            timeout=5
+        )
+        if resp.status_code != 200:
+            return None
+        data = resp.json()
+        return data.get(prompt_id)
+
+    def view_image(self, filename: str, subfolder: str = "", folder_type: str = "output") -> bytes:
+        """
+        Скачивает сгенерированное изображение через эндпоинт /view.
+        """
+        params = {
+            "filename": filename,
+            "subfolder": subfolder,
+            "type": folder_type
+        }
+        resp = requests.get(
+            f"{self.base_url}/view",
+            params=params,
+            timeout=15
+        )
+        if resp.status_code != 200:
+            raise RuntimeError(
+                f"Не удалось загрузить изображение через /view: HTTP {resp.status_code}"
+            )
+        return resp.content
+
+    def free_memory(self) -> bool:
+        """
+        Запрашивает освобождение VRAM в ComfyUI (/free).
+        """
+        try:
+            resp = requests.post(
+                f"{self.base_url}/free",
+                json={"unload_models": True, "free_memory": True},
+                timeout=5
+            )
+            return resp.status_code == 200
+        except Exception:
+            return False
+
+
+class ImageAgent(SubAgent):
+    """
+    Специализированный SubAgent генерации изображений через локальный ComfyUI Worker.
+    """
+
+    name: str = "image"
+    description: str = "Специализированный sub-agent для генерации изображений через локальный ComfyUI Worker."
+    capabilities: List[str] = ["image_generation", "sdxl_lightning", "text_to_image"]
+
+    DEFAULT_CHECKPOINT = "sdxl_lightning_4step.safetensors"
+    DEFAULT_NEGATIVE_PROMPT = "blurry, low quality, distorted, bad anatomy, ugly, watermark, signature"
+    DEFAULT_WIDTH = 1024
+    DEFAULT_HEIGHT = 1024
+    DEFAULT_STEPS = 4
+    DEFAULT_CFG = 1.5
+    DEFAULT_SAMPLER = "euler"
+    DEFAULT_SCHEDULER = "sgm_uniform"
+    DEFAULT_TIMEOUT = 60
+
+    def __init__(
+        self,
+        name: Optional[str] = None,
+        description: Optional[str] = None,
+        capabilities: Optional[List[str]] = None,
+        base_url: str = "http://127.0.0.1:8188",
+        output_dir: Optional[str] = None,
+        timeout: int = DEFAULT_TIMEOUT,
+        enabled: bool = True
+    ):
+        super().__init__(
+            name=name or self.name,
+            description=description or self.description,
+            capabilities=capabilities or self.capabilities,
+            enabled=enabled
+        )
+        self.base_url = base_url.rstrip("/")
+        self.timeout = timeout
+        self.output_dir = Path(output_dir) if output_dir else (PROJECT_PATH / "data" / "generated" / "images")
+        self.client = ComfyUIClient(base_url=self.base_url, timeout=self.timeout)
+
+    def build_workflow(
+        self,
+        prompt: str,
+        negative_prompt: str = DEFAULT_NEGATIVE_PROMPT,
+        seed: Optional[int] = None,
+        width: int = DEFAULT_WIDTH,
+        height: int = DEFAULT_HEIGHT,
+        steps: int = DEFAULT_STEPS,
+        cfg: float = DEFAULT_CFG,
+        sampler: str = DEFAULT_SAMPLER,
+        scheduler: str = DEFAULT_SCHEDULER,
+        checkpoint: str = DEFAULT_CHECKPOINT
+    ) -> Dict[str, Any]:
+        """
+        Формирует минимальный стандартный JSON-граф для SDXL-Lightning 4-step.
+        """
+        if seed is None:
+            seed = random.randint(1, 2**32 - 1)
+
+        return {
+            "1": {
+                "inputs": {
+                    "ckpt_name": checkpoint
+                },
+                "class_type": "CheckpointLoaderSimple"
+            },
+            "2": {
+                "inputs": {
+                    "text": prompt,
+                    "clip": ["1", 1]
+                },
+                "class_type": "CLIPTextEncode"
+            },
+            "3": {
+                "inputs": {
+                    "text": negative_prompt,
+                    "clip": ["1", 1]
+                },
+                "class_type": "CLIPTextEncode"
+            },
+            "4": {
+                "inputs": {
+                    "width": width,
+                    "height": height,
+                    "batch_size": 1
+                },
+                "class_type": "EmptyLatentImage"
+            },
+            "5": {
+                "inputs": {
+                    "seed": seed,
+                    "steps": steps,
+                    "cfg": cfg,
+                    "sampler_name": sampler,
+                    "scheduler": scheduler,
+                    "denoise": 1.0,
+                    "model": ["1", 0],
+                    "positive": ["2", 0],
+                    "negative": ["3", 0],
+                    "latent_image": ["4", 0]
+                },
+                "class_type": "KSampler"
+            },
+            "6": {
+                "inputs": {
+                    "samples": ["5", 0],
+                    "vae": ["1", 2]
+                },
+                "class_type": "VAEDecode"
+            },
+            "7": {
+                "inputs": {
+                    "filename_prefix": "Akakiy_ImageAgent",
+                    "images": ["6", 0]
+                },
+                "class_type": "SaveImage"
+            }
+        }
+
+    def _generate_safe_filename(self) -> str:
+        """Генерирует безопасное уникальное имя для сохраняемого файла изображения."""
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        unique_suffix = uuid.uuid4().hex[:6]
+        return f"img_{timestamp}_{unique_suffix}.png"
+
+    def run(self, context: AgentContext) -> AgentResult:
+        """
+        Выполняет генерацию изображения по переданному контексту.
+        """
+        if not self.validate_context(context):
+            return AgentResult.fail(
+                error="Некорректный контекст: ожидается экземпляр AgentContext."
+            )
+
+        if not self.enabled:
+            return AgentResult.fail(
+                error=f"Sub-agent '{self.name}' отключен."
+            )
+
+        # 1. Извлечение и валидация текстового запроса (prompt)
+        prompt = context.task.strip()
+        if not prompt:
+            prompt = str(context.get("prompt", "")).strip()
+
+        if not prompt:
+            return AgentResult.fail(
+                error="Не указан текст запроса (prompt) для генерации изображения."
+            )
+
+        # 2. Проверка доступности ComfyUI Worker
+        if not self.client.is_available():
+            return AgentResult.fail(
+                error=f"Локальный ComfyUI Worker недоступен по адресу {self.base_url}. Убедитесь, что воркер запущен."
+            )
+
+        # 3. Извлечение параметров генерации с поддержкой оверрайдов из metadata
+        negative_prompt = str(context.get("negative_prompt", self.DEFAULT_NEGATIVE_PROMPT))
+        width = int(context.get("width", self.DEFAULT_WIDTH))
+        height = int(context.get("height", self.DEFAULT_HEIGHT))
+        steps = int(context.get("steps", self.DEFAULT_STEPS))
+        cfg = float(context.get("cfg", self.DEFAULT_CFG))
+        sampler = str(context.get("sampler", self.DEFAULT_SAMPLER))
+        scheduler = str(context.get("scheduler", self.DEFAULT_SCHEDULER))
+        seed = context.get("seed")
+        if seed is not None:
+            seed = int(seed)
+        else:
+            seed = random.randint(1, 2**32 - 1)
+        checkpoint = str(context.get("checkpoint", self.DEFAULT_CHECKPOINT))
+        timeout = int(context.get("timeout", self.timeout))
+
+        # 4. Сборка workflow
+        workflow = self.build_workflow(
+            prompt=prompt,
+            negative_prompt=negative_prompt,
+            seed=seed,
+            width=width,
+            height=height,
+            steps=steps,
+            cfg=cfg,
+            sampler=sampler,
+            scheduler=scheduler,
+            checkpoint=checkpoint
+        )
+
+        # 5. Отправка workflow в ComfyUI
+        t_start = time.time()
+        try:
+            prompt_res = self.client.queue_prompt(workflow)
+            prompt_id = prompt_res.get("prompt_id")
+            if not prompt_id:
+                return AgentResult.fail(
+                    error="ComfyUI не вернул prompt_id задачи.",
+                    data={"comfy_response": prompt_res}
+                )
+        except Exception as e:
+            return AgentResult.fail(
+                error=f"Ошибка при отправке задачи в ComfyUI: {e}"
+            )
+
+        # 6. Ожидание завершения генерации (polling /history/{prompt_id})
+        output_image_info = None
+        deadline = t_start + timeout
+
+        while time.time() < deadline:
+            time.sleep(0.5)
+            try:
+                hist_item = self.client.get_history(prompt_id)
+                if hist_item:
+                    status = hist_item.get("status", {})
+                    # Проверяем возможную ошибку внутри воркера
+                    if status.get("status_str") == "error":
+                        messages = status.get("messages", [])
+                        return AgentResult.fail(
+                            error=f"Ошибка выполнения графа в ComfyUI: {messages}",
+                            data={"history": hist_item}
+                        )
+
+                    if status.get("completed", False):
+                        outputs = hist_item.get("outputs", {})
+                        for _, node_out in outputs.items():
+                            if isinstance(node_out, dict) and "images" in node_out:
+                                images_list = node_out["images"]
+                                if images_list and len(images_list) > 0:
+                                    output_image_info = images_list[0]
+                                    break
+                        break
+            except Exception:
+                # Временные сетевые сбои опрашивания не должны сразу ронять агент
+                pass
+
+        generation_time = time.time() - t_start
+
+        if not output_image_info:
+            if time.time() >= deadline:
+                return AgentResult.fail(
+                    error=f"Превышено время ожидания генерации изображения ({timeout} сек)."
+                )
+            return AgentResult.fail(
+                error="ComfyUI завершил задачу, но не вернул выходное изображение."
+            )
+
+        # 7. Получение готового изображения через API /view
+        remote_filename = output_image_info.get("filename")
+        subfolder = output_image_info.get("subfolder", "")
+        folder_type = output_image_info.get("type", "output")
+
+        if not remote_filename:
+            return AgentResult.fail(
+                error="В ответе ComfyUI отсутствует имя файла изображения."
+            )
+
+        try:
+            image_bytes = self.client.view_image(
+                filename=remote_filename,
+                subfolder=subfolder,
+                folder_type=folder_type
+            )
+            if not image_bytes or len(image_bytes) == 0:
+                return AgentResult.fail(
+                    error="Получено пустое изображение (0 байт) от ComfyUI."
+                )
+        except Exception as e:
+            return AgentResult.fail(
+                error=f"Не удалось загрузить изображение через API /view: {e}"
+            )
+
+        # 8. Сохранение файла в директорию проекта (data/generated/images/)
+        try:
+            self.output_dir.mkdir(parents=True, exist_ok=True)
+            safe_name = self._generate_safe_filename()
+            target_path = (self.output_dir / safe_name).resolve()
+
+            with open(target_path, "wb") as f:
+                f.write(image_bytes)
+        except Exception as e:
+            return AgentResult.fail(
+                error=f"Не удалось сохранить изображение на диск: {e}"
+            )
+
+        # 9. Освобождение VRAM в ComfyUI после генерации (по умолчанию)
+        if context.get("auto_free", True):
+            self.client.free_memory()
+
+        msg = f"Изображение успешно сгенерировано: {safe_name}"
+
+        return AgentResult.ok(
+            message=msg,
+            created_files=[str(target_path)],
+            data={
+                "prompt": prompt,
+                "negative_prompt": negative_prompt,
+                "width": width,
+                "height": height,
+                "steps": steps,
+                "seed": seed,
+                "sampler": sampler,
+                "scheduler": scheduler,
+                "checkpoint": checkpoint,
+                "generation_time_sec": round(generation_time, 2),
+                "file_size_bytes": len(image_bytes),
+                "saved_to": str(target_path)
+            }
+        )

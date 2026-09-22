@@ -6,9 +6,9 @@
 
 ## 1. Текущий статус проекта
 
-* **Текущая версия**: Акакий 2.0 (Desktop Hub + Voice UX + Household Assistant + Memory + Core Dev Tools + Notifications + Fast CLI REPL + Global Push-to-Talk + Backup & Restore + UI Filter & Pagination (Tasks, Notes, Memory, Lists) + Recurring Reminders & Tasks + Daily Briefing + Audio Notifications & Settings + Sub-Agent Architecture Foundation).
-* **Состояние кодовой базы**: Стабильное, все тесты пройдены (`97` файлов валидированы, 329 тестов в `tests/` успешны, 0 синтаксических ошибок).
-* **Последний этап**: Создание первого этапа расширяемой архитектуры специализированных Sub-Agent'ов (`tools/agents/`).
+* **Текущая версия**: Акакий 2.0 (Desktop Hub + Voice UX + Household Assistant + Memory + Core Dev Tools + Notifications + Fast CLI REPL + Global Push-to-Talk + Backup & Restore + UI Filter & Pagination + Recurring Reminders & Tasks + Daily Briefing + Audio Notifications & Settings + Sub-Agent Foundation + ImageAgent v1).
+* **Состояние кодовой базы**: Стабильное, все тесты пройдены (342 теста в `tests/`: 341 unit-тест успешен, 1 интеграционный пропущен по умолчанию; 0 синтаксических ошибок).
+* **Последний этап**: Подключение ImageAgent v1 к изолированному ComfyUI Worker (`tools/agents/image.py`).
 * **Ветка**: `master`, синхронизирована с `origin/master`.
 
 ---
@@ -182,6 +182,15 @@
   * Реализован эталонный тестовый Sub-Agent `EchoAgent` (`tools/agents/echo.py`) с эхо-обработкой контекста, mock-генерацией файлов и эмуляцией сбоев.
   * Минимальная обратная интеграция с `Agent` (`tools/agent.py`): регистрация `agent_registry` в `__init__`, фасадный метод `Agent.run_subagent()`. Существующие методы `process`, `execute_tool`, `create_plan` не затронуты.
   * Создан специализированный тестовый набор `tests/test_subagents_architecture.py` (30 тестов, 100% pass, всего 329 тестов в `tests/`).
+* [x] **ImageAgent v1 с интеграцией ComfyUI Worker**:
+  * Реализован клиент `ComfyUIClient` (`tools/agents/image.py`) на стандартной библиотеке Python (`urllib.request`) без установки сторонних зависимостей в основной `.venv`.
+  * Реализован `ImageAgent(SubAgent)` со стандартным SDXL-Lightning workflow (1024x1024, 4 steps, Euler, sgm_uniform, CFG 1.5).
+  * Получение бинарных данных PNG через официальный endpoint `/view` с сохранением в `data/generated/images/img_<timestamp>_<uuid>.png`.
+  * Автоматический вызов `/free` для своевременного освобождения видеопамяти VRAM.
+  * Регистрация в `AgentRegistry` по умолчанию под ключом `"image"`.
+  * Создан модульный тестовый набор `tests/test_image_agent.py` (12 unit-тестов с mock HTTP, 100% pass).
+  * Создан интеграционный тест `tests/test_image_agent_integration.py` (валидация реальной генерации на RTX 4070 Laptop GPU, 9.17с, валидация PNG через `struct` без внешних зависимостей).
+  * Всего 342 теста в `tests/` (341 unit pass + 1 integration skip by default).
 * [ ] **Интеграционные E2E тесты с виртуальным микрофоном**:
   * Реализовать тестовый сценарий, прогоняющий синтезированные аудиофайлы (WAV) через живой конвейер `VoiceService` с проверкой реакции GUI.
 * [ ] **Очистка устаревших бэкап-файлов `*.bak` в корне**:
