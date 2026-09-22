@@ -18,7 +18,13 @@ from tools.agents.registry import (
     reset_agent_registry
 )
 from tools.agents.echo import EchoAgent
-from tools.agents.image import ImageAgent, ComfyUIClient
+from tools.agents.image import (
+    ImageAgent,
+    ComfyUIClient,
+    RESOLUTION_PRESETS,
+    safe_validate_resolution,
+    safe_validate_count
+)
 from tools.vram import VRAMManager, get_vram_manager, reset_vram_manager
 
 __all__ = [
@@ -31,6 +37,9 @@ __all__ = [
     "EchoAgent",
     "ImageAgent",
     "ComfyUIClient",
+    "RESOLUTION_PRESETS",
+    "safe_validate_resolution",
+    "safe_validate_count",
     "VRAMManager",
     "get_vram_manager",
     "reset_vram_manager",

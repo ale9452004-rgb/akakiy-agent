@@ -17,7 +17,7 @@ import os
 from pathlib import Path
 import random
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 import uuid
 
 import requests
@@ -112,6 +112,70 @@ class ComfyUIClient:
             return resp.status_code == 200
         except Exception:
             return False
+
+
+RESOLUTION_PRESETS: Dict[str, Tuple[int, int]] = {
+    "square": (1024, 1024),
+    "квадрат": (1024, 1024),
+    "квадратное": (1024, 1024),
+    "квадратный": (1024, 1024),
+    "1:1": (1024, 1024),
+    "landscape": (1216, 832),
+    "широкое": (1216, 832),
+    "широкий": (1216, 832),
+    "горизонтальное": (1216, 832),
+    "горизонтальный": (1216, 832),
+    "альбомное": (1216, 832),
+    "пейзажное": (1216, 832),
+    "16:9": (1344, 768),
+    "portrait": (832, 1216),
+    "вертикальное": (832, 1216),
+    "вертикальный": (832, 1216),
+    "портретное": (832, 1216),
+    "портретный": (832, 1216),
+    "9:16": (768, 1344),
+}
+
+
+def safe_validate_resolution(width: Any, height: Any) -> Tuple[int, int]:
+    """
+    Безопасно валидирует и нормализует разрешение для SDXL на 8 GB VRAM:
+    - минимальный размер стороны: 512 px
+    - максимальный размер стороны: 1536 px
+    - масштабирует при превышении ~1.35 MP с сохранением соотношения сторон
+    - округляет до ближайшего кратного 64 (требование VAE SDXL)
+    """
+    try:
+        w = int(width)
+        h = int(height)
+    except (ValueError, TypeError):
+        return 1024, 1024
+
+    if w <= 0:
+        w = 1024
+    if h <= 0:
+        h = 1024
+
+    MAX_PIXELS = 1344 * 768  # ~1.03 MP
+    total = w * h
+    if total > 1_350_000:
+        scale = (MAX_PIXELS / total) ** 0.5
+        w = int(w * scale)
+        h = int(h * scale)
+
+    w = max(512, min(1536, round(w / 64) * 64))
+    h = max(512, min(1536, round(h / 64) * 64))
+
+    return w, h
+
+
+def safe_validate_count(count: Any) -> int:
+    """Безопасно валидирует количество изображений (1..4) для защиты от OOM и таймаутов."""
+    try:
+        c = int(count)
+    except (ValueError, TypeError):
+        c = 1
+    return max(1, min(4, c))
 
 
 class ImageAgent(SubAgent):
@@ -265,6 +329,20 @@ class ImageAgent(SubAgent):
                 error="Не указан текст запроса (prompt) для генерации изображения."
             )
 
+        # 1.1. Извлечение и безопасная нормализация разрешения и количества
+        aspect_ratio = str(context.get("aspect_ratio", "")).strip().lower()
+        raw_width = context.get("width")
+        raw_height = context.get("height")
+
+        if aspect_ratio in RESOLUTION_PRESETS and (raw_width is None or raw_height is None):
+            width, height = RESOLUTION_PRESETS[aspect_ratio]
+        else:
+            w_val = raw_width if raw_width is not None else self.DEFAULT_WIDTH
+            h_val = raw_height if raw_height is not None else self.DEFAULT_HEIGHT
+            width, height = safe_validate_resolution(w_val, h_val)
+
+        count = safe_validate_count(context.get("count", 1))
+
         # 2. Проверка доступности ComfyUI Worker
         if not self.client.is_available():
             return AgentResult.fail(
@@ -285,44 +363,115 @@ class ImageAgent(SubAgent):
                 )
 
         # 4. Выполнение генерации в защищенном блоке try...finally
-        saved_target_path = None
-        image_bytes = None
+        saved_target_paths = []
+        total_file_size = 0
         generation_time = 0.0
         generation_error = None
-        prompt_id = None
+        last_prompt_id = None
         workflow_data = None
         vram_restore_info = None
         cleanup_error = None
+        used_seeds = []
 
+        t_overall_start = time.time()
         try:
-            # Извлечение параметров генерации с поддержкой оверрайдов из metadata
             negative_prompt = str(context.get("negative_prompt", self.DEFAULT_NEGATIVE_PROMPT))
-            width = int(context.get("width", self.DEFAULT_WIDTH))
-            height = int(context.get("height", self.DEFAULT_HEIGHT))
             steps = int(context.get("steps", self.DEFAULT_STEPS))
             cfg = float(context.get("cfg", self.DEFAULT_CFG))
             sampler = str(context.get("sampler", self.DEFAULT_SAMPLER))
             scheduler = str(context.get("scheduler", self.DEFAULT_SCHEDULER))
-            seed = context.get("seed")
-            if seed is not None:
-                seed = int(seed)
-            else:
-                seed = random.randint(1, 2**32 - 1)
+            base_seed = context.get("seed")
             checkpoint = str(context.get("checkpoint", self.DEFAULT_CHECKPOINT))
             timeout = int(context.get("timeout", self.timeout))
 
-            workflow = self.build_workflow(
-                prompt=prompt,
-                negative_prompt=negative_prompt,
-                seed=seed,
-                width=width,
-                height=height,
-                steps=steps,
-                cfg=cfg,
-                sampler=sampler,
-                scheduler=scheduler,
-                checkpoint=checkpoint
-            )
+            self.output_dir.mkdir(parents=True, exist_ok=True)
+
+            for i in range(count):
+                if base_seed is not None:
+                    curr_seed = int(base_seed) + i
+                else:
+                    curr_seed = random.randint(1, 2**32 - 1)
+                used_seeds.append(curr_seed)
+
+                workflow = self.build_workflow(
+                    prompt=prompt,
+                    negative_prompt=negative_prompt,
+                    seed=curr_seed,
+                    width=width,
+                    height=height,
+                    steps=steps,
+                    cfg=cfg,
+                    sampler=sampler,
+                    scheduler=scheduler,
+                    checkpoint=checkpoint
+                )
+
+                # Отправка задачи в ComfyUI
+                try:
+                    prompt_res = self.client.queue_prompt(workflow)
+                    prompt_id = prompt_res.get("prompt_id")
+                    if not prompt_id:
+                        raise RuntimeError("ComfyUI не вернул prompt_id задачи.")
+                    last_prompt_id = prompt_id
+                except Exception as e:
+                    raise RuntimeError(f"Ошибка при отправке задачи в ComfyUI: {e}")
+
+                # Ожидание завершения генерации
+                t_iter_start = time.time()
+                deadline = t_iter_start + timeout
+                output_images_info = []
+
+                while time.time() < deadline:
+                    time.sleep(0.5)
+                    try:
+                        hist_item = self.client.get_history(prompt_id)
+                        if hist_item:
+                            status = hist_item.get("status", {})
+                            if status.get("status_str") == "error":
+                                messages = status.get("messages", [])
+                                raise RuntimeError(f"Ошибка выполнения графа в ComfyUI: {messages}")
+
+                            if status.get("completed", False):
+                                outputs = hist_item.get("outputs", {})
+                                for _, node_out in outputs.items():
+                                    if isinstance(node_out, dict) and "images" in node_out:
+                                        imgs = node_out["images"]
+                                        if imgs:
+                                            output_images_info.extend(imgs)
+                                break
+                    except Exception as ex:
+                        if "Ошибка выполнения графа" in str(ex):
+                            raise ex
+                        pass
+
+                if not output_images_info:
+                    if time.time() >= deadline:
+                        raise TimeoutError(f"Превышено время ожидания генерации изображения ({timeout} сек).")
+                    raise RuntimeError("ComfyUI завершил задачу, но не вернул выходное изображение.")
+
+                # Скачивание и сохранение изображений текущей итерации
+                for img_info in output_images_info:
+                    remote_filename = img_info.get("filename")
+                    subfolder = img_info.get("subfolder", "")
+                    folder_type = img_info.get("type", "output")
+                    if not remote_filename:
+                        continue
+
+                    image_bytes = self.client.view_image(
+                        filename=remote_filename,
+                        subfolder=subfolder,
+                        folder_type=folder_type
+                    )
+                    if not image_bytes or len(image_bytes) == 0:
+                        raise RuntimeError("Получено пустое изображение (0 байт) от ComfyUI.")
+
+                    safe_name = self._generate_safe_filename()
+                    target_path = (self.output_dir / safe_name).resolve()
+                    with open(target_path, "wb") as f:
+                        f.write(image_bytes)
+                    saved_target_paths.append(target_path)
+                    total_file_size += len(image_bytes)
+
             workflow_data = {
                 "negative_prompt": negative_prompt,
                 "width": width,
@@ -331,85 +480,12 @@ class ImageAgent(SubAgent):
                 "cfg": cfg,
                 "sampler": sampler,
                 "scheduler": scheduler,
-                "seed": seed,
-                "checkpoint": checkpoint
+                "checkpoint": checkpoint,
+                "seed": base_seed if base_seed is not None else (used_seeds[0] if used_seeds else None),
+                "seeds": used_seeds,
+                "count": count
             }
-
-            # Отправка задачи в ComfyUI
-            t_start = time.time()
-            try:
-                prompt_res = self.client.queue_prompt(workflow)
-                prompt_id = prompt_res.get("prompt_id")
-                if not prompt_id:
-                    raise RuntimeError("ComfyUI не вернул prompt_id задачи.")
-            except Exception as e:
-                raise RuntimeError(f"Ошибка при отправке задачи в ComfyUI: {e}")
-
-            # Ожидание завершения генерации (polling /history/{prompt_id})
-            output_image_info = None
-            deadline = t_start + timeout
-
-            while time.time() < deadline:
-                time.sleep(0.5)
-                try:
-                    hist_item = self.client.get_history(prompt_id)
-                    if hist_item:
-                        status = hist_item.get("status", {})
-                        if status.get("status_str") == "error":
-                            messages = status.get("messages", [])
-                            raise RuntimeError(f"Ошибка выполнения графа в ComfyUI: {messages}")
-
-                        if status.get("completed", False):
-                            outputs = hist_item.get("outputs", {})
-                            for _, node_out in outputs.items():
-                                if isinstance(node_out, dict) and "images" in node_out:
-                                    images_list = node_out["images"]
-                                    if images_list and len(images_list) > 0:
-                                        output_image_info = images_list[0]
-                                        break
-                            break
-                except Exception as ex:
-                    if "Ошибка выполнения графа" in str(ex):
-                        raise ex
-                    pass
-
-            generation_time = time.time() - t_start
-
-            if not output_image_info:
-                if time.time() >= deadline:
-                    raise TimeoutError(f"Превышено время ожидания генерации изображения ({timeout} сек).")
-                raise RuntimeError("ComfyUI завершил задачу, но не вернул выходное изображение.")
-
-            # Получение готового изображения через API /view
-            remote_filename = output_image_info.get("filename")
-            subfolder = output_image_info.get("subfolder", "")
-            folder_type = output_image_info.get("type", "output")
-
-            if not remote_filename:
-                raise RuntimeError("В ответе ComfyUI отсутствует имя файла изображения.")
-
-            try:
-                image_bytes = self.client.view_image(
-                    filename=remote_filename,
-                    subfolder=subfolder,
-                    folder_type=folder_type
-                )
-                if not image_bytes or len(image_bytes) == 0:
-                    raise RuntimeError("Получено пустое изображение (0 байт) от ComfyUI.")
-            except Exception as e:
-                raise RuntimeError(f"Не удалось загрузить изображение через API /view: {e}")
-
-            # Сохранение файла в директорию проекта (data/generated/images/)
-            try:
-                self.output_dir.mkdir(parents=True, exist_ok=True)
-                safe_name = self._generate_safe_filename()
-                target_path = (self.output_dir / safe_name).resolve()
-
-                with open(target_path, "wb") as f:
-                    f.write(image_bytes)
-                saved_target_path = target_path
-            except Exception as e:
-                raise RuntimeError(f"Не удалось сохранить изображение на диск: {e}")
+            generation_time = time.time() - t_overall_start
 
         except Exception as e:
             generation_error = str(e)
@@ -430,29 +506,37 @@ class ImageAgent(SubAgent):
                         cleanup_error = str(e)
 
         # Обработка результатов
-        if generation_error is not None:
+        if generation_error is not None and not saved_target_paths:
             return AgentResult.fail(
                 error=generation_error,
                 data={
                     "prompt": prompt,
-                    "prompt_id": prompt_id,
+                    "prompt_id": last_prompt_id,
                     "vram_prepare": vram_prepare_info,
                     "vram_restore": vram_restore_info,
                     "vram_cleanup_error": cleanup_error
                 }
             )
 
-        # Генерация успешна, файл сохранён
-        safe_name = saved_target_path.name
-        msg = f"Изображение успешно сгенерировано: {safe_name}"
+        # Генерация успешна
+        if len(saved_target_paths) == 1:
+            safe_name = saved_target_paths[0].name
+            msg = f"Изображение успешно сгенерировано: {safe_name}"
+        else:
+            names = ", ".join(p.name for p in saved_target_paths)
+            msg = f"Успешно сгенерировано изображений: {len(saved_target_paths)} ({names})"
+
         if cleanup_error:
             msg += f" (Предупреждение: ошибка освобождения VRAM: {cleanup_error})"
 
         res_data = {
             "prompt": prompt,
-            "saved_to": str(saved_target_path),
+            "saved_to": [str(p) for p in saved_target_paths],
+            "count": len(saved_target_paths),
+            "width": width,
+            "height": height,
+            "file_size_bytes": total_file_size,
             "generation_time_sec": round(generation_time, 2),
-            "file_size_bytes": len(image_bytes) if image_bytes else 0,
             "vram_prepare": vram_prepare_info,
             "vram_restore": vram_restore_info,
             "vram_cleanup_error": cleanup_error
@@ -462,6 +546,6 @@ class ImageAgent(SubAgent):
 
         return AgentResult.ok(
             message=msg,
-            created_files=[str(saved_target_path)],
+            created_files=[str(p) for p in saved_target_paths],
             data=res_data
         )

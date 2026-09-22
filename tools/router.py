@@ -229,34 +229,170 @@ class CommandRouter:
 
     def match_image(self, user_input: str) -> Optional[Dict[str, Any]]:
         """
-        Проверяет, является ли запрос командой генерации изображения.
-        Возвращает dict с action='generate' и извлечённым чистым prompt, либо None.
+        Проверяет, является ли запрос командой генерации изображения,
+        и извлекает параметры (prompt, aspect_ratio, width, height, count).
         """
         raw_trimmed = user_input.strip()
         if not raw_trimmed:
             return None
 
-        # 1. Паттерн с глаголом создания и объектом (изображение, картинка, арт и т.д.)
-        m = self.image_with_noun_p.match(raw_trimmed)
-        if m:
-            clean_prompt = m.group(1).strip().lstrip(":").strip().strip(".,;:!?")
-            if len(clean_prompt) >= 2:
-                return {
-                    "action": "generate",
-                    "prompt": clean_prompt
-                }
+        # Нормализованная проверка обращения в начале: "Акакий, ...", "Пожалуйста, ..."
+        prefix_pattern = re.compile(
+            r"^(?:акакий[,\s]+)?(?:пожалуйста[,\s]+)?",
+            re.IGNORECASE
+        )
+        body = prefix_pattern.sub("", raw_trimmed).strip()
 
-        # 2. Паттерн с глаголом рисования без явного существительного (нарисуй ..., изобрази ...)
-        m = self.image_draw_verb_p.match(raw_trimmed)
-        if m:
-            clean_prompt = m.group(1).strip().lstrip(":").strip().strip(".,;:!?")
-            if len(clean_prompt) >= 2:
-                return {
-                    "action": "generate",
-                    "prompt": clean_prompt
-                }
+        # 1. Проверяем наличие управляющего глагола генерации/рисования в начале
+        verb_pattern = re.compile(
+            r"^(?:создай|создайте|создать|сгенерируй|сгенерируйте|сгенерировать|сделай|сделайте|сделать|нарисуй|нарисуйте|нарисовать|изобрази|изобразите|изобразить|отрисуй|отрисуйте|отрисовать)(?:\s+мне)?(?:[,\s]+пожалуйста)?(?:\s*:\s*|[,\s]+)",
+            re.IGNORECASE
+        )
+        verb_match = verb_pattern.match(body)
+        if not verb_match:
+            return None
 
-        return None
+        remainder = body[verb_match.end():].strip()
+        if not remainder:
+            return None
+
+        # Инициализация параметров по умолчанию
+        aspect_ratio = "square"
+        width = 1024
+        height = 1024
+        count = 1
+
+        # 2.1. Поиск явного разрешения WxH (например: 1280x720, 1024х1024, 800*600)
+        wxh_match = re.search(r"\b(\d{3,4})\s*[xхXХ*×]\s*(\d{3,4})\b", remainder)
+        if wxh_match:
+            rw, rh = int(wxh_match.group(1)), int(wxh_match.group(2))
+            from tools.agents.image import safe_validate_resolution
+            width, height = safe_validate_resolution(rw, rh)
+            aspect_ratio = "custom"
+            remainder = remainder[:wxh_match.start()] + " " + remainder[wxh_match.end():]
+
+        # Общий паттерн служебных существительных (изображение, картинка, рисунок, арт, фото и т.д.)
+        img_noun = r"(?:изображен\w*|картинк\w*|картинок|рисун\w*|иллюстрац\w*|арт\w*|фото\w*|постер\w*|штук\w*|шт)"
+
+        # 2.2. Поиск количества изображений (цифры или словесные числительные 1..4)
+        count_noun_pattern = re.compile(
+            rf"\b(\d+|одно|один|одну|два|две|три|четыре|пару|пара)\s+(?:(?:квадратн\w*|широк\w*|горизонтальн\w*|альбомн\w*|пейзажн\w*|вертикальн\w*|портретн\w*|landscape|portrait|16:9|9:16|1:1)\s+)?{img_noun}\b",
+            re.IGNORECASE
+        )
+        count_match = count_noun_pattern.search(remainder)
+        if not count_match:
+            count_match = re.match(
+                rf"^(\d+|одно|один|одну|два|две|три|четыре|пару|пара)\s+{img_noun}\b",
+                remainder,
+                re.IGNORECASE
+            )
+
+        if count_match:
+            raw_c = count_match.group(1).lower()
+            word_map = {
+                "один": 1, "одно": 1, "одну": 1,
+                "два": 2, "две": 2, "три": 3, "четыре": 4,
+                "пару": 2, "пара": 2
+            }
+            if raw_c in word_map:
+                count = word_map[raw_c]
+            else:
+                try:
+                    count = int(raw_c)
+                except ValueError:
+                    count = 1
+            from tools.agents.image import safe_validate_count
+            count = safe_validate_count(count)
+            c_start = count_match.start(1)
+            c_end = count_match.end(1)
+            remainder = remainder[:c_start] + " " + remainder[c_end:]
+
+        # 2.3. Поиск ориентации / пресета (если не было явного WxH)
+        if aspect_ratio != "custom":
+            # Landscape
+            m_land = re.search(
+                rf"\b(широк\w*|горизонтальн\w*|альбомн\w*|пейзажн\w*|landscape|16:9)\s+{img_noun}\b"
+                rf"|\b{img_noun}\s+(широк\w*|горизонтальн\w*|альбомн\w*|пейзажн\w*)\b"
+                r"|,\s*(широк\w*|горизонтальн\w*|landscape|16:9)\s*$"
+                r"|\b(landscape|16:9)\b",
+                remainder,
+                re.IGNORECASE
+            )
+            if m_land:
+                aspect_ratio = "landscape"
+                width = 1216
+                height = 832
+                for g_idx in range(1, 5):
+                    if m_land.group(g_idx):
+                        remainder = remainder[:m_land.start(g_idx)] + " " + remainder[m_land.end(g_idx):]
+                        break
+            else:
+                # Portrait
+                m_port = re.search(
+                    rf"\b(вертикальн\w*|портретн\w*|portrait|9:16)\s+{img_noun}\b"
+                    rf"|\b{img_noun}\s+(вертикальн\w*|портретн\w*)\b"
+                    r"|,\s*(вертикальн\w*|портретн\w*|portrait|9:16)\s*$"
+                    r"|\b(portrait|9:16)\b",
+                    remainder,
+                    re.IGNORECASE
+                )
+                if m_port:
+                    aspect_ratio = "portrait"
+                    width = 832
+                    height = 1216
+                    for g_idx in range(1, 5):
+                        if m_port.group(g_idx):
+                            remainder = remainder[:m_port.start(g_idx)] + " " + remainder[m_port.end(g_idx):]
+                            break
+                else:
+                    # Square
+                    m_sq = re.search(
+                        rf"\b(квадратн\w*|квадрат|1:1)\s+{img_noun}\b"
+                        rf"|\b{img_noun}\s+(квадратн\w*|квадрат|1:1)\b"
+                        r"|,\s*(квадратн\w*|квадрат|1:1)\s*$"
+                        r"|\b(1:1)\b",
+                        remainder,
+                        re.IGNORECASE
+                    )
+                    if m_sq:
+                        aspect_ratio = "square"
+                        width = 1024
+                        height = 1024
+                        for g_idx in range(1, 5):
+                            if m_sq.group(g_idx):
+                                remainder = remainder[:m_sq.start(g_idx)] + " " + remainder[m_sq.end(g_idx):]
+                                break
+
+        # 2.4. Удаление ведущих служебных существительных (изображение, картинка и т.д.)
+        noun_pattern = re.compile(
+            rf"^\s*{img_noun}(?:\s*:\s*|[,\s]+|$)",
+            re.IGNORECASE
+        )
+        remainder = noun_pattern.sub(" ", remainder)
+
+        # 2.5. Очистка предлогов и концевой пунктуации
+        clean_prompt = remainder.strip().lstrip(":").strip()
+        clean_prompt = re.sub(r"^(?:мне|пожалуйста)[,\s]+", "", clean_prompt, flags=re.IGNORECASE).strip()
+        clean_prompt = clean_prompt.strip(".,;:!? ")
+
+        if len(clean_prompt) < 2:
+            return None
+
+        # Дополнительная валидация: наличие существительного или глагола рисования
+        has_image_noun = bool(re.search(rf"\b{img_noun}\b", body, re.IGNORECASE))
+        has_draw_verb = bool(re.match(r"^(?:акакий[,\s]+)?(?:пожалуйста[,\s]+)?(?:нарисуй|нарисуйте|нарисовать|изобрази|изобразите|изобразить|отрисуй|отрисуйте|отрисовать)", raw_trimmed, re.IGNORECASE))
+
+        if not has_image_noun and not has_draw_verb:
+            return None
+
+        return {
+            "action": "generate",
+            "prompt": clean_prompt,
+            "aspect_ratio": aspect_ratio,
+            "width": width,
+            "height": height,
+            "count": count
+        }
 
     def choose_tool(self, user_input: str) -> Dict[str, Any]:
         """

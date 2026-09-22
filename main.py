@@ -184,7 +184,12 @@ def main():
                     created_files = result["result"].created_files
 
                 if created_files:
-                    print(f"\nФайл сохранён: {created_files[0]}")
+                    if len(created_files) == 1:
+                        print(f"\nФайл сохранён: {created_files[0]}")
+                    else:
+                        print(f"\nСохранено файлов: {len(created_files)}")
+                        for idx, fpath in enumerate(created_files, 1):
+                            print(f"  {idx}. {fpath}")
 
                 continue
 

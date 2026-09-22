@@ -17,7 +17,10 @@ from tools.agents import (
     ImageAgent,
     ComfyUIClient,
     get_agent_registry,
-    reset_agent_registry
+    reset_agent_registry,
+    safe_validate_resolution,
+    safe_validate_count,
+    RESOLUTION_PRESETS
 )
 
 
@@ -236,6 +239,77 @@ class TestImageAgentUnit(unittest.TestCase):
         self.assertTrue(name1.startswith("img_"))
         self.assertTrue(name1.endswith(".png"))
         self.assertNotEqual(name1, name2)
+
+    def test_safe_validate_resolution(self):
+        """Проверка безопасной валидации и нормализации разрешения."""
+        # Стандартные валидные размеры
+        self.assertEqual(safe_validate_resolution(1024, 1024), (1024, 1024))
+        self.assertEqual(safe_validate_resolution(1280, 720), (1280, 704))
+        # Ограничение по минимальному размеру (min 512)
+        self.assertEqual(safe_validate_resolution(100, 200), (512, 512))
+        # Масштабирование при превышении допустимого лимита VRAM (~1.35 MP)
+        w, h = safe_validate_resolution(1920, 1080)
+        self.assertEqual((w, h), (1344, 768))
+        self.assertLessEqual(w * h, 1_350_000)
+        self.assertEqual(w % 64, 0)
+        self.assertEqual(h % 64, 0)
+        # Некорректные типы и отрицательные значения
+        self.assertEqual(safe_validate_resolution("bad", None), (1024, 1024))
+        self.assertEqual(safe_validate_resolution(-100, -200), (1024, 1024))
+
+    def test_safe_validate_count(self):
+        """Проверка безопасного диапазона количества изображений (1..4)."""
+        self.assertEqual(safe_validate_count(1), 1)
+        self.assertEqual(safe_validate_count(2), 2)
+        self.assertEqual(safe_validate_count(4), 4)
+        self.assertEqual(safe_validate_count(0), 1)
+        self.assertEqual(safe_validate_count(-3), 1)
+        self.assertEqual(safe_validate_count(10), 4)
+        self.assertEqual(safe_validate_count("abc"), 1)
+
+    def test_resolution_presets(self):
+        """Проверка наличия стандартных пресетов разрешения."""
+        self.assertEqual(RESOLUTION_PRESETS["square"], (1024, 1024))
+        self.assertEqual(RESOLUTION_PRESETS["landscape"], (1216, 832))
+        self.assertEqual(RESOLUTION_PRESETS["portrait"], (832, 1216))
+
+    def test_multi_image_generation_flow(self):
+        """Проверка последовательной генерации нескольких изображений (count=2)."""
+        fake_png_1 = b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDRimage1"
+        fake_png_2 = b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDRimage2"
+
+        hist_1 = {
+            "status": {"status_str": "success", "completed": True},
+            "outputs": {"7": {"images": [{"filename": "img_0001.png", "subfolder": "", "type": "output"}]}}
+        }
+        hist_2 = {
+            "status": {"status_str": "success", "completed": True},
+            "outputs": {"7": {"images": [{"filename": "img_0002.png", "subfolder": "", "type": "output"}]}}
+        }
+
+        with patch.object(self.agent.client, "is_available", return_value=True), \
+             patch.object(self.agent.client, "queue_prompt", side_effect=[{"prompt_id": "id-1"}, {"prompt_id": "id-2"}]) as mock_queue, \
+             patch.object(self.agent.client, "get_history", side_effect=[hist_1, hist_2]), \
+             patch.object(self.agent.client, "view_image", side_effect=[fake_png_1, fake_png_2]), \
+             patch.object(self.agent.client, "free_memory", return_value=True) as mock_free:
+
+            ctx = AgentContext(
+                task="Два кота",
+                metadata={"count": 2, "aspect_ratio": "landscape", "seed": 100}
+            )
+            res = self.agent.run(ctx)
+
+            self.assertTrue(res.success)
+            self.assertEqual(len(res.created_files), 2)
+            self.assertEqual(res.data["count"], 2)
+            self.assertEqual(res.data["width"], 1216)
+            self.assertEqual(res.data["height"], 832)
+            self.assertEqual(res.data["seed"], 100)
+            self.assertEqual(res.data["seeds"], [100, 101])
+            self.assertEqual(mock_queue.call_count, 2)
+            self.assertEqual(self.mock_vram.prepare_for_image_generation.call_count, 1)
+            self.assertEqual(self.mock_vram.restore_after_image_generation.call_count, 1)
+            mock_free.assert_called_once()
 
     def test_image_agent_in_default_registry(self):
         """ImageAgent автоматически регистрируется в глобальном реестре под именем 'image'."""

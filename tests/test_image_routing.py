@@ -114,6 +114,85 @@ class TestImageRouterPatterns(unittest.TestCase):
         self.assertEqual(route.get("type"), "image")
         self.assertLess(elapsed_ms, 1.0, f"Latency {elapsed_ms:.3f} ms exceeds 1.0 ms")
 
+    def test_aspect_ratio_presets(self):
+        """Проверка распознавания пресетов соотношения сторон: квадрат, landscape, portrait."""
+        cases = [
+            ("создай квадратное изображение кота", "кота", "square", 1024, 1024),
+            ("сделай картинку котенка, 1:1", "котенка", "square", 1024, 1024),
+            ("создай широкое изображение замка", "замка", "landscape", 1216, 832),
+            ("нарисуй горизонтальное фото гор", "гор", "landscape", 1216, 832),
+            ("сгенерируй арт пейзажное озера", "озера", "landscape", 1216, 832),
+            ("сделай вертикальную картинку водопада", "водопада", "portrait", 832, 1216),
+            ("создай портретное фото девушки", "девушки", "portrait", 832, 1216),
+        ]
+        for query, exp_prompt, exp_ratio, exp_w, exp_h in cases:
+            with self.subTest(query=query):
+                route = self.router.route(query)
+                self.assertEqual(route.get("type"), "image")
+                self.assertEqual(route.get("prompt"), exp_prompt)
+                self.assertEqual(route.get("aspect_ratio"), exp_ratio)
+                self.assertEqual(route.get("width"), exp_w)
+                self.assertEqual(route.get("height"), exp_h)
+                self.assertEqual(route.get("count"), 1)
+
+    def test_explicit_resolution(self):
+        """Проверка распознавания явного разрешения WxH."""
+        cases = [
+            ("создай изображение 1280x720 автомобиля", "автомобиля", 1280, 704),
+            ("нарисуй картинку 800х600 старинный замок", "старинный замок", 768, 576),
+            ("сделай фото 1920*1080 заката", "заката", 1344, 768),
+        ]
+        for query, exp_prompt, exp_w, exp_h in cases:
+            with self.subTest(query=query):
+                route = self.router.route(query)
+                self.assertEqual(route.get("type"), "image")
+                self.assertEqual(route.get("prompt"), exp_prompt)
+                self.assertEqual(route.get("aspect_ratio"), "custom")
+                self.assertEqual(route.get("width"), exp_w)
+                self.assertEqual(route.get("height"), exp_h)
+
+    def test_count_parameters(self):
+        """Проверка распознавания количества изображений (1..4)."""
+        cases = [
+            ("сделай 2 изображения робота", "робота", 2),
+            ("создай 3 картинки дракона", "дракона", 3),
+            ("нарисуй 4 фото автомобиля", "автомобиля", 4),
+            ("сделай две иллюстрации леса", "леса", 2),
+            ("создай одну картинку котенка", "котенка", 1),
+            ("нарисуй три рисунка бабочки", "бабочки", 3),
+            ("сделай четыре арта киберпанк", "киберпанк", 4),
+            ("создай пару картинок волков", "волков", 2),
+        ]
+        for query, exp_prompt, exp_count in cases:
+            with self.subTest(query=query):
+                route = self.router.route(query)
+                self.assertEqual(route.get("type"), "image")
+                self.assertEqual(route.get("prompt"), exp_prompt)
+                self.assertEqual(route.get("count"), exp_count)
+
+    def test_combined_parameters(self):
+        """Проверка комбинации количества и соотношения сторон."""
+        route = self.router.route("создай 2 широких изображения космического корабля")
+        self.assertEqual(route.get("type"), "image")
+        self.assertEqual(route.get("prompt"), "космического корабля")
+        self.assertEqual(route.get("aspect_ratio"), "landscape")
+        self.assertEqual(route.get("count"), 2)
+        self.assertEqual(route.get("width"), 1216)
+        self.assertEqual(route.get("height"), 832)
+
+    def test_edge_cases_preserve_prompt(self):
+        """Проверка, что параметры в описании самого объекта не затираются."""
+        cases = [
+            ("создай изображение робота с 3 глазами", "робота с 3 глазами", 1),
+            ("нарисуй широкую реку", "широкую реку", 1),
+        ]
+        for query, exp_prompt, exp_count in cases:
+            with self.subTest(query=query):
+                route = self.router.route(query)
+                self.assertEqual(route.get("type"), "image")
+                self.assertEqual(route.get("prompt"), exp_prompt)
+                self.assertEqual(route.get("count"), exp_count)
+
 
 class TestAgentImageProcessIntegration(unittest.TestCase):
     """Проверка вызова ImageAgent из Agent.process()."""
@@ -192,6 +271,24 @@ class TestAgentImageProcessIntegration(unittest.TestCase):
                 route = self.agent.router.route(query)
                 self.assertEqual(route.get("type"), "image")
                 self.assertEqual(route.get("prompt"), expected_prompt)
+
+    def test_agent_process_passes_parameters_to_subagent(self):
+        test_agent = DummyTestImageAgent(should_succeed=True)
+        self.agent.agent_registry.register(test_agent)
+
+        res = self.agent.process("создай 2 широких изображения космического корабля")
+
+        self.assertEqual(res.get("type"), "image")
+        self.assertTrue(res.get("success"))
+        self.assertEqual(res.get("width"), 1216)
+        self.assertEqual(res.get("height"), 832)
+        self.assertEqual(res.get("count"), 1)  # Dummy agent returned 1 created file
+        self.assertIsNotNone(test_agent.last_context)
+        self.assertEqual(test_agent.last_context.task, "космического корабля")
+        self.assertEqual(test_agent.last_context.get("aspect_ratio"), "landscape")
+        self.assertEqual(test_agent.last_context.get("width"), 1216)
+        self.assertEqual(test_agent.last_context.get("height"), 832)
+        self.assertEqual(test_agent.last_context.get("count"), 2)
 
 
 if __name__ == "__main__":

@@ -521,7 +521,22 @@ class Agent:
         # 1.3. Генерация изображений (Image Sub-Agent Fast-Path)
         if route_type == "image":
             prompt = route.get("prompt", "")
-            subagent_res = self.run_subagent("image", task=prompt)
+            width = route.get("width")
+            height = route.get("height")
+            count = route.get("count", 1)
+            aspect_ratio = route.get("aspect_ratio")
+
+            subagent_kwargs = {}
+            if width is not None:
+                subagent_kwargs["width"] = width
+            if height is not None:
+                subagent_kwargs["height"] = height
+            if count is not None:
+                subagent_kwargs["count"] = count
+            if aspect_ratio is not None:
+                subagent_kwargs["aspect_ratio"] = aspect_ratio
+
+            subagent_res = self.run_subagent("image", task=prompt, **subagent_kwargs)
             if subagent_res.success:
                 answer = subagent_res.message
             else:
@@ -535,6 +550,9 @@ class Agent:
                 "answer": answer,
                 "success": subagent_res.success,
                 "created_files": list(subagent_res.created_files),
+                "width": width,
+                "height": height,
+                "count": len(subagent_res.created_files) if subagent_res.success else count,
             }
             if not subagent_res.success:
                 resp["error"] = subagent_res.error or subagent_res.message

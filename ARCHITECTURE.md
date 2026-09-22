@@ -97,7 +97,7 @@
   * **Единые правила роутинга**: файлы проекта (`find_file`, `list_files`, `search_files`), бытовые сущности (`create_task`, `list_tasks`, `complete_task`, `delete_task`, заметки, напоминания, списки).
   * **Устранение дублирования памяти**: единые шаблоны команд памяти (`remember`, `recall`, `forget`, `search`, `clear`) как для `choose_tool()`, так и для оркестратора `route()`.
   * **Управление планами**: распознавание директив планирования (`create`, `execute`, `get`, `clear`).
-  * **Генерация изображений**: распознавание пользовательских интентов генерации изображений («создай изображение...», «нарисуй...», «сгенерируй картинку...») с извлечением чистого текстового промпта без служебных префиксов и маршрутизацией в `type: "image"` (< 1 мс).
+  * **Генерация изображений**: распознавание пользовательских интентов генерации изображений («создай изображение...», «нарисуй...», «сгенерируй картинку...») с извлечением чистого текстового промпта, пресетов соотношения сторон (квадрат, landscape, portrait, 16:9, 9:16), явного безопасного разрешения WxH и количества (1..4) с быстрой маршрутизацией в `type: "image"` (< 1 мс).
 * [tools/agent.py](file:///c:/Akakiy%20agent/tools/agent.py): Класс `Agent`.
   * **Оркестрация конвейера**: прозрачная цепочка `CommandRouter (fast-path)` $\to$ `Teamwork` $\to$ `SkillRegistry` $\to$ `Native Tool Calling`.
   * **Маршрутизация к Sub-Agent'ам**: прямое исполнение `route_type == "image"` через `run_subagent("image", task=prompt)` с изоляцией VRAM, фиксацией хода диалога в `ContextManager` и возвратом структурированного результата.
@@ -313,34 +313,37 @@ NotificationService.show_reminder()
          └─► Пользователь нажал «×» (Закрыть)   ──► Закрытие окна -> _restack() оставшихся
 ```
 
-### Поток 4: Генерация изображений через Sub-Agent и VRAM Manager (ImageAgent)
+### Поток 4: Генерация изображений через Sub-Agent и VRAM Manager (ImageAgent v2)
 ```
 Пользователь / Агент
    │
    ▼
-Agent.run_subagent("image", task="описание картинки")
+Agent.run_subagent("image", task="промпт", aspect_ratio="landscape", count=2, ...)
    │
    ├─► ImageAgent.run(AgentContext)
    │      │
-   │      ├─► VRAMManager.prepare_for_image_generation()
+   │      ├─► Валидация параметров:
+   │      │      ├─ aspect_ratio пресеты (square, landscape, portrait, 16:9, 9:16)
+   │      │      ├─ safe_validate_resolution (лимит ~1.35 MP, кратно 64)
+   │      │      └─ safe_validate_count (1..4)
+   │      │
+   │      ├─► VRAMManager.prepare_for_image_generation() [Выполняется ровно 1 раз на сессию]
    │      │      ├─ Замер начальной VRAM (nvidia-smi)
    │      │      ├─ POST http://localhost:11434/api/generate {"keep_alive": 0} (выгрузка Ollama)
    │      │      └─ Замер VRAM после выгрузки (~1.3 GB used, ~6.5 GB free)
    │      │
-   │      ├─► ComfyUIClient.queue_prompt(workflow) ──► HTTP POST /prompt (127.0.0.1:8188)
+   │      ├─► Последовательный цикл генерации: for i in range(count) [Пик VRAM <= 7.4 GB]:
+   │      │      ├─ ComfyUIClient.queue_prompt(workflow_i) ──► HTTP POST /prompt (127.0.0.1:8188)
+   │      │      ├─ Опрос статуса и истории ──────────────► HTTP GET /history/{prompt_id}
+   │      │      ├─ Загрузка байтов изображения ──────────► HTTP GET /view (бинарный PNG)
+   │      │      └─ Сохранение в data/generated/images/img_<timestamp>_<uuid>.png
    │      │
-   │      ├─► Опрос статуса и истории ──────────────► HTTP GET /history/{prompt_id}
-   │      │
-   │      ├─► Загрузка байтов изображения ──────────► HTTP GET /view (бинарный PNG)
-   │      │
-   │      ├─► Сохранение в data/generated/images/img_<timestamp>_<uuid>.png
-   │      │
-   │      └─► finally: VRAMManager.restore_after_image_generation()
+   │      └─► finally: VRAMManager.restore_after_image_generation() [Выполняется ровно 1 раз]
    │             ├─ POST http://127.0.0.1:8188/free {"unload_models": true, "free_memory": true}
    │             └─ Замер финальной VRAM после очистки
    │
    ▼
-AgentResult(success=True, created_files=[...], data={prompt_id, filename, vram_prepare, vram_restore, ...})
+AgentResult(success=True, created_files=[...], data={count, width, height, saved_to, seed, seeds, ...})
 ```
 
 ---

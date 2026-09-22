@@ -6,9 +6,9 @@
 
 ## 1. Текущий статус проекта
 
-* **Текущая версия**: Акакий 2.0 (Desktop Hub + Voice UX + Household Assistant + Memory + Core Dev Tools + Notifications + Fast CLI REPL + Global Push-to-Talk + Backup & Restore + UI Filter & Pagination + Recurring Reminders & Tasks + Daily Briefing + Audio Notifications & Settings + Sub-Agent Foundation + ImageAgent v1 + VRAM Manager v1 + Image Request Routing).
-* **Состояние кодовой базы**: Стабильное, все тесты пройдены (362 теста в `tests/`: 360 unit-тестов успешны, 2 интеграционных пропущены по умолчанию; 0 синтаксических ошибок в 1022 Python-файлах).
-* **Последний этап**: Пользовательский сценарий генерации изображений: маршрутизация запросов `Agent.process()` / `CommandRouter` $\to$ `ImageAgent`.
+* **Текущая версия**: Акакий 2.0 (Desktop Hub + Voice UX + Household Assistant + Memory + Core Dev Tools + Notifications + Fast CLI REPL + Global Push-to-Talk + Backup & Restore + UI Filter & Pagination + Recurring Reminders & Tasks + Daily Briefing + Audio Notifications & Settings + Sub-Agent Foundation + ImageAgent v1 + VRAM Manager v1 + Image Request Routing + ImageAgent v2 Generation Parameters).
+* **Состояние кодовой базы**: Стабильное, все тесты пройдены (372 теста в `tests/`: 370 unit-тестов успешны, 2 интеграционных пропущены по умолчанию; 0 синтаксических ошибок в 1022 Python-файлах).
+* **Последний этап**: Этап №3 — ImageAgent v2: базовые параметры генерации изображений (соотношение сторон/пресеты, явное безопасное разрешение WxH, количество изображений 1..4).
 * **Ветка**: `master`, синхронизирована с `origin/master`.
 
 ---
@@ -210,6 +210,14 @@
   * В `main.py` добавлено чистое CLI-отображение для `result["type"] == "image"` с выводом пути к сохранённому файлу PNG.
   * Создан модульный тестовый набор `tests/test_image_routing.py` (7 тестов: 13 позитивных паттернов, 10 негативных проверок, latency < 1 мс, flow успеха и ошибки, регистры и пунктуация, 100% pass).
   * Всего 362 теста в `tests/` (360 unit pass + 2 integration skip by default).
+* [x] **ImageAgent v2: Базовые параметры генерации изображений (Generation Parameters)**:
+  * Поддержка пресетов соотношения сторон: `square` / `квадрат` (1024x1024), `landscape` / `широкое` / `горизонтальное` (1216x832), `portrait` / `вертикальное` / `портретное` (832x1216), `16:9` (1344x768), `9:16` (768x1344).
+  * Поддержка явного разрешения WxH (например, `1280x720`, `800х600`, `1920x1080`) с автоматической нормализацией `safe_validate_resolution`: пропорциональное масштабирование при превышении допустимого лимита VRAM (~1.35 MP) и строгое округление до ближайшего кратного 64 (требование VAE SDXL).
+  * Поддержка количества изображений (1..4, `safe_validate_count`) цифровыми и словесными числительными («два», «две», «три», «четыре», «пару»).
+  * Последовательная генерация нескольких изображений с уникальными seeds (`for i in range(count):`) в рамках одной сессии VRAMManager (Ollama выгружается 1 раз в начале, ComfyUI `/free` вызывается 1 раз в конце). Пиковое потребление VRAM не превышает 7.4 GB независимо от количества сгенерированных файлов.
+  * Возврат путей ко всем сохранённым файлам в `AgentResult.created_files`, чистое форматирование вывода в CLI REPL (`main.py`).
+  * Добавлено 10 новых unit-тестов (6 в `tests/test_image_routing.py` и 4 в `tests/test_image_agent.py`), 100% pass.
+  * Всего 372 теста в `tests/` (370 unit pass + 2 integration skip by default).
 * [ ] **Интеграционные E2E тесты с виртуальным микрофоном**:
   * Реализовать тестовый сценарий, прогоняющий синтезированные аудиофайлы (WAV) через живой конвейер `VoiceService` с проверкой реакции GUI.
 * [ ] **Очистка устаревших бэкап-файлов `*.bak` в корне**:
