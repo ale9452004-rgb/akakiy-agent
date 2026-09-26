@@ -25,6 +25,7 @@ from tools.agents.image import (
     safe_validate_resolution,
     safe_validate_count
 )
+from tools.agents.presentation import PresentationAgent
 from tools.vram import VRAMManager, get_vram_manager, reset_vram_manager
 
 __all__ = [
@@ -38,6 +39,7 @@ __all__ = [
     "reset_agent_registry",
     "EchoAgent",
     "ImageAgent",
+    "PresentationAgent",
     "ComfyUIClient",
     "RESOLUTION_PRESETS",
     "safe_validate_resolution",

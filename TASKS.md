@@ -6,9 +6,9 @@
 
 ## 1. Текущий статус проекта
 
-* **Текущая версия**: Акакий 2.0 (Desktop Hub + Voice UX + Household Assistant + Memory + Core Dev Tools + Notifications + Fast CLI REPL + Global Push-to-Talk + Backup & Restore + UI Filter & Pagination + Recurring Reminders & Tasks + Daily Briefing + Audio Notifications & Settings + Sub-Agent Foundation + ImageAgent v1 + VRAM Manager v1 + Image Request Routing + ImageAgent v2 Generation Parameters + Agent Router Robust Routing + AgentContext v2 Foundation Contract + AgentResult v2 & Artifacts Foundation).
-* **Состояние кодовой базы**: Стабильное, все тесты пройдены (415 тестов в `tests/`: 413 unit-тестов успешны, 2 интеграционных пропущены по умолчанию; 0 синтаксических ошибок в 1025 Python-файлах).
-* **Последний этап**: Этап №6 — AgentResult v2 / Artifacts: универсальный контракт результатов для multi-agent системы и GUI 2.0 (модель Artifact, ArtifactType с автоопределением, двусторонняя синхронизация с created_files, выборка images, 100% обратная совместимость).
+* **Текущая версия**: Акакий 2.0 (Desktop Hub + Voice UX + Household Assistant + Memory + Core Dev Tools + Notifications + Fast CLI REPL + Global Push-to-Talk + Backup & Restore + UI Filter & Pagination + Recurring Reminders & Tasks + Daily Briefing + Audio Notifications & Settings + Sub-Agent Foundation + ImageAgent v1 + VRAM Manager v1 + Image Request Routing + ImageAgent v2 Generation Parameters + Agent Router Robust Routing + AgentContext v2 Foundation Contract + AgentResult v2 & Artifacts Foundation + PresentationAgent v1 Foundation).
+* **Состояние кодовой базы**: Стабильное, все тесты пройдены (429 тестов в `tests/`: 427 unit-тестов успешны, 2 интеграционных пропущены по умолчанию; 0 синтаксических ошибок в 1026 Python-файлах).
+* **Последний этап**: Этап №7 — PresentationAgent v1: первый специализированный Sub-Agent создания презентаций (.pptx) на базе чистой стандартной библиотеки Python (модель OpenXML, авторазбор задач, интеграция с Artifacts, регистрация в AgentRegistry, роутинг).
 * **Ветка**: `master`, синхронизирована с `origin/master`.
 
 ---
@@ -247,6 +247,18 @@
   * Экспорт `Artifact` и `ArtifactType` из пакета `tools/agents`.
   * Создан модульный тестовый набор `tests/test_agent_result_v2.py` (15 тестов, 100% pass).
   * Всего 415 тестов в `tests/` (413 unit pass + 2 integration skip by default).
+* [x] **PresentationAgent v1: первый специализированный Sub-Agent создания презентаций (.pptx) (Этап 7)**:
+  * Разработан легковесный движок генерации валидных презентаций Microsoft PowerPoint (`.pptx`, Office OpenXML) на чистой стандартной библиотеке Python (`zipfile`, `xml.sax.saxutils`, `io.BytesIO`) без сторонних пакетов.
+  * Реализован специализированный субагент `PresentationAgent` (`tools/agents/presentation.py`), поддерживающий формат 16:9, титульные и контентные слайды, списки и цветовую палитру Modern Slate.
+  * Реализован метод `parse_task(task, metadata)`: автоматическое извлечение темы, разбор многострочных планов и поддержка явного списка слайдов из метаданных.
+  * Сохранение презентаций в стандартное хранилище `data/generated/presentations/pres_<timestamp>_<uuid>.pptx`.
+  * В `ArtifactType` и `Artifact` добавлена поддержка типа `PRESENTATION = "presentation"` (свойство `is_presentation`, фабрика `from_presentation`, свойство `presentations` в `AgentResult`).
+  * `PresentationAgent` зарегистрирован по умолчанию в `AgentRegistry` и экспортирован из `tools/agents`.
+  * В `CommandRouter` (`tools/router.py`) добавлен метод `match_presentation(user_input)` для естественных команд и защита в `NON_IMAGE_TARGET_PATTERN`.
+  * В `Agent.process()` подключена обработка маршрута `route_type == "presentation"` с запуском субагента и возвратом структурированного ответа.
+  * В `main.py` добавлен вывод созданных презентаций в CLI REPL.
+  * Создан модульный тестовый набор `tests/test_presentation_agent.py` (14 тестов, 100% pass).
+  * Всего 429 тестов в `tests/` (427 unit pass + 2 integration skip by default).
 * [ ] **Интеграционные E2E тесты с виртуальным микрофоном**:
   * Реализовать тестовый сценарий, прогоняющий синтезированные аудиофайлы (WAV) через живой конвейер `VoiceService` с проверкой реакции GUI.
 * [ ] **Очистка устаревших бэкап-файлов `*.bak` в корне**:

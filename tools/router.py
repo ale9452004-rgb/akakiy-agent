@@ -18,7 +18,7 @@ CALL_PREFIX_REGEX = re.compile(
 )
 
 NON_IMAGE_TARGET_PATTERN = re.compile(
-    r"^(?:файл\w*|папк\w*|директори\w*|скрипт\w*|код\w*|класс\w*|функци\w*|модул\w*|тест\w*|коммит\w*|документ\w*|таблиц\w*|задач\w*|заметк\w*|напоминан\w*|список\w*|списк\w*|план\w*|проект\w*)\b",
+    r"^(?:файл\w*|папк\w*|директори\w*|скрипт\w*|код\w*|класс\w*|функци\w*|модул\w*|тест\w*|коммит\w*|документ\w*|таблиц\w*|презентаци\w*|слайд\w*|задач\w*|заметк\w*|напоминан\w*|список\w*|списк\w*|план\w*|проект\w*)\b",
     re.IGNORECASE
 )
 
@@ -295,6 +295,53 @@ class CommandRouter:
                     "agent": agent_name,
                     "task": task_text
                 }
+    def match_presentation(self, user_input: str) -> Optional[Dict[str, Any]]:
+        """
+        Проверяет, является ли запрос командой создания презентации.
+        Распознает естественные шаблоны:
+        - 'создай презентацию [по/на тему/про] ...'
+        - 'сделай презентацию [по/на тему/про] ...'
+        - 'сгенерируй презентацию [по/на тему/про] ...'
+        - 'презентация [по/на тему/про]: ...'
+        - 'создай слайды [по/на тему/про] ...'
+        """
+        raw_trimmed = user_input.strip()
+        if not raw_trimmed:
+            return None
+
+        body = strip_call_prefixes(raw_trimmed)
+
+        # 1. Шаблоны с управляющими глаголами
+        verb_pattern = re.compile(
+            r"^(?:создай|создайте|создать|сделай|сделайте|сделать|сгенерируй|сгенерируйте|сгенерировать|подготовь|подготовьте|подготовить)"
+            r"(?:\s+мне)?\s+(?:презентаци\w*|слайд\w*)(?:\s*(?:на\s+тему|про|по|о|об))?(?:\s*:\s*|[,\s]+)",
+            re.IGNORECASE
+        )
+        m = verb_pattern.match(body)
+        if m:
+            remainder = body[m.end():].strip().strip("\"'«»“”")
+            if remainder:
+                return {
+                    "action": "create",
+                    "prompt": remainder,
+                    "title": remainder
+                }
+
+        # 2. Шаблоны прямого ввода темы: "презентация: <тема>" или "презентация на тему <тема>"
+        intro_pattern = re.compile(
+            r"^(?:презентаци\w*|слайд\w*)(?:\s*(?:на\s+тему|про|по|о|об))?(?:\s*:\s*|[,\s]+)",
+            re.IGNORECASE
+        )
+        m2 = intro_pattern.match(body)
+        if m2:
+            remainder = body[m2.end():].strip().strip("\"'«»“”")
+            if remainder:
+                return {
+                    "action": "create",
+                    "prompt": remainder,
+                    "title": remainder
+                }
+
         return None
 
     def match_image(self, user_input: str) -> Optional[Dict[str, Any]]:
@@ -697,12 +744,28 @@ class CommandRouter:
                         "type": "image",
                         **img_data
                     }
+            elif subagent_route.get("agent") == "presentation":
+                task_txt = subagent_route.get("task", "")
+                return {
+                    "type": "presentation",
+                    "action": "create",
+                    "prompt": task_txt,
+                    "title": task_txt
+                }
             return {
                 "type": "subagent",
                 **subagent_route
             }
 
-        # 5. Проверяем генерацию изображений (Image Sub-Agent Fast-Path)
+        # 5. Проверяем создание презентаций (Presentation Sub-Agent Fast-Path)
+        pres_route = self.match_presentation(cleaned)
+        if pres_route:
+            return {
+                "type": "presentation",
+                **pres_route
+            }
+
+        # 6. Проверяем генерацию изображений (Image Sub-Agent Fast-Path)
         image_route = self.match_image(cleaned)
         if image_route:
             return {
@@ -710,7 +773,7 @@ class CommandRouter:
                 **image_route
             }
 
-        # 6. Естественный язык / сложные запросы -> Native Tool Calling
+        # 7. Естественный язык / сложные запросы -> Native Tool Calling
         return {
             "type": None,
             "tool": None,

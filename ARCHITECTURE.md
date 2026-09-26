@@ -126,6 +126,7 @@
   * `AgentRegistry` (`tools/agents/registry.py`): Потокобезопасный реестр с поиском, динамическим включением/отключением и синглтоном `get_agent_registry()`.
   * `EchoAgent` (`tools/agents/echo.py`): Эталонный тестовый Sub-Agent для отладки передачи контекста, генерации файлов и симуляции сбоев.
   * `ImageAgent` (`tools/agents/image.py`): Специализированный Sub-Agent генерации изображений через изолированный HTTP Worker на базе ComfyUI (`127.0.0.1:8188`, SDXL-Lightning 4-step). Предоставляет `ComfyUIClient` на стандартной библиотеке Python с получением бинарных данных PNG через `/view`, безопасным сохранением в `data/generated/images/` и освобождением VRAM через `/free`.
+  * `PresentationAgent` (`tools/agents/presentation.py`): Специализированный Sub-Agent создания презентаций (.pptx) на базе чистой стандартной библиотеки Python (Office OpenXML / zipfile). Поддерживает титульный слайд, слайды содержания, текстовые блоки (bullet points), авторазбор темы из задачи/метаданных, сохранение в `data/generated/presentations/` и возврат `AgentResult` с `Artifact` типа `presentation`/`document`.
 
 ### 3.4. Слой данных и памяти (Data Layer)
 * [tools/memory.py](file:///c:/Akakiy%20agent/tools/memory.py): Долговременная память (`MemoryManager`).

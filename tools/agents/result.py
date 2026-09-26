@@ -23,6 +23,7 @@ class ArtifactType:
     Стандартные типы артефактов для multi-agent конвейера и GUI 2.0.
     """
     IMAGE = "image"
+    PRESENTATION = "presentation"
     DOCUMENT = "document"
     FILE = "file"
     TEXT = "text"
@@ -40,14 +41,17 @@ class ArtifactType:
         ".gif": IMAGE,
         ".svg": IMAGE,
         ".tiff": IMAGE,
+        # Презентации
+        ".pptx": PRESENTATION,
+        ".ppt": PRESENTATION,
+        ".odp": PRESENTATION,
+        ".key": PRESENTATION,
         # Документы и таблицы
         ".pdf": DOCUMENT,
         ".docx": DOCUMENT,
         ".doc": DOCUMENT,
         ".xlsx": DOCUMENT,
         ".xls": DOCUMENT,
-        ".pptx": DOCUMENT,
-        ".ppt": DOCUMENT,
         ".csv": DOCUMENT,
         ".epub": DOCUMENT,
         # Текст
@@ -117,9 +121,14 @@ class Artifact:
         return self.type == ArtifactType.IMAGE
 
     @property
+    def is_presentation(self) -> bool:
+        """Является ли артефакт презентацией."""
+        return self.type == ArtifactType.PRESENTATION
+
+    @property
     def is_document(self) -> bool:
         """Является ли артефакт документом."""
-        return self.type == ArtifactType.DOCUMENT
+        return self.type in (ArtifactType.DOCUMENT, ArtifactType.PRESENTATION)
 
     @property
     def is_file(self) -> bool:
@@ -197,6 +206,25 @@ class Artifact:
             content=None,
             metadata=meta
         )
+
+    @classmethod
+    def from_presentation(
+        cls,
+        path: Union[str, Path],
+        name: Optional[str] = None,
+        title: Optional[str] = None,
+        slides_count: Optional[int] = None,
+        **metadata
+    ) -> "Artifact":
+        """
+        Фабричный метод для создания артефакта презентации.
+        """
+        meta = dict(metadata)
+        if title is not None:
+           meta["title"] = title
+        if slides_count is not None:
+           meta["slides_count"] = slides_count
+        return cls.from_file(path, name=name, type=ArtifactType.PRESENTATION, **meta)
 
     @classmethod
     def from_image(
@@ -464,6 +492,11 @@ class AgentResult:
     def images(self) -> List[Artifact]:
         """Список всех артефактов изображений."""
         return self.get_artifacts_by_type(ArtifactType.IMAGE)
+
+    @property
+    def presentations(self) -> List[Artifact]:
+        """Список всех артефактов презентаций."""
+        return self.get_artifacts_by_type(ArtifactType.PRESENTATION)
 
     @property
     def has_artifacts(self) -> bool:

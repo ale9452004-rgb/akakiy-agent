@@ -113,10 +113,12 @@ def _init_default_registry() -> AgentRegistry:
     """Создаёт реестр и регистрирует стандартных агентов."""
     from tools.agents.echo import EchoAgent
     from tools.agents.image import ImageAgent
+    from tools.agents.presentation import PresentationAgent
 
     reg = AgentRegistry()
     reg.register(EchoAgent())
     reg.register(ImageAgent())
+    reg.register(PresentationAgent())
     return reg
 
 
