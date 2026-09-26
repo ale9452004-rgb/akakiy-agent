@@ -6,9 +6,9 @@
 
 ## 1. Текущий статус проекта
 
-* **Текущая версия**: Акакий 2.0 (Desktop Hub + Voice UX + Household Assistant + Memory + Core Dev Tools + Notifications + Fast CLI REPL + Global Push-to-Talk + Backup & Restore + UI Filter & Pagination + Recurring Reminders & Tasks + Daily Briefing + Audio Notifications & Settings + Sub-Agent Foundation + ImageAgent v1 + VRAM Manager v1 + Image Request Routing + ImageAgent v2 Generation Parameters + Agent Router Robust Routing).
-* **Состояние кодовой базы**: Стабильное, все тесты пройдены (384 теста в `tests/`: 382 unit-теста успешны, 2 интеграционных пропущены по умолчанию; 0 синтаксических ошибок в 1023 Python-файлах).
-* **Последний этап**: Этап №4 — Agent Router: robust routing (нормализация обращений/вежливости, поддержка местоимения «мне», устранение ложных срабатываний ImageAgent, явная маршрутизация субагентов).
+* **Текущая версия**: Акакий 2.0 (Desktop Hub + Voice UX + Household Assistant + Memory + Core Dev Tools + Notifications + Fast CLI REPL + Global Push-to-Talk + Backup & Restore + UI Filter & Pagination + Recurring Reminders & Tasks + Daily Briefing + Audio Notifications & Settings + Sub-Agent Foundation + ImageAgent v1 + VRAM Manager v1 + Image Request Routing + ImageAgent v2 Generation Parameters + Agent Router Robust Routing + AgentContext v2 Foundation Contract).
+* **Состояние кодовой базы**: Стабильное, все тесты пройдены (400 тестов в `tests/`: 398 unit-тестов успешны, 2 интеграционных пропущены по умолчанию; 0 синтаксических ошибок в 1024 Python-файлах).
+* **Последний этап**: Этап №5 — AgentContext v2: общий контракт для будущей multi-agent системы (структурированный task, метаданные файлов, передача результатов, связь parent/child, сериализация).
 * **Ветка**: `master`, синхронизирована с `origin/master`.
 
 ---
@@ -227,6 +227,15 @@
   * Сохранение естественного диалога при общих приветствиях и вопросах («Акакий, привет!», «Как дела?»).
   * Создан специализированный тестовый набор `tests/test_router_robustness.py` (12 тестов, latency < 1 мс, 100% pass).
   * Всего 384 теста в `tests/` (382 unit pass + 2 integration skip by default).
+* [x] **AgentContext v2: общий контракт multi-agent системы (Этап 5)**:
+  * Структурированные атрибуты задачи: `task_id` (уникальный UUID), `root_task_id` (сквозной trace ID), `task_type`, `instruction`, `status` (`pending`, `running`, `completed`, `failed`), методы `mark_completed()`, `mark_failed()`.
+  * Работа с файлами и метаданными: упорядоченный список `files`, словарь метаданных `file_metadata`, методы `add_file(path, **meta)`, `get_file_metadata(path)`, `set_file_metadata(path, meta)`, `remove_file(path)`, `has_file(path)`.
+  * Передача результатов предыдущих агентов: список `previous_results`, методы `add_result(res, agent_name)`, `get_last_result(agent_name)`, `get_results_from(agent_name)`.
+  * Метаданные параметров и протокол сопоставления: методы `get`, `set`, `update_metadata`, `has_metadata`, операторы `__getitem__`, `__setitem__`, `__contains__`.
+  * Иерархическая связь parent/child: сохранение `parent_agent`, добавление ссылки `parent_context`, метод `create_child_context(...)` с безопасным глубоким копированием метаданных и изоляцией состояния, метод `copy()`.
+  * Сериализация и десериализация: `to_dict()`, `from_dict()`, `to_json()`, `from_json()`, защита от циклических ссылок, 100% обратная совместимость со словарями v1.
+  * Создан модульный тестовый набор `tests/test_agent_context_v2.py` (16 тестов, 100% pass).
+  * Всего 400 тестов в `tests/` (398 unit pass + 2 integration skip by default).
 * [ ] **Интеграционные E2E тесты с виртуальным микрофоном**:
   * Реализовать тестовый сценарий, прогоняющий синтезированные аудиофайлы (WAV) через живой конвейер `VoiceService` с проверкой реакции GUI.
 * [ ] **Очистка устаревших бэкап-файлов `*.bak` в корне**:

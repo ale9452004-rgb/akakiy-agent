@@ -121,7 +121,7 @@
 * [tools/summary.py](file:///c:/Akakiy%20agent/tools/summary.py): Форматирование агрегированных итоговых сводок выполнения плана.
 * [tools/agents/](file:///c:/Akakiy%20agent/tools/agents): Архитектура специализированных Sub-Agent'ов (Sub-Agents Foundation).
   * `SubAgent` (`tools/agents/base.py`): Базовый абстрактный контракт независимого агента с методом `run(context: AgentContext) -> AgentResult` и валидацией контекста.
-  * `AgentContext` (`tools/agents/context.py`): Изолированный контекст задачи (`task`, `files`, `previous_results`, `metadata`, `parent_agent`).
+  * `AgentContext` (`tools/agents/context.py`): Унифицированный контракт контекста задач multi-agent системы (`task`, `instruction`, `task_id`, `root_task_id`, `task_type`, `status`, `files`, `file_metadata`, `previous_results`, `metadata`, `parent_agent`, `parent_context`). Поддерживает доступ по словарному протоколу (`ctx["key"]`), управление метаданными файлов, структурированное индексирование результатов субагентов, иерархию parent/child (`create_child_context`) с изоляцией состояния и цикл-безопасную JSON-сериализацию.
   * `AgentResult` (`tools/agents/result.py`): Унифицированный результат (`success`, `message`, `created_files`, `data`, `error`) с фабриками `ok`/`fail` и обратной совместимостью через dict-like интерфейс.
   * `AgentRegistry` (`tools/agents/registry.py`): Потокобезопасный реестр с поиском, динамическим включением/отключением и синглтоном `get_agent_registry()`.
   * `EchoAgent` (`tools/agents/echo.py`): Эталонный тестовый Sub-Agent для отладки передачи контекста, генерации файлов и симуляции сбоев.
