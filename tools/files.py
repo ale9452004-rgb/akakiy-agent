@@ -5,9 +5,9 @@ import subprocess
 from config import PROJECT_PATH
 
 
-def resolve_safe_path(filename):
+def resolve_safe_path(filename, base_path=None):
     """
-    Проверяет и возвращает безопасный Path внутри PROJECT_PATH.
+    Проверяет и возвращает безопасный Path внутри PROJECT_PATH (или base_path).
     Защищает от Path Traversal, выхода за пределы проекта через '..'
     или абсолютные пути вне проекта.
     Возвращает кортеж (resolved_path, error_dict_or_None).
@@ -19,7 +19,7 @@ def resolve_safe_path(filename):
         }
 
     try:
-        project_resolved = PROJECT_PATH.resolve()
+        project_resolved = Path(base_path).resolve() if base_path else PROJECT_PATH.resolve()
         raw_path = Path(str(filename).strip())
 
         if raw_path.is_absolute():
@@ -108,8 +108,8 @@ def find_file(filename):
     }
 
 
-def read_file(filename):
-    file_path, error = resolve_safe_path(filename)
+def read_file(filename, base_path=None):
+    file_path, error = resolve_safe_path(filename, base_path=base_path)
 
     if error:
         return error
@@ -144,8 +144,8 @@ def read_file(filename):
         }
 
 
-def write_file(filename, content):
-    file_path, error = resolve_safe_path(filename)
+def write_file(filename, content, base_path=None):
+    file_path, error = resolve_safe_path(filename, base_path=base_path)
 
     if error:
         return error

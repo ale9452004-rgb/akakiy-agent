@@ -29,6 +29,7 @@ from tools.agents.presentation import PresentationAgent
 from tools.agents.document import DocumentAgent
 from tools.agents.research import ResearchAgent
 from tools.agents.coding import CodingAgent
+from tools.agents.file import FileAgent
 from tools.vram import VRAMManager, get_vram_manager, reset_vram_manager
 
 __all__ = [
@@ -46,6 +47,7 @@ __all__ = [
     "DocumentAgent",
     "ResearchAgent",
     "CodingAgent",
+    "FileAgent",
     "ComfyUIClient",
     "RESOLUTION_PRESETS",
     "safe_validate_resolution",

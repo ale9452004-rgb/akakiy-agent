@@ -170,10 +170,10 @@ def main():
                 continue
 
             # =============================================
-            # Генерация контента и кода (Image / Presentation / Document / Research / Coding)
+            # Генерация контента, кода и файлов (Image / Presentation / Document / Research / Coding / File)
             # =============================================
 
-            elif result["type"] in ("image", "presentation", "document", "research", "coding"):
+            elif result["type"] in ("image", "presentation", "document", "research", "coding", "file"):
 
                 print("\nАкакий:")
                 answer = result.get("answer") or ""

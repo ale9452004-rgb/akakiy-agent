@@ -499,6 +499,120 @@ class CommandRouter:
 
         return None
 
+    def match_file(self, user_input: str) -> Optional[Dict[str, Any]]:
+        """
+        Проверяет, является ли запрос командой для FileAgent.
+        Распознает явные и естественные шаблоны:
+        - 'файл: <задача>'
+        - 'файлы: <задача>'
+        - 'file: <задача>'
+        - 'файловый агент: <задача>'
+        - 'скопируй файл <src> в <dst>'
+        - 'перемести файл <src> в <dst>'
+        - 'переименуй файл <src> в <dst>'
+        - 'метаданные файла <path>'
+        - 'информация о файле <path>'
+        - 'статистика файла <path>'
+        - 'прочитай файл <path>'
+        - 'создай файл <path> с содержимым <content>'
+        - 'запиши в файл <path>: <content>'
+        """
+        raw_trimmed = user_input.strip()
+        if not raw_trimmed:
+            return None
+
+        body = strip_call_prefixes(raw_trimmed)
+
+        # 1. Шаблоны с явным префиксом: "файл: ...", "файлы: ...", "file: ...", "файловый агент: ..."
+        prefix_pattern = re.compile(
+            r"^(?:файловый\s+агент|файл[ыа]?|files?)(?:\s*:\s*|[,\s]+)(.+)$",
+            re.IGNORECASE
+        )
+        m1 = prefix_pattern.match(body)
+        if m1:
+            task_text = m1.group(1).strip()
+            if task_text:
+                return {
+                    "action": "file",
+                    "prompt": task_text,
+                    "task": task_text
+                }
+
+        # 2. Шаблоны копирования: "скопируй [файл] <src> в [файл] <dst>"
+        copy_pattern = re.compile(
+            r"^(?:скопируй|скопировать|копируй|копировать|copy|cp)(?:\s+мне)?\s+(?:файл\s+)?([^\s]+)\s+(?:в|to|в\s+файл)\s+([^\s]+)$",
+            re.IGNORECASE
+        )
+        m2 = copy_pattern.match(body)
+        if m2:
+            return {
+                "action": "copy",
+                "source": m2.group(1).strip(),
+                "destination": m2.group(2).strip(),
+                "prompt": body,
+                "task": body
+            }
+
+        # 3. Шаблоны перемещения / переименования: "перемести / переименуй [файл] <src> в <dst>"
+        move_pattern = re.compile(
+            r"^(?:перемести|переместить|переименуй|переименовать|move|mv|rename)(?:\s+мне)?\s+(?:файл\s+)?([^\s]+)\s+(?:в|to|на|в\s+файл)\s+([^\s]+)$",
+            re.IGNORECASE
+        )
+        m3 = move_pattern.match(body)
+        if m3:
+            return {
+                "action": "move",
+                "source": m3.group(1).strip(),
+                "destination": m3.group(2).strip(),
+                "prompt": body,
+                "task": body
+            }
+
+        # 4. Шаблоны метаданных: "метаданные / информация о файле <path>"
+        meta_pattern = re.compile(
+            r"^(?:метаданные|информация|инфо|статистика|stat|metadata|info)(?:\s+мне)?\s+(?:о\s+файле\s+|файла\s+|файл\s+)?([^\s]+)$",
+            re.IGNORECASE
+        )
+        m4 = meta_pattern.match(body)
+        if m4:
+            return {
+                "action": "metadata",
+                "file": m4.group(1).strip(),
+                "prompt": body,
+                "task": body
+            }
+
+        # 5. Шаблоны чтения файла: "прочитай / покажи содержимое файла <path>"
+        read_pattern = re.compile(
+            r"^(?:прочитай|прочитать|чтение|read|покажи\s+содержимое|содержимое)(?:\s+мне)?\s+(?:файла\s+|файл\s+)([^\s]+)$",
+            re.IGNORECASE
+        )
+        m5 = read_pattern.match(body)
+        if m5:
+            return {
+                "action": "read",
+                "file": m5.group(1).strip(),
+                "prompt": body,
+                "task": body
+            }
+
+        # 6. Шаблоны создания файла: "создай / запиши файл <path> с содержимым <content>"
+        create_pattern = re.compile(
+            r"^(?:создай|создать|запиши|записать|create|write)(?:\s+мне)?\s+(?:файл\s+)([^\s:]+)(?:\s*:\s*|\s+(?:с\s+содержимым|содержимое)\s+)(.+)$",
+            re.IGNORECASE
+        )
+        m6 = create_pattern.match(body)
+        if m6:
+            return {
+                "action": "create",
+                "file": m6.group(1).strip(),
+                "content": m6.group(2).strip(),
+                "prompt": body,
+                "task": body
+            }
+
+        return None
+
     def match_image(self, user_input: str) -> Optional[Dict[str, Any]]:
         """
         Проверяет, является ли запрос командой генерации изображения,
@@ -931,6 +1045,14 @@ class CommandRouter:
                     "prompt": task_txt,
                     "task": task_txt
                 }
+            elif subagent_route.get("agent") in ("file", "files", "fileagent"):
+                task_txt = subagent_route.get("task", "")
+                return {
+                    "type": "file",
+                    "action": "file",
+                    "prompt": task_txt,
+                    "task": task_txt
+                }
             return {
                 "type": "subagent",
                 **subagent_route
@@ -968,7 +1090,15 @@ class CommandRouter:
                 **coding_route
             }
 
-        # 9. Проверяем генерацию изображений (Image Sub-Agent Fast-Path)
+        # 9. Проверяем файловые операции (File Sub-Agent Fast-Path)
+        file_route = self.match_file(cleaned)
+        if file_route:
+            return {
+                "type": "file",
+                **file_route
+            }
+
+        # 10. Проверяем генерацию изображений (Image Sub-Agent Fast-Path)
         image_route = self.match_image(cleaned)
         if image_route:
             return {
@@ -976,7 +1106,7 @@ class CommandRouter:
                 **image_route
             }
 
-        # 10. Естественный язык / сложные запросы -> Native Tool Calling
+        # 11. Естественный язык / сложные запросы -> Native Tool Calling
         return {
             "type": None,
             "tool": None,

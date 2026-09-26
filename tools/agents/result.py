@@ -186,6 +186,7 @@ class Artifact:
         path: Union[str, Path],
         name: Optional[str] = None,
         type: Optional[str] = None,
+        content: Optional[str] = None,
         **metadata
     ) -> "Artifact":
         """
@@ -213,7 +214,7 @@ class Artifact:
             name=file_name,
             type=art_type,
             path=str(path),
-            content=None,
+            content=content,
             metadata=meta
         )
 
@@ -583,6 +584,11 @@ class AgentResult:
     def code_artifacts(self) -> List[Artifact]:
         """Список всех артефактов кода."""
         return self.get_artifacts_by_type(ArtifactType.CODE)
+
+    @property
+    def file_artifacts(self) -> List[Artifact]:
+        """Список всех артефактов файлов."""
+        return self.get_artifacts_by_type(ArtifactType.FILE)
 
     @property
     def has_artifacts(self) -> bool:

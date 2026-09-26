@@ -660,7 +660,32 @@ class Agent:
             self._record_interaction(user_input, answer, tool_name="coding")
             return resp
 
-        # 1.8. Явный запуск субагента (Sub-Agent Fast-Path)
+        # 1.8. Файловые операции (File Sub-Agent Fast-Path)
+        if route_type == "file":
+            prompt = route.get("prompt", "") or route.get("task", "")
+            subagent_res = self.run_subagent("file", task=prompt, metadata=route)
+            if subagent_res.success:
+                answer = subagent_res.message
+            else:
+                err_detail = subagent_res.error or subagent_res.message or "Неизвестная ошибка"
+                answer = f"Ошибка выполнения файловой операции: {err_detail}"
+
+            resp = {
+                "type": "file",
+                "tool": "file",
+                "result": subagent_res,
+                "answer": answer,
+                "success": subagent_res.success,
+                "created_files": list(subagent_res.created_files),
+                "artifacts": [a.to_dict() for a in subagent_res.artifacts],
+            }
+            if not subagent_res.success:
+                resp["error"] = subagent_res.error or subagent_res.message
+
+            self._record_interaction(user_input, answer, tool_name="file")
+            return resp
+
+        # 1.9. Явный запуск субагента (Sub-Agent Fast-Path)
         if route_type == "subagent":
             sub_name = route.get("agent", "")
             sub_task = route.get("task", "")
