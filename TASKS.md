@@ -6,9 +6,9 @@
 
 ## 1. Текущий статус проекта
 
-* **Текущая версия**: Акакий 2.0 (Desktop Hub + Voice UX + Household Assistant + Memory + Core Dev Tools + Notifications + Fast CLI REPL + Global Push-to-Talk + Backup & Restore + UI Filter & Pagination + Recurring Reminders & Tasks + Daily Briefing + Audio Notifications & Settings + Sub-Agent Foundation + ImageAgent v1 + VRAM Manager v1 + Image Request Routing + ImageAgent v2 Generation Parameters + Agent Router Robust Routing + AgentContext v2 Foundation Contract).
-* **Состояние кодовой базы**: Стабильное, все тесты пройдены (400 тестов в `tests/`: 398 unit-тестов успешны, 2 интеграционных пропущены по умолчанию; 0 синтаксических ошибок в 1024 Python-файлах).
-* **Последний этап**: Этап №5 — AgentContext v2: общий контракт для будущей multi-agent системы (структурированный task, метаданные файлов, передача результатов, связь parent/child, сериализация).
+* **Текущая версия**: Акакий 2.0 (Desktop Hub + Voice UX + Household Assistant + Memory + Core Dev Tools + Notifications + Fast CLI REPL + Global Push-to-Talk + Backup & Restore + UI Filter & Pagination + Recurring Reminders & Tasks + Daily Briefing + Audio Notifications & Settings + Sub-Agent Foundation + ImageAgent v1 + VRAM Manager v1 + Image Request Routing + ImageAgent v2 Generation Parameters + Agent Router Robust Routing + AgentContext v2 Foundation Contract + AgentResult v2 & Artifacts Foundation).
+* **Состояние кодовой базы**: Стабильное, все тесты пройдены (415 тестов в `tests/`: 413 unit-тестов успешны, 2 интеграционных пропущены по умолчанию; 0 синтаксических ошибок в 1025 Python-файлах).
+* **Последний этап**: Этап №6 — AgentResult v2 / Artifacts: универсальный контракт результатов для multi-agent системы и GUI 2.0 (модель Artifact, ArtifactType с автоопределением, двусторонняя синхронизация с created_files, выборка images, 100% обратная совместимость).
 * **Ветка**: `master`, синхронизирована с `origin/master`.
 
 ---
@@ -236,6 +236,17 @@
   * Сериализация и десериализация: `to_dict()`, `from_dict()`, `to_json()`, `from_json()`, защита от циклических ссылок, 100% обратная совместимость со словарями v1.
   * Создан модульный тестовый набор `tests/test_agent_context_v2.py` (16 тестов, 100% pass).
   * Всего 400 тестов в `tests/` (398 unit pass + 2 integration skip by default).
+* [x] **AgentResult v2 / Artifacts: универсальный контракт результатов и модель артефактов (Этап 6)**:
+  * Реализована отдельная модель `Artifact` (`tools/agents/result.py`): поля `name`, `type`, `path`, `content`, `metadata`, свойства `is_image`, `is_document`, `is_file`, `exists()`, `size_bytes`, `mime_type`, словарный протокол `art["key"]` и `art.get()`.
+  * Реализован классификатор `ArtifactType` (`image`, `document`, `file`, `text`, `code`, `audio`, `data`) с эвристикой автоопределения `guess_type` по расширениям файлов.
+  * Фабричные методы `Artifact`: `from_file(path, ...)`, `from_image(path, width, height, ...)`, `from_text(content, ...)`, `from_dict(d)`.
+  * Развит `AgentResult` v2: поддержка коллекции `artifacts: List[Artifact]`, двусторонняя синхронизация `created_files` $\leftrightarrow$ `artifacts`, перенос параметров генерации (`width`, `height`, `seed`) из `data` в метаданные артефактов изображений.
+  * Методы выборки и фильтрации: `get_artifacts_by_type(type)`, свойство `images`, `get_artifact(name_or_index)`, `has_artifacts`, `primary_artifact`.
+  * Фабричные методы добавления: `add_artifact(art, **kwargs)`, `add_file(path, **meta)`.
+  * Сериализация в dict/JSON: `to_dict()`, `from_dict()`, `to_json()`, `from_json()` с полной поддержкой старого формата v1 без поля `artifacts`.
+  * Экспорт `Artifact` и `ArtifactType` из пакета `tools/agents`.
+  * Создан модульный тестовый набор `tests/test_agent_result_v2.py` (15 тестов, 100% pass).
+  * Всего 415 тестов в `tests/` (413 unit pass + 2 integration skip by default).
 * [ ] **Интеграционные E2E тесты с виртуальным микрофоном**:
   * Реализовать тестовый сценарий, прогоняющий синтезированные аудиофайлы (WAV) через живой конвейер `VoiceService` с проверкой реакции GUI.
 * [ ] **Очистка устаревших бэкап-файлов `*.bak` в корне**:

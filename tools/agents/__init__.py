@@ -11,7 +11,7 @@
 
 from tools.agents.base import SubAgent
 from tools.agents.context import AgentContext
-from tools.agents.result import AgentResult
+from tools.agents.result import AgentResult, Artifact, ArtifactType
 from tools.agents.registry import (
     AgentRegistry,
     get_agent_registry,
@@ -31,6 +31,8 @@ __all__ = [
     "SubAgent",
     "AgentContext",
     "AgentResult",
+    "Artifact",
+    "ArtifactType",
     "AgentRegistry",
     "get_agent_registry",
     "reset_agent_registry",
