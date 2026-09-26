@@ -295,6 +295,8 @@ class CommandRouter:
                     "agent": agent_name,
                     "task": task_text
                 }
+        return None
+
     def match_presentation(self, user_input: str) -> Optional[Dict[str, Any]]:
         """
         Проверяет, является ли запрос командой создания презентации.
@@ -330,6 +332,56 @@ class CommandRouter:
         # 2. Шаблоны прямого ввода темы: "презентация: <тема>" или "презентация на тему <тема>"
         intro_pattern = re.compile(
             r"^(?:презентаци\w*|слайд\w*)(?:\s*(?:на\s+тему|про|по|о|об))?(?:\s*:\s*|[,\s]+)",
+            re.IGNORECASE
+        )
+        m2 = intro_pattern.match(body)
+        if m2:
+            remainder = body[m2.end():].strip().strip("\"'«»“”")
+            if remainder:
+                return {
+                    "action": "create",
+                    "prompt": remainder,
+                    "title": remainder
+                }
+
+        return None
+
+    def match_document(self, user_input: str) -> Optional[Dict[str, Any]]:
+        """
+        Проверяет, является ли запрос командой создания документа (.docx).
+        Распознает естественные шаблоны:
+        - 'создай документ [по/на тему/про] ...'
+        - 'сделай документ [по/на тему/про] ...'
+        - 'сгенерируй документ [по/на тему/про] ...'
+        - 'подготовь документ [по/на тему/про] ...'
+        - 'напиши документ [по/на тему/про] ...'
+        - 'документ: <тема>'
+        """
+        raw_trimmed = user_input.strip()
+        if not raw_trimmed:
+            return None
+
+        body = strip_call_prefixes(raw_trimmed)
+
+        # 1. Шаблоны с управляющими глаголами
+        verb_pattern = re.compile(
+            r"^(?:создай|создайте|создать|сделай|сделайте|сделать|сгенерируй|сгенерируйте|сгенерировать|подготовь|подготовьте|подготовить|напиши|напишите|написать)"
+            r"(?:\s+мне)?\s+(?:документ\w*|отчет\w*)(?:\s*(?:на\s+тему|про|по|о|об))?(?:\s*:\s*|[,\s]+)",
+            re.IGNORECASE
+        )
+        m = verb_pattern.match(body)
+        if m:
+            remainder = body[m.end():].strip().strip("\"'«»“”")
+            if remainder:
+                return {
+                    "action": "create",
+                    "prompt": remainder,
+                    "title": remainder
+                }
+
+        # 2. Шаблоны прямого ввода темы: "документ: <тема>" или "документ на тему <тема>"
+        intro_pattern = re.compile(
+            r"^(?:документ\w*|отчет\w*)(?:\s*(?:на\s+тему|про|по|о|об))?(?:\s*:\s*|[,\s]+)",
             re.IGNORECASE
         )
         m2 = intro_pattern.match(body)
@@ -752,6 +804,14 @@ class CommandRouter:
                     "prompt": task_txt,
                     "title": task_txt
                 }
+            elif subagent_route.get("agent") == "document":
+                task_txt = subagent_route.get("task", "")
+                return {
+                    "type": "document",
+                    "action": "create",
+                    "prompt": task_txt,
+                    "title": task_txt
+                }
             return {
                 "type": "subagent",
                 **subagent_route
@@ -765,7 +825,15 @@ class CommandRouter:
                 **pres_route
             }
 
-        # 6. Проверяем генерацию изображений (Image Sub-Agent Fast-Path)
+        # 6. Проверяем создание документов (Document Sub-Agent Fast-Path)
+        doc_route = self.match_document(cleaned)
+        if doc_route:
+            return {
+                "type": "document",
+                **doc_route
+            }
+
+        # 7. Проверяем генерацию изображений (Image Sub-Agent Fast-Path)
         image_route = self.match_image(cleaned)
         if image_route:
             return {

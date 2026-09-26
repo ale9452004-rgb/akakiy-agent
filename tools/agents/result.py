@@ -227,6 +227,25 @@ class Artifact:
         return cls.from_file(path, name=name, type=ArtifactType.PRESENTATION, **meta)
 
     @classmethod
+    def from_document(
+        cls,
+        path: Union[str, Path],
+        name: Optional[str] = None,
+        title: Optional[str] = None,
+        sections_count: Optional[int] = None,
+        **metadata
+    ) -> "Artifact":
+        """
+        Фабричный метод для создания артефакта документа.
+        """
+        meta = dict(metadata)
+        if title is not None:
+            meta["title"] = title
+        if sections_count is not None:
+            meta["sections_count"] = sections_count
+        return cls.from_file(path, name=name, type=ArtifactType.DOCUMENT, **meta)
+
+    @classmethod
     def from_image(
         cls,
         path: Union[str, Path],
@@ -497,6 +516,11 @@ class AgentResult:
     def presentations(self) -> List[Artifact]:
         """Список всех артефактов презентаций."""
         return self.get_artifacts_by_type(ArtifactType.PRESENTATION)
+
+    @property
+    def documents(self) -> List[Artifact]:
+        """Список всех артефактов документов."""
+        return self.get_artifacts_by_type(ArtifactType.DOCUMENT)
 
     @property
     def has_artifacts(self) -> bool:

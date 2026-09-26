@@ -585,7 +585,32 @@ class Agent:
             self._record_interaction(user_input, answer, tool_name="presentation")
             return resp
 
-        # 1.5. Явный запуск субагента (Sub-Agent Fast-Path)
+        # 1.5. Создание документов (Document Sub-Agent Fast-Path)
+        if route_type == "document":
+            prompt = route.get("prompt", "")
+            subagent_res = self.run_subagent("document", task=prompt, metadata=route)
+            if subagent_res.success:
+                answer = subagent_res.message
+            else:
+                err_detail = subagent_res.error or subagent_res.message or "Неизвестная ошибка"
+                answer = f"Ошибка создания документа: {err_detail}"
+
+            resp = {
+                "type": "document",
+                "tool": "document",
+                "result": subagent_res,
+                "answer": answer,
+                "success": subagent_res.success,
+                "created_files": list(subagent_res.created_files),
+                "artifacts": [a.to_dict() for a in subagent_res.artifacts],
+            }
+            if not subagent_res.success:
+                resp["error"] = subagent_res.error or subagent_res.message
+
+            self._record_interaction(user_input, answer, tool_name="document")
+            return resp
+
+        # 1.6. Явный запуск субагента (Sub-Agent Fast-Path)
         if route_type == "subagent":
             sub_name = route.get("agent", "")
             sub_task = route.get("task", "")

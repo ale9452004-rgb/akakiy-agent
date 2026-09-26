@@ -114,11 +114,13 @@ def _init_default_registry() -> AgentRegistry:
     from tools.agents.echo import EchoAgent
     from tools.agents.image import ImageAgent
     from tools.agents.presentation import PresentationAgent
+    from tools.agents.document import DocumentAgent
 
     reg = AgentRegistry()
     reg.register(EchoAgent())
     reg.register(ImageAgent())
     reg.register(PresentationAgent())
+    reg.register(DocumentAgent())
     return reg
 
 

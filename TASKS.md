@@ -259,6 +259,18 @@
   * В `main.py` добавлен вывод созданных презентаций в CLI REPL.
   * Создан модульный тестовый набор `tests/test_presentation_agent.py` (14 тестов, 100% pass).
   * Всего 429 тестов в `tests/` (427 unit pass + 2 integration skip by default).
+* [x] **DocumentAgent v1: специализированный Sub-Agent создания документов (.docx) (Этап 8)**:
+  * Разработан легковесный движок генерации валидных документов Microsoft Word (`.docx`, WordProcessingML / Office OpenXML) на чистой стандартной библиотеке Python (`zipfile`, `xml.sax.saxutils`, `io.BytesIO`) без сторонних пакетов.
+  * Реализован специализированный субагент `DocumentAgent` (`tools/agents/document.py`), поддерживающий формат страницы A4, стиль заголовка (Title 26pt), подзаголовок (Subtitle 12pt italic), нумерованные разделы (Heading1 17pt), абзацы текста и маркированные списки (bullet points).
+  * Реализован метод `parse_task(task, metadata)`: автоматическое извлечение темы, разбор структурированного многострочного текста задачи и поддержка явного списка разделов из метаданных `metadata["sections"]`.
+  * Сохранение документов в стандартное хранилище `data/generated/documents/doc_<timestamp>_<uuid>.docx`.
+  * В `Artifact` добавлена фабрика `from_document`, в `AgentResult` добавлено свойство `documents`.
+  * `DocumentAgent` зарегистрирован по умолчанию в `AgentRegistry` и экспортирован из `tools/agents`.
+  * В `CommandRouter` (`tools/router.py`) добавлен метод `match_document(user_input)` для естественных русскоязычных команд и явных вызовов `субагент document: ...`.
+  * В `Agent.process()` подключена обработка маршрута `route_type == "document"` с запуском субагента, возвратом структурированного ответа и фиксацией в контексте диалога.
+  * В `main.py` добавлен вывод созданных документов в CLI REPL.
+  * Создан модульный тестовый набор `tests/test_document_agent.py` (15 тестов, 100% pass).
+  * Всего 444 теста в `tests/` (442 unit pass + 2 integration skip by default).
 * [ ] **Интеграционные E2E тесты с виртуальным микрофоном**:
   * Реализовать тестовый сценарий, прогоняющий синтезированные аудиофайлы (WAV) через живой конвейер `VoiceService` с проверкой реакции GUI.
 * [ ] **Очистка устаревших бэкап-файлов `*.bak` в корне**:
