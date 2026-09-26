@@ -18,7 +18,7 @@ CALL_PREFIX_REGEX = re.compile(
 )
 
 NON_IMAGE_TARGET_PATTERN = re.compile(
-    r"^(?:файл\w*|папк\w*|директори\w*|скрипт\w*|код\w*|класс\w*|функци\w*|модул\w*|тест\w*|коммит\w*|документ\w*|таблиц\w*|презентаци\w*|слайд\w*|задач\w*|заметк\w*|напоминан\w*|список\w*|списк\w*|план\w*|проект\w*)\b",
+    r"^(?:файл\w*|папк\w*|директори\w*|скрипт\w*|код\w*|класс\w*|функци\w*|модул\w*|тест\w*|коммит\w*|документ\w*|таблиц\w*|презентаци\w*|слайд\w*|исследован\w*|анализ\w*|задач\w*|заметк\w*|напоминан\w*|список\w*|списк\w*|план\w*|проект\w*)\b",
     re.IGNORECASE
 )
 
@@ -392,6 +392,58 @@ class CommandRouter:
                     "action": "create",
                     "prompt": remainder,
                     "title": remainder
+                }
+
+        return None
+
+    def match_research(self, user_input: str) -> Optional[Dict[str, Any]]:
+        """
+        Проверяет, является ли запрос командой проведения исследования (ResearchAgent).
+        Распознает естественные шаблоны:
+        - 'исследуй [тему/вопрос/про] ...'
+        - 'проведи исследование [по/на тему/про] ...'
+        - 'сделай исследование [по/на тему/про] ...'
+        - 'исследовать [тему/про] ...'
+        - 'исследование: <тема>'
+        - 'исследование [по/на тему/про] ...'
+        """
+        raw_trimmed = user_input.strip()
+        if not raw_trimmed:
+            return None
+
+        body = strip_call_prefixes(raw_trimmed)
+
+        # 1. Шаблоны с управляющими глаголами исследования
+        verb_pattern = re.compile(
+            r"^(?:исследуй|исследуйте|исследовать"
+            r"|(?:проведи|проведите|провести|сделай|сделайте|сделать|подготовь|подготовьте|подготовить)(?:\s+мне)?\s+исследован\w*"
+            r"|(?:найди|найти|собери|собрать)(?:\s+мне)?\s+информаци\w*)"
+            r"(?:\s+мне)?(?:\s+(?:на\s+тему|тему|вопрос\w*|про|по|о|об))?(?:\s*:\s*|[,\s]+)",
+            re.IGNORECASE
+        )
+        m = verb_pattern.match(body)
+        if m:
+            remainder = body[m.end():].strip().strip("\"'«»“”")
+            if remainder:
+                return {
+                    "action": "research",
+                    "prompt": remainder,
+                    "topic": remainder
+                }
+
+        # 2. Шаблоны прямого ввода темы: "исследование: <тема>" или "исследование на тему <тема>"
+        intro_pattern = re.compile(
+            r"^(?:исследован\w*|анализ\w*)(?:\s*(?:на\s+тему|про|по|о|об))?(?:\s*:\s*|[,\s]+)",
+            re.IGNORECASE
+        )
+        m2 = intro_pattern.match(body)
+        if m2:
+            remainder = body[m2.end():].strip().strip("\"'«»“”")
+            if remainder:
+                return {
+                    "action": "research",
+                    "prompt": remainder,
+                    "topic": remainder
                 }
 
         return None
@@ -812,6 +864,14 @@ class CommandRouter:
                     "prompt": task_txt,
                     "title": task_txt
                 }
+            elif subagent_route.get("agent") == "research":
+                task_txt = subagent_route.get("task", "")
+                return {
+                    "type": "research",
+                    "action": "research",
+                    "prompt": task_txt,
+                    "topic": task_txt
+                }
             return {
                 "type": "subagent",
                 **subagent_route
@@ -833,7 +893,15 @@ class CommandRouter:
                 **doc_route
             }
 
-        # 7. Проверяем генерацию изображений (Image Sub-Agent Fast-Path)
+        # 7. Проверяем проведение исследований (Research Sub-Agent Fast-Path)
+        research_route = self.match_research(cleaned)
+        if research_route:
+            return {
+                "type": "research",
+                **research_route
+            }
+
+        # 8. Проверяем генерацию изображений (Image Sub-Agent Fast-Path)
         image_route = self.match_image(cleaned)
         if image_route:
             return {
@@ -841,7 +909,7 @@ class CommandRouter:
                 **image_route
             }
 
-        # 7. Естественный язык / сложные запросы -> Native Tool Calling
+        # 9. Естественный язык / сложные запросы -> Native Tool Calling
         return {
             "type": None,
             "tool": None,

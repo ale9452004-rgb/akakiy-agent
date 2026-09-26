@@ -131,6 +131,11 @@ class Artifact:
         return self.type in (ArtifactType.DOCUMENT, ArtifactType.PRESENTATION)
 
     @property
+    def is_research(self) -> bool:
+        """Является ли артефакт исследовательским отчётом."""
+        return bool(self.metadata.get("topic") or "research" in self.name.lower())
+
+    @property
     def is_file(self) -> bool:
         """Имеет ли артефакт привязку к физическому файлу на диске."""
         return self.path is not None
@@ -244,6 +249,28 @@ class Artifact:
         if sections_count is not None:
             meta["sections_count"] = sections_count
         return cls.from_file(path, name=name, type=ArtifactType.DOCUMENT, **meta)
+
+    @classmethod
+    def from_research(
+        cls,
+        path: Union[str, Path],
+        name: Optional[str] = None,
+        topic: Optional[str] = None,
+        questions_count: Optional[int] = None,
+        sources_count: Optional[int] = None,
+        **metadata
+    ) -> "Artifact":
+        """
+        Фабричный метод для создания артефакта исследовательского отчёта.
+        """
+        meta = dict(metadata)
+        if topic is not None:
+            meta["topic"] = topic
+        if questions_count is not None:
+            meta["questions_count"] = questions_count
+        if sources_count is not None:
+            meta["sources_count"] = sources_count
+        return cls.from_file(path, name=name, type=ArtifactType.TEXT, **meta)
 
     @classmethod
     def from_image(
@@ -521,6 +548,14 @@ class AgentResult:
     def documents(self) -> List[Artifact]:
         """Список всех артефактов документов."""
         return self.get_artifacts_by_type(ArtifactType.DOCUMENT)
+
+    @property
+    def research_reports(self) -> List[Artifact]:
+        """Список всех артефактов исследовательских отчётов."""
+        return [
+            a for a in self.artifacts
+            if a.is_research
+        ]
 
     @property
     def has_artifacts(self) -> bool:
