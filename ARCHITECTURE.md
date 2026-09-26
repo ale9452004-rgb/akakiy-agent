@@ -118,7 +118,14 @@
   * `PlanStep`: структурированный шаг плана (`id`, `action`, `description`, `details`, `depends_on`, `subagent`, `target`, `command`, `query`, `task`, `files`, `metadata`), dict-like доступ для обратной совместимости (`__getitem__`), метод `to_pipeline_step()` для трансляции в `PipelineStep`.
   * `TaskPlan`: модель структурированного плана (`goal`, `steps`, `expected_result`, `verification`, `metadata`, `status`). Включает строгую валидацию структуры, проверку зависимостей (запрет самозависимости, проверка существования ID, детекция циклов алгоритмом Кана), топологическую сортировку `get_execution_order()`, мост в multi-agent конвейеры через `to_pipeline_steps()` и `to_pipeline()`.
   * `Planner`: эволюция планировщика до v2. Предоставляет программную фабрику `create_structured_plan()`, валидацию планов `validate_plan()`, интеграцию с Teamwork (`to_pipeline()`) и сохраняет 100% обратную совместимость с LLM-планированием (`create_plan`, `_validate_plan`).
-* [tools/plan_executor.py](file:///c:/Akakiy%20agent/tools/plan_executor.py): Класс `PlanExecutor` — пошаговое исполнение действий с валидацией синтаксиса после каждого шага. Поддерживает как legacy dict-планы, так и объекты `TaskPlan`/`PlanStep`. Интегрирован с Sub-Agent архитектурой: распознает субагентов по реестру и исполняет их шаги через `AgentContext` и `AgentRegistry` (`_execute_subagent`).
+* [tools/plan_executor.py](file:///c:/Akakiy%20agent/tools/plan_executor.py): Модуль исполнения планов (Task Executor v2):
+  * Класс `PlanExecutor` — полноценное пошаговое исполнение планов с поддержкой `TaskPlan` и legacy-структур (словари и списки).
+  * Предварительная валидация графа плана (`validate()`) перед запуском с предотвращением циклов и невалидных шагов.
+  * Топологическое упорядочивание шагов (`get_execution_order()`) с гарантией разрешения зависимостей до запуска зависимых действий.
+  * Делегирование Sub-Agent шагов в `TeamworkPipeline` с контекстной изоляцией (`create_child_context`), семантическим трансфером данных и генерацией артефактов.
+  * Сквозное накопление истории, созданных файлов и артефактов в `AgentContext` и возврат стандартизированного итогового объекта `AgentResult`.
+  * Управление ошибками и прерыванием через параметр `stop_on_error` с валидацией проекта при мутациях.
+  * 100% обратная совместимость со словарным интерфейсом (`__getitem__`, `__setitem__`, `get`), `format_task_summary` и классическими инструментами (`search`, `analyze`, `read`, `edit`, `command`, `validate`, `git`).
 * [tools/teamwork.py](file:///c:/Akakiy%20agent/tools/teamwork.py): Teamwork Preview — координация виртуальных ролей (Researcher, Architect, Implementer, Reviewer) для сложных задач.
 * [tools/edit_preparer.py](file:///c:/Akakiy%20agent/tools/edit_preparer.py): Класс `EditPreparer` — подготовка точечных диффов и хирургических замен в коде на базе AST.
 * [tools/summary.py](file:///c:/Akakiy%20agent/tools/summary.py): Форматирование агрегированных итоговых сводок выполнения плана.

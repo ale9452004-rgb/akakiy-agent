@@ -26,7 +26,7 @@ def format_task_summary(plan_data, exec_result, research_info=None):
             for item in research_info:
                 res_lines.append(f"- {item}")
 
-    step_results = exec_result.get("results", []) if isinstance(exec_result, dict) else []
+    step_results = exec_result.get("results", []) if (isinstance(exec_result, dict) or hasattr(exec_result, "get")) else []
     for r in step_results:
         action = r.get("action")
         if action in ("search", "read", "analyze"):
@@ -88,9 +88,9 @@ def format_task_summary(plan_data, exec_result, research_info=None):
 
     # 5. Результат
     lines.append("## Результат")
-    if isinstance(exec_result, dict) and exec_result.get("success"):
+    if (isinstance(exec_result, dict) or hasattr(exec_result, "get")) and exec_result.get("success"):
         lines.append(exec_result.get("message", "Задача выполнена успешно."))
-    elif isinstance(exec_result, dict):
+    elif isinstance(exec_result, dict) or hasattr(exec_result, "get"):
         lines.append(exec_result.get("message", "Выполнение задачи остановлено."))
     else:
         lines.append("Выполнение задачи остановлено.")

@@ -149,7 +149,7 @@ class TeamworkVerifier:
         Проверяет состояние проекта после выполнения шагов плана.
         Если шаг валидации уже выполнялся в рамках плана, используем его результат.
         """
-        if execution_result and isinstance(execution_result, dict):
+        if execution_result and (isinstance(execution_result, dict) or hasattr(execution_result, "get")):
             step_results = execution_result.get("results", [])
             val_steps = [s for s in step_results if s.get("action") == "validate"]
             if val_steps:

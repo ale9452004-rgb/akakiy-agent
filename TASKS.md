@@ -6,9 +6,9 @@
 
 ## 1. Текущий статус проекта
 
-* **Текущая версия**: Акакий 2.0 (Desktop Hub + Voice UX + Household Assistant + Memory + Core Dev Tools + Notifications + Fast CLI REPL + Global Push-to-Talk + Backup & Restore + UI Filter & Pagination + Recurring Reminders & Tasks + Daily Briefing + Audio Notifications & Settings + Sub-Agent Foundation + ImageAgent v1 + VRAM Manager v1 + Image Request Routing + ImageAgent v2 Generation Parameters + Agent Router Robust Routing + AgentContext v2 Foundation Contract + AgentResult v2 & Artifacts Foundation + PresentationAgent v1 Foundation + DocumentAgent v1 Foundation + ResearchAgent v1 Foundation + CodingAgent v1 Foundation + FileAgent v1 Foundation + Agent Teamwork v1 Pipeline).
-* **Состояние кодовой базы**: Стабильное, все тесты пройдены (507 тестов в `tests/`: 505 unit-тестов успешны, 2 интеграционных пропущены по умолчанию; 0 синтаксических ошибок в Python-файлах проекта).
-* **Последний этап**: Этап №12 — Agent Teamwork v1: реализация последовательного конвейера взаимодействия Sub-Agent'ов (`TeamworkPipeline`, `PipelineStep`, `run_agent_pipeline`, автотрансфер контекста и артефактов).
+* **Текущая версия**: Акакий 2.0 (Desktop Hub + Voice UX + Household Assistant + Memory + Core Dev Tools + Notifications + Fast CLI REPL + Global Push-to-Talk + Backup & Restore + UI Filter & Pagination + Recurring Reminders & Tasks + Daily Briefing + Audio Notifications & Settings + Sub-Agent Foundation + ImageAgent v1 + VRAM Manager v1 + Image Request Routing + ImageAgent v2 Generation Parameters + Agent Router Robust Routing + AgentContext v2 Foundation Contract + AgentResult v2 & Artifacts Foundation + PresentationAgent v1 Foundation + DocumentAgent v1 Foundation + ResearchAgent v1 Foundation + CodingAgent v1 Foundation + FileAgent v1 Foundation + Agent Teamwork v1 Pipeline + Task Planner v2 Structured Plans + Task Executor v2 Execution Engine).
+* **Состояние кодовой базы**: Стабильное, все тесты пройдены (540 тестов в `tests/`: 538 unit-тестов успешны, 2 интеграционных пропущены по умолчанию; 0 синтаксических ошибок в Python-файлах проекта).
+* **Последний этап**: Этап №14 — Task Executor v2: эволюция `PlanExecutor` для полноценного исполнения `TaskPlan` v2, предварительная валидация, топологический порядок зависимостей, исполнение Sub-Agent шагов через `TeamworkPipeline`, агрегация артефактов и результатов в `AgentResult`.
 * **Ветка**: `master`, синхронизирована с `origin/master`.
 
 ---
@@ -330,6 +330,17 @@
   * Ленивый экспорт `PlanStep`, `TaskPlan`, `Planner` в `tools/agents/__init__.py` через PEP 562 (`__getattr__`) для полной защиты от циклических зависимостей.
   * Создан модульный тестовый набор `tests/test_task_planner_v2.py` (19 тестов, 100% pass).
   * Всего 526 тестов в `tests/` (524 unit pass + 2 integration skip by default).
+* [x] **Task Executor v2: исполнение TaskPlan v2, TeamworkPipeline и агрегация AgentResult (Этап 14)**:
+  * Эволюция `PlanExecutor` (`tools/plan_executor.py`): полноценное исполнение структурированных планов `TaskPlan` v2, legacy-словарей и списков шагов с сохранением 100% обратной совместимости API (`__getitem__`, `get`, `keys`, `to_dict`, `format_task_summary`).
+  * Валидация перед запуском (`plan.validate()`): предотвращение исполнения некорректных планов с немедленным возвратом `AgentResult.fail()` до совершения каких-либо действий.
+  * Топологический порядок зависимостей (`plan.get_execution_order()`): шаги выполняются строго с учётом зависимостей `depends_on`.
+  * Исполнение Sub-Agent шагов через `TeamworkPipeline`: изоляция шага, автоматическая трансляция контекста и результатов.
+  * Агрегация артефактов и созданных файлов: все `Artifact` и пути к файлам собираются в `AgentContext` и результирующем `AgentResult`.
+  * Гибкая обработка ошибок (`stop_on_error`): при `stop_on_error=True` немедленный останов; при `stop_on_error=False` продолжение выполнения независимых шагов с итоговым статусом ошибки. При сбоях после мутирующих операций (`edit`/`write`) автоматически запускается валидация синтаксиса проекта.
+  * Укрепление универсального контракта `AgentResult`: поддержка мутабельного словарного протокола (`__setitem__`), сохранение произвольных пользовательских полей и безопасное чтение через `summary.py` и `teamwork.py`.
+  * Добавлено свойство `artifacts` в `AgentContext` для агрегации артефактов всех предшествующих результатов.
+  * Создан модульный тестовый набор `tests/test_task_executor_v2.py` (14 тестов, 100% pass).
+  * Всего 540 тестов в `tests/` (538 unit pass + 2 integration skip by default).
 * [ ] **Интеграционные E2E тесты с виртуальным микрофоном**:
   * Реализовать тестовый сценарий, прогоняющий синтезированные аудиофайлы (WAV) через живой конвейер `VoiceService` с проверкой реакции GUI.
 * [ ] **Очистка устаревших бэкап-файлов `*.bak` в корне**:

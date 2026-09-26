@@ -149,6 +149,17 @@ class AgentContext:
         """Возвращает список всех результатов конкретного агента."""
         return list(self._results_by_agent.get(str(agent_name), []))
 
+    @property
+    def artifacts(self) -> List[Any]:
+        """Все артефакты, полученные из предыдущих результатов субагентов."""
+        accumulated: List[Any] = []
+        for r in self.previous_results:
+            if hasattr(r, "artifacts") and r.artifacts:
+                accumulated.extend(r.artifacts)
+            elif isinstance(r, dict) and "artifacts" in r and isinstance(r["artifacts"], list):
+                accumulated.extend(r["artifacts"])
+        return accumulated
+
     # =========================================================================
     # Метаданные и параметры (dict-like protocol)
     # =========================================================================

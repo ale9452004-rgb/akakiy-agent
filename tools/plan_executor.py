@@ -1,89 +1,308 @@
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 from tools.dispatcher import dispatch
+from tools.agents.context import AgentContext
+from tools.agents.result import AgentResult, Artifact, ArtifactType
+from tools.agents.registry import get_agent_registry, AgentRegistry
+from tools.planner import PlanStep, TaskPlan
+from tools.teamwork import TeamworkPipeline, PipelineStep
 
 
 class PlanExecutor:
     """
-    Выполняет структурированный план по шагам.
+    Выполняет структурированный план по шагам (Task Executor v2).
 
-    Executor получает готовый план от Planner
-    и последовательно выполняет его действия.
+    Поддерживает:
+    - TaskPlan (v2) с валидацией целостности графа и топологическим порядком исполнения;
+    - Legacy-планы (словари и списки) с сохранением обратной совместимости;
+    - Делегирование Sub-Agent шагов в TeamworkPipeline;
+    - Накопление результатов, созданных файлов и артефактов в AgentContext и итоговом AgentResult;
+    - Контроль ошибок и досрочной остановки (stop_on_error).
     """
 
-    def __init__(self, agent=None):
+    def __init__(self, agent=None, stop_on_error: bool = True):
         self.agent = agent
+        self.stop_on_error = stop_on_error
 
-    def execute(self, plan):
+    def execute(
+        self,
+        plan: Any,
+        initial_context: Optional[AgentContext] = None,
+        stop_on_error: Optional[bool] = None,
+        **kwargs
+    ) -> AgentResult:
         """
-        Выполняет переданный план.
+        Выполняет переданный план (TaskPlan или legacy-план).
+        Возвращает стандартизированный итоговый AgentResult.
         """
-        if hasattr(plan, "to_dict"):
-            plan = plan.to_dict()
+        should_stop = self.stop_on_error if stop_on_error is None else bool(stop_on_error)
+        reg = getattr(self.agent, "agent_registry", None) or get_agent_registry()
 
-        if not isinstance(plan, dict):
-            return {
-                "success": False,
-                "message": "План имеет некорректный формат."
-            }
-
-        steps = plan.get("steps")
-
-        if not isinstance(steps, list) or not steps:
-            return {
-                "success": False,
-                "message": "В плане отсутствуют шаги."
-            }
-
-        results = []
-        mutations_executed = []
-
-        for step in steps:
-
-            result = self._execute_step(
-                step,
-                results
+        # 1. Приведение плана к TaskPlan
+        if isinstance(plan, TaskPlan):
+            task_plan = plan
+        elif isinstance(plan, dict):
+            if "steps" in plan:
+                try:
+                    task_plan = TaskPlan.from_dict(plan)
+                except Exception as ex:
+                    return AgentResult.fail(
+                        error=f"Ошибка структуры плана: {ex}",
+                        message="План имеет некорректный формат.",
+                        data={"success": False, "message": "План имеет некорректный формат.", "raw_plan": plan}
+                    )
+            else:
+                return AgentResult.fail(
+                    error="В плане отсутствуют шаги.",
+                    message="В плане отсутствуют шаги.",
+                    data={"success": False, "message": "В плане отсутствуют шаги.", "raw_plan": plan}
+                )
+        elif isinstance(plan, list):
+            try:
+                task_plan = TaskPlan(steps=plan)
+            except Exception as ex:
+                return AgentResult.fail(
+                    error=f"Ошибка структуры шагов: {ex}",
+                    message="Список шагов имеет некорректный формат.",
+                    data={"success": False, "message": "Список шагов имеет некорректный формат."}
+                )
+        else:
+            return AgentResult.fail(
+                error="План имеет некорректный формат.",
+                message="План имеет некорректный формат.",
+                data={"success": False, "message": "План имеет некорректный формат."}
             )
 
-            results.append(result)
+        # 2. Валидация плана перед запуском
+        is_valid, validation_err = task_plan.validate()
+        if not is_valid:
+            return AgentResult.fail(
+                error=validation_err,
+                message=f"Ошибка валидации плана: {validation_err}",
+                data={
+                    "success": False,
+                    "message": f"Ошибка валидации плана: {validation_err}",
+                    "plan": task_plan.to_dict(),
+                    "validation_error": validation_err
+                }
+            )
 
-            if not result.get("success"):
-                # Если в этом плане уже были выполнены мутации до сбоя/отмены,
-                # запускаем валидацию только для реально выполненных изменений
-                if mutations_executed:
-                    dispatch("validate_project")
+        # 3. Исполнение в порядке топологических зависимостей
+        ordered_steps = task_plan.get_execution_order()
 
-                is_cancelled = (
-                    "отменил" in str(result.get("result", {}).get("error", ""))
-                    or "отменил" in str(result.get("message", ""))
+        # 4. Инициализация рабочего контекста
+        plan_goal = task_plan.goal or ""
+        plan_meta = dict(task_plan.metadata or {})
+        plan_meta.update(kwargs)
+
+        if initial_context is not None:
+            current_context = initial_context
+            if not current_context.task:
+                current_context.task = plan_goal
+            current_context.update_metadata(plan_meta)
+        else:
+            current_context = AgentContext(task=plan_goal, metadata=plan_meta)
+
+        results: List[Dict[str, Any]] = []
+        step_history: List[Dict[str, Any]] = []
+        accumulated_artifacts: List[Artifact] = list(getattr(current_context, "artifacts", []))
+        accumulated_files: List[str] = list(getattr(current_context, "files", []))
+        mutations_executed: List[str] = []
+        has_failures = False
+
+        # 5. Цикл выполнения шагов плана
+        for idx, step in enumerate(ordered_steps, start=1):
+            step_dict = step.to_dict() if hasattr(step, "to_dict") else dict(step)
+            step_id = step.id if hasattr(step, "id") else step_dict.get("id", idx)
+            step_action = step.action if hasattr(step, "action") else step_dict.get("action")
+            step_subagent = step.subagent if hasattr(step, "subagent") else step_dict.get("subagent")
+
+            is_subagent = bool(
+                step_subagent
+                or step_action == "subagent"
+                or self._is_registered_subagent(step_action, registry=reg)
+            )
+
+            if is_subagent:
+                # Sub-Agent шаг: делегирование в TeamworkPipeline
+                step_pipeline = TeamworkPipeline(
+                    steps=[step],
+                    registry=reg,
+                    stop_on_error=True
+                )
+                pipeline_res = step_pipeline.run(
+                    initial_task=step.task or step.details or step.description,
+                    initial_context=current_context
                 )
 
-                if is_cancelled:
-                    msg = (
-                        f"План остановлен. "
-                        f"Действие {step.get('id')} отменено пользователем. "
-                        f"Последующие действия не выполнены."
-                    )
-                else:
-                    msg = (
-                        f"Выполнение остановлено "
-                        f"на шаге {step.get('id')}."
-                    )
+                # Аккумулируем артефакты и созданные файлы
+                for art in pipeline_res.artifacts:
+                    if art not in accumulated_artifacts:
+                        accumulated_artifacts.append(art)
+                for cf in pipeline_res.created_files:
+                    if cf not in accumulated_files:
+                        accumulated_files.append(cf)
 
-                return {
-                    "success": False,
-                    "message": msg,
-                    "step": step,
-                    "results": results
+                # Фиксируем результат в AgentContext
+                current_context.add_result(
+                    pipeline_res,
+                    agent_name=step_subagent or step_action
+                )
+
+                step_res_dict = {
+                    "success": pipeline_res.success,
+                    "message": pipeline_res.message,
+                    "result": pipeline_res.to_dict(),
+                    "data": pipeline_res.data,
+                    "subagent": step_subagent or step_action,
+                    "action": step_action,
+                    "id": step_id,
+                    "created_files": list(pipeline_res.created_files),
+                    "artifacts": [a.to_dict() for a in pipeline_res.artifacts],
+                    "error": pipeline_res.error
                 }
+                results.append(step_res_dict)
 
-            if step.get("action") in ("edit", "write"):
-                mutations_executed.append(step.get("target"))
+                step_history.append({
+                    "step": idx,
+                    "id": step_id,
+                    "name": str(step_id),
+                    "step_id": str(step_id),
+                    "action": step_action,
+                    "subagent": step_subagent or step_action,
+                    "task": step.task or step.details or step.description,
+                    "success": pipeline_res.success,
+                    "message": pipeline_res.message,
+                    "created_files": list(pipeline_res.created_files),
+                    "artifacts": [a.to_dict() for a in pipeline_res.artifacts],
+                    "error": pipeline_res.error
+                })
 
-        return {
-            "success": True,
-            "message": "План выполнен успешно.",
-            "results": results
-        }
+                if not pipeline_res.success:
+                    has_failures = True
+                    if mutations_executed:
+                        dispatch("validate_project")
+                    if should_stop:
+                        err_msg = f"Выполнение остановлено на шаге {step_id}: {pipeline_res.error or pipeline_res.message}"
+                        return AgentResult.fail(
+                            error=pipeline_res.error or pipeline_res.message,
+                            message=err_msg,
+                            created_files=accumulated_files,
+                            artifacts=accumulated_artifacts,
+                            data={
+                                "success": False,
+                                "message": err_msg,
+                                "step": step_dict,
+                                "results": results,
+                                "history": step_history,
+                                "failed_step": step_id,
+                                "plan": task_plan.to_dict()
+                            }
+                        )
+
+            else:
+                # Стандартный шаг инструмента (search, analyze, read, edit, command, validate, git)
+                tool_res = self._execute_step(step, results)
+                results.append(tool_res)
+
+                target = step.target if hasattr(step, "target") else step_dict.get("target")
+                if step_action in ("edit", "write") and target:
+                    mutations_executed.append(target)
+                    if target not in accumulated_files:
+                        accumulated_files.append(target)
+                    accumulated_artifacts.append(Artifact.from_file(target, type=ArtifactType.CODE))
+                elif step_action == "read" and target:
+                    if target not in accumulated_files:
+                        accumulated_files.append(target)
+                    accumulated_artifacts.append(Artifact.from_file(target, type=ArtifactType.FILE))
+
+                tool_agent_res = AgentResult(
+                    success=tool_res.get("success", False),
+                    message=tool_res.get("message", ""),
+                    created_files=[target] if target else [],
+                    data=tool_res,
+                    error=tool_res.get("error") if not tool_res.get("success") else None
+                )
+                current_context.add_result(tool_agent_res, agent_name=step_action)
+
+                step_history.append({
+                    "step": idx,
+                    "id": step_id,
+                    "name": str(step_id),
+                    "step_id": str(step_id),
+                    "action": step_action,
+                    "success": tool_res.get("success", False),
+                    "message": tool_res.get("message", ""),
+                    "created_files": [target] if target else [],
+                    "artifacts": [a.to_dict() for a in tool_agent_res.artifacts],
+                    "error": tool_res.get("error")
+                })
+
+                if not tool_res.get("success"):
+                    has_failures = True
+                    if mutations_executed:
+                        dispatch("validate_project")
+                    is_cancelled = (
+                        "отменил" in str(tool_res.get("result", {}).get("error", ""))
+                        or "отменил" in str(tool_res.get("message", ""))
+                    )
+                    if is_cancelled:
+                        msg = (
+                            f"План остановлен. "
+                            f"Действие {step_id} отменено пользователем. "
+                            f"Последующие действия не выполнены."
+                        )
+                    else:
+                        msg = f"Выполнение остановлено на шаге {step_id}."
+
+                    if should_stop:
+                        return AgentResult.fail(
+                            error=tool_res.get("message") or msg,
+                            message=msg,
+                            created_files=accumulated_files,
+                            artifacts=accumulated_artifacts,
+                            data={
+                                "success": False,
+                                "message": msg,
+                                "step": step_dict,
+                                "results": results,
+                                "history": step_history,
+                                "failed_step": step_id,
+                                "plan": task_plan.to_dict()
+                            }
+                        )
+
+        # 6. Формирование итогового AgentResult
+        if has_failures:
+            return AgentResult.fail(
+                error="Один или несколько шагов плана завершились с ошибкой.",
+                message="План завершён с ошибками.",
+                created_files=accumulated_files,
+                artifacts=accumulated_artifacts,
+                data={
+                    "success": False,
+                    "message": "План завершён с ошибками.",
+                    "results": results,
+                    "history": step_history,
+                    "plan": task_plan.to_dict(),
+                    "total_steps": len(ordered_steps),
+                    "completed_steps": len([r for r in results if r.get("success")])
+                }
+            )
+
+        return AgentResult.ok(
+            message="План выполнен успешно.",
+            created_files=accumulated_files,
+            artifacts=accumulated_artifacts,
+            data={
+                "success": True,
+                "message": "План выполнен успешно.",
+                "results": results,
+                "history": step_history,
+                "plan": task_plan.to_dict(),
+                "total_steps": len(ordered_steps),
+                "completed_steps": len(results)
+            }
+        )
 
     def _execute_step(self, step, previous_results):
         """
@@ -672,22 +891,21 @@ class PlanExecutor:
         return request
 
     # =========================================================================
-    # Поддержка Sub-Agent в Task Planner v2
+    # Поддержка Sub-Agent в Task Executor v2 через TeamworkPipeline
     # =========================================================================
 
-    def _is_registered_subagent(self, action: Optional[str]) -> bool:
+    def _is_registered_subagent(self, action: Optional[str], registry=None) -> bool:
         """Проверяет, зарегистрирован ли субагент с таким именем."""
         if not action or not isinstance(action, str):
             return False
         if action in ("search", "analyze", "read", "edit", "command", "validate", "git"):
             return False
-        from tools.agents.registry import get_agent_registry
-        reg = getattr(self.agent, "agent_registry", None) or get_agent_registry()
+        reg = registry or getattr(self.agent, "agent_registry", None) or get_agent_registry()
         return reg.has(action)
 
     def _execute_subagent(self, step, previous_results, context):
         """
-        Выполняет шаг, привязанный к Sub-Agent (Task Planner v2).
+        Выполняет шаг, привязанный к Sub-Agent через TeamworkPipeline (Task Executor v2).
         """
         agent_name = step.get("subagent") or step.get("action")
         task_str = step.get("task") or step.get("details") or step.get("description") or ""
@@ -696,32 +914,41 @@ class PlanExecutor:
         if step.get("target") and step.get("target") not in files:
             files.append(step.get("target"))
 
-        from tools.agents.registry import get_agent_registry
-        from tools.agents.context import AgentContext
         reg = getattr(self.agent, "agent_registry", None) or get_agent_registry()
-        subagent = reg.get(agent_name)
-
-        if not subagent:
+        if not reg.has(agent_name):
             return {
                 "success": False,
                 "message": f"Субагент '{agent_name}' не найден в реестре.",
                 "step": step
             }
 
-        ctx = AgentContext(
+        pipe_step = PipelineStep(
+            agent=agent_name,
             task=task_str,
+            metadata=meta,
             files=files,
-            metadata=meta
+            name=str(step.get("id") or agent_name)
         )
-        ctx.instruction = task_str
+        pipeline = TeamworkPipeline(
+            steps=[pipe_step],
+            registry=reg,
+            stop_on_error=self.stop_on_error
+        )
+        if isinstance(context, AgentContext):
+            step_context = context
+        else:
+            step_context = AgentContext(task=task_str, files=files, metadata=meta)
 
-        res = subagent.run(ctx)
+        res = pipeline.run(initial_task=task_str, initial_context=step_context)
         return {
             "success": res.success,
             "message": res.message,
             "result": res.to_dict(),
             "data": res.data,
             "subagent": agent_name,
+            "action": step.get("action") or agent_name,
+            "id": step.get("id"),
             "created_files": list(res.created_files),
-            "artifacts": [a.to_dict() for a in res.artifacts]
+            "artifacts": [a.to_dict() for a in res.artifacts],
+            "error": res.error
         }

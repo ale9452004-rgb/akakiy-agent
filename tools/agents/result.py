@@ -617,6 +617,9 @@ class AgentResult:
         }
         if self.error is not None:
             res["error"] = self.error
+        for k, v in self.data.items():
+            if k not in res:
+                res[k] = v
         return res
 
     @classmethod
@@ -635,11 +638,19 @@ class AgentResult:
                 for a in artifacts_data
             ]
 
+        # Извлекаем дополнительные ключи, не входящие в стандартные поля
+        extra_data = {}
+        if isinstance(data.get("data"), dict):
+            extra_data.update(data["data"])
+        for k, v in data.items():
+            if k not in ("success", "message", "created_files", "data", "error", "artifacts"):
+                extra_data[k] = v
+
         return cls(
             success=data.get("success", False),
             message=data.get("message", ""),
             created_files=data.get("created_files"),
-            data=data.get("data"),
+            data=extra_data if extra_data else data.get("data"),
             error=data.get("error"),
             artifacts=parsed_artifacts
         )
@@ -660,13 +671,29 @@ class AgentResult:
     # =========================================================================
 
     def __getitem__(self, key: str) -> Any:
+        if key in ("success", "message", "created_files", "data", "artifacts", "error"):
+            return getattr(self, key)
+        if key in self.data:
+            return self.data[key]
         return self.to_dict()[key]
 
+    def __setitem__(self, key: str, value: Any) -> None:
+        if key in ("success", "message", "created_files", "error", "artifacts"):
+            setattr(self, key, value)
+        self.data[key] = value
+
     def get(self, key: str, default: Any = None) -> Any:
-        return self.to_dict().get(key, default)
+        try:
+            return self[key]
+        except KeyError:
+            return default
 
     def __contains__(self, key: str) -> bool:
-        return key in self.to_dict()
+        return (
+            key in ("success", "message", "created_files", "data", "artifacts", "error")
+            or key in self.data
+            or key in self.to_dict()
+        )
 
     def keys(self):
         """Возвращает ключи словаря результата."""
