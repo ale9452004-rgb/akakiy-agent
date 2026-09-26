@@ -151,12 +151,18 @@
   * `TeamworkPipeline` (`tools/teamwork.py`): Механизм последовательного взаимодействия нескольких Sub-Agent'ов через существующие `AgentContext`, `AgentResult` и `AgentRegistry`. Поддерживает конвейеры из 2–3+ агентов, передачу контекста и результатов между шагами (`create_child_context`, автотрансфер `topic`/`title`/`findings` $\to$ `sections`/`slides`), аккумуляцию `Artifact` и созданных файлов каждого шага, безопасную досрочную остановку при сбоях (`stop_on_error`) с сохранением промежуточных артефактов, динамические шаблоны задач и хуки трансформации `input_transform`. Публичный API: `PipelineStep`, `TeamworkPipeline`, `run_agent_pipeline` и `TeamworkCoordinator.run_pipeline()`.
 
 ### 3.4. Слой данных и памяти (Data Layer)
-* [tools/memory.py](file:///c:/Akakiy%20agent/tools/memory.py): Долговременная память (`MemoryManager`).
-  * Хранилище: `data/memory.json`.
-  * Атомарная запись через `.tmp` и `os.replace`.
-  * Фильтрация системного мусора и дампов ошибок (`is_valid_memory_text`).
-  * Дедупликация фактов по нормализованному тексту.
-  * Экспортируемые инструменты: `remember`, `recall_memory`, `forget_memory`.
+* [tools/persistent_memory.py](file:///c:/Akakiy%20agent/tools/persistent_memory.py): Выделенный слой постоянной долговременной памяти (`PersistentMemory`):
+  * Структурированная модель `MemoryEntry(dict)` (`id`, `content`/`text`, `type`/`category`, `source`, `tags`, `metadata`, `created_at`, `updated_at`).
+  * Типы и источники: `MemoryType` (fact, preference, result, note, general, artifact), `MemorySource` (user, agent, subagent, cli, gui, system).
+  * Изоляция долговременных фактов от диалогового runtime history (`short_term`) и контекста исполнения задач (`AgentContext`).
+  * Безопасные CRUD-операции (`create`, `get`, `get_all`, `update`, `delete`, `clear`).
+  * Многокритериальный поиск и фильтрация (`search` по тексту, типу, тегам, источнику).
+  * Атомарная запись через `.tmp` и `os.replace`, автомиграция схемы v1 $\to$ v2 и устойчивость к повреждённым файлам.
+  * Метод `remember_result()` для контролируемой явной фиксации итогов задач.
+* [tools/memory.py](file:///c:/Akakiy%20agent/tools/memory.py): Фасад памяти и скользящее окно диалога (`MemoryManager`):
+  * Делегирует долговременное хранение в `PersistentMemory` с сохранением 100% обратной совместимости.
+  * Ведет изолированное скользящее окно краткосрочных ходов диалога (`short_term`, `add_turn`, `get_recent_history`).
+  * Экспортируемые инструменты: `remember`, `recall_memory`, `forget_memory`, `update_memory`.
 * [tools/household.py](file:///c:/Akakiy%20agent/tools/household.py): Бытовой менеджер (`HouseholdManager`).
   * Хранилище: `data/household.json`.
   * Атомарная запись и потокобезопасность.

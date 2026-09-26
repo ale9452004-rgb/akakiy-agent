@@ -66,12 +66,16 @@ __all__ = [
     "ErrorContext",
     "ErrorClassifier",
     "SelfHealingManager",
+    "MemoryEntry",
+    "PersistentMemory",
+    "MemoryType",
+    "MemorySource",
 ]
 
 
 def __getattr__(name: str):
     """
-    Ленивый импорт внешних компонентов (teamwork, planner, executor, self_healing)
+    Ленивый импорт внешних компонентов (teamwork, planner, executor, self_healing, memory)
     для предотвращения циклических зависимостей при прямой загрузке submodules.
     """
     if name in ("PipelineStep", "TeamworkPipeline", "run_agent_pipeline"):
@@ -112,6 +116,19 @@ def __getattr__(name: str):
         globals()["ErrorContext"] = _ECtx
         globals()["ErrorClassifier"] = _EClf
         globals()["SelfHealingManager"] = _SHM
+        return globals()[name]
+
+    if name in ("MemoryEntry", "PersistentMemory", "MemoryType", "MemorySource"):
+        from tools.persistent_memory import (
+            MemoryEntry as _ME,
+            PersistentMemory as _PM,
+            MemoryType as _MT,
+            MemorySource as _MS,
+        )
+        globals()["MemoryEntry"] = _ME
+        globals()["PersistentMemory"] = _PM
+        globals()["MemoryType"] = _MT
+        globals()["MemorySource"] = _MS
         return globals()[name]
 
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

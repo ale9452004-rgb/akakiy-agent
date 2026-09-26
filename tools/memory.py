@@ -18,73 +18,25 @@ import re
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 from config import PROJECT_PATH
+from tools.persistent_memory import (
+    MemoryEntry,
+    PersistentMemory,
+    MemoryType,
+    MemorySource,
+    normalize_for_comparison,
+    is_valid_memory_text,
+    DEFAULT_PERSISTENT_MEMORY_FILE,
+)
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_MEMORY_FILE = PROJECT_PATH / "data" / "memory.json"
-
-
-def normalize_for_comparison(text: str) -> str:
-    """Нормализует текст для выявления дубликатов."""
-    if not text:
-        return ""
-    t = text.lower().strip()
-    t = re.sub(r"[^\w\s]", " ", t)
-    t = re.sub(r"\s+", " ", t).strip()
-    return t
-
-
-def is_valid_memory_text(text: str) -> Tuple[bool, str]:
-    """
-    Проверяет текст на пригодность для долговременной памяти:
-    отсекает пустые строки, системный мусор, трейсбеки и дампы ошибок.
-    """
-    if not text or not isinstance(text, str):
-        return False, "Текст памяти не может быть пустым."
-
-    stripped = text.strip()
-    if len(stripped) < 3:
-        return False, "Слишком короткий текст для сохранения в память (минимум 3 символа)."
-
-    if len(stripped) > 500:
-        return False, "Текст слишком длинный (максимум 500 символов). Для больших данных используйте файлы проекта."
-
-    # Проверка на наличие букв/цифр
-    if not re.search(r"[a-zA-Zа-яА-Я0-9]", stripped):
-        return False, "Текст должен содержать осмысленные слова или цифры."
-
-    # Фильтрация трейсбеков Python
-    if re.search(r"traceback\s+\(most recent call last\)", stripped, re.IGNORECASE):
-        return False, "Текст похож на системный трейсбек и не подходит для долговременной памяти."
-
-    if re.search(r'File\s+"[^"]+",\s+line\s+\d+', stripped):
-        return False, "Текст содержит строки трейсбека файлов и не подходит для долговременной памяти."
-
-    # Фильтрация типичных сообщений об исключениях
-    if re.search(r"\b(SyntaxError|ImportError|TypeError|ValueError|IndexError|KeyError|AttributeError|ZeroDivisionError|RuntimeError|FileNotFoundError|PermissionError|OSError|Exception)\s*:", stripped):
-        return False, "Текст похож на ошибку выполнения программы, а не на факт для запоминания."
-
-    # Фильтрация сырых дампов разметки или JSON
-    if (stripped.startswith("{") and stripped.endswith("}")) or (stripped.startswith("[") and stripped.endswith("]")):
-        try:
-            json.loads(stripped)
-            return False, "Текст содержит сырой JSON-дамп и отклонён как технический мусор."
-        except Exception:
-            pass
-
-    if re.search(r"^<(?:\?xml|!DOCTYPE|html|div|xml|body|[a-zA-Z0-9_-]+)", stripped, re.IGNORECASE) and stripped.endswith(">"):
-        return False, "Текст содержит сырой HTML/XML код и отклонён как технический мусор."
-
-    # Фильтрация дампов шестнадцатеричных байтов
-    if re.search(r"(?:0x[0-9a-fA-F]{2,}\s*){4,}", stripped):
-        return False, "Текст содержит бинарный/hex дамп и отклонён."
-
-    return True, "OK"
+DEFAULT_MEMORY_FILE = DEFAULT_PERSISTENT_MEMORY_FILE
 
 
 class MemoryManager:
     """
     Менеджер краткосрочной и долговременной памяти Акакия.
+    Использует PersistentMemory как слой долговременного хранения.
     """
 
     def __init__(
@@ -98,7 +50,7 @@ class MemoryManager:
         self.max_turns = max_turns
         self.short_term: deque = deque(maxlen=max_turns * 2)
         self._ensure_storage_dir()
-        self.memories: List[Dict[str, Any]] = self._load_memories()
+        self.persistent = PersistentMemory(storage_path=self.storage_path)
 
     def _ensure_storage_dir(self):
         try:
@@ -106,89 +58,55 @@ class MemoryManager:
         except Exception as e:
             logger.warning(f"Не удалось создать директорию памяти {self.storage_path.parent}: {e}")
 
+    @property
+    def memories(self) -> List[Any]:
+        """Доступ к списку записей долговременной памяти."""
+        return self.persistent.entries
+
+    @memories.setter
+    def memories(self, value: List[Any]) -> None:
+        self.persistent.entries = value
+
     def reload(self):
         """Перечитывает долговременную память с диска."""
-        self.memories = self._load_memories()
+        self.persistent.reload()
 
     def _load_memories(self) -> List[Dict[str, Any]]:
         """Загружает долговременную память с диска."""
-        if not self.storage_path.exists():
-            return []
-        try:
-            with open(self.storage_path, "r", encoding="utf-8") as f:
-                data = json.load(f)
-                if isinstance(data, dict):
-                    return data.get("memories", [])
-                elif isinstance(data, list):
-                    return data
-                return []
-        except Exception as e:
-            logger.error(f"Ошибка чтения файла памяти {self.storage_path}: {e}")
-            return []
+        return [dict(e) for e in self.persistent._load_from_disk()]
 
     def _save_memories(self) -> bool:
         """Атомарно сохраняет долговременную память на диск."""
-        self._ensure_storage_dir()
-        payload = {
-            "version": 1,
-            "updated_at": datetime.now().isoformat(),
-            "memories": self.memories
-        }
-        try:
-            tmp_path = self.storage_path.with_suffix(".tmp")
-            with open(tmp_path, "w", encoding="utf-8") as f:
-                json.dump(payload, f, ensure_ascii=False, indent=2)
-            # Атомарная замена
-            if self.storage_path.exists():
-                os.replace(tmp_path, self.storage_path)
-            else:
-                tmp_path.rename(self.storage_path)
-            return True
-        except Exception as e:
-            logger.error(f"Ошибка сохранения файла памяти {self.storage_path}: {e}")
-            return False
+        return self.persistent.save()
 
     # =========================================================================
     # Долговременная память (Long-Term Memory)
     # =========================================================================
 
-    def remember(self, text: str, category: str = "general") -> Tuple[bool, str, Optional[Dict[str, Any]]]:
+    def remember(
+        self,
+        text: str,
+        category: str = "general",
+        source: str = MemorySource.USER,
+        tags: Optional[List[str]] = None,
+        metadata: Optional[Dict[str, Any]] = None
+    ) -> Tuple[bool, str, Optional[Dict[str, Any]]]:
         """
         Сохраняет факт или предпочтение в долговременную память.
         Проверяет на технический мусор и дубликаты.
         """
-        valid, msg = is_valid_memory_text(text)
-        if not valid:
-            return False, f"Не удалось сохранить: {msg}", None
-
-        clean_text = text.strip()
-        norm_text = normalize_for_comparison(clean_text)
-
-        # Проверка на дубликаты
-        for m in self.memories:
-            existing_norm = normalize_for_comparison(m.get("text", ""))
-            if norm_text == existing_norm:
-                return False, f"Эта информация уже есть в памяти (запись #{m['id']}): \"{m['text']}\"", m
-
-        # Присваиваем следующий ID
-        next_id = max([m.get("id", 0) for m in self.memories], default=0) + 1
-        entry = {
-            "id": next_id,
-            "text": clean_text,
-            "category": category,
-            "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        }
-
-        self.memories.append(entry)
-        saved = self._save_memories()
-        if not saved:
-            return False, "Не удалось записать память на диск.", None
-
-        return True, f"Запомнил: \"{clean_text}\" (запись #{next_id})", entry
+        return self.persistent.create(
+            content=text,
+            type=category,
+            category=category,
+            source=source,
+            tags=tags,
+            metadata=metadata
+        )
 
     def get_all(self) -> List[Dict[str, Any]]:
         """Возвращает все сохранённые записи памяти."""
-        return list(self.memories)
+        return self.persistent.get_all()
 
     def recall(self, query: str = "") -> List[Dict[str, Any]]:
         """Ищет записи или возвращает все (псевдоним для search/get_all)."""
@@ -196,82 +114,67 @@ class MemoryManager:
             return self.search(str(query).strip())
         return self.get_all()
 
-    def search(self, query: str) -> List[Dict[str, Any]]:
-        """Поиск записей в памяти по ключевым словам."""
-        if not query:
-            return self.get_all()
-
-        words = [w for w in normalize_for_comparison(query).split() if len(w) > 1]
-        if not words:
-            return []
-
-        results = []
-        for m in self.memories:
-            norm_m = normalize_for_comparison(m.get("text", ""))
-            if all(w in norm_m for w in words):
-                results.append(m)
-            elif any(w in norm_m for w in words):
-                results.append(m)
-        return results
+    def search(
+        self,
+        query: str = "",
+        type: Optional[str] = None,
+        tags: Optional[List[str]] = None,
+        source: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
+        """Поиск записей в памяти по ключевым словам и фильтрам."""
+        return self.persistent.search(query=query, type=type, tags=tags, source=source)
 
     def forget(self, target: Union[int, str]) -> Tuple[bool, str]:
         """
         Удаляет запись из памяти по ID или текстовому совпадению.
         """
-        if not target and target != 0:
-            return False, "Укажите номер или текст записи для удаления."
-
-        # Попытка удалить по ID
-        target_id = None
-        if isinstance(target, int):
-            target_id = target
-        else:
-            t_str = str(target).strip()
-            # Проверяем, число ли это ("1", "#1", "№1")
-            id_match = re.match(r"^[#№]?(\d+)$", t_str)
-            if id_match:
-                target_id = int(id_match.group(1))
-
-        if target_id is not None:
-            for idx, m in enumerate(self.memories):
-                if m.get("id") == target_id:
-                    removed = self.memories.pop(idx)
-                    self._save_memories()
-                    return True, f"Удалил запись #{removed['id']} из памяти: \"{removed['text']}\""
-            # Если по ID не найдено, число может быть фрагментом текста (напр. токен, порт)
-
-        # Поиск по текстовому совпадению
-        target_norm = normalize_for_comparison(str(target))
-        if not target_norm:
-            return False, "Укажите непустой текст для удаления."
-
-        matching_indices = []
-        for idx, m in enumerate(self.memories):
-            norm_m = normalize_for_comparison(m.get("text", ""))
-            if target_norm in norm_m:
-                matching_indices.append(idx)
-
-        if not matching_indices:
-            if target_id is not None:
-                return False, f"Запись с номером #{target_id} не найдена в памяти."
-            return False, f"Запись, содержащая \"{target}\", не найдена в памяти."
-
-        if len(matching_indices) == 1:
-            removed = self.memories.pop(matching_indices[0])
-            self._save_memories()
-            return True, f"Удалил запись #{removed['id']} из памяти: \"{removed['text']}\""
-
-        # Несколько совпадений
-        matched_entries = [self.memories[i] for i in matching_indices]
-        entries_str = ", ".join(f"#{m['id']} (\"{m['text'][:30]}...\")" for m in matched_entries[:3])
-        return False, f"Найдено несколько записей: {entries_str}. Укажите точный номер записи (например, 'забудь: #{matched_entries[0]['id']}')."
+        return self.persistent.delete(target)
 
     def clear_long_term(self) -> Tuple[bool, str]:
         """Очищает всю долговременную память."""
-        count = len(self.memories)
-        self.memories.clear()
-        self._save_memories()
-        return True, f"Долговременная память очищена (удалено записей: {count})."
+        return self.persistent.clear()
+
+    def get_entry(self, entry_id: Union[int, str]) -> Optional[MemoryEntry]:
+        """Возвращает структурированную запись памяти по ID."""
+        return self.persistent.get(entry_id)
+
+    def update_entry(
+        self,
+        entry_id: Union[int, str],
+        content: Optional[str] = None,
+        type: Optional[str] = None,
+        tags: Optional[List[str]] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+        source: Optional[str] = None
+    ) -> Tuple[bool, str, Optional[MemoryEntry]]:
+        """Безопасно обновляет существующую запись памяти."""
+        return self.persistent.update(
+            entry_id=entry_id,
+            content=content,
+            type=type,
+            tags=tags,
+            metadata=metadata,
+            source=source
+        )
+
+    def delete_entry(self, entry_id: Union[int, str]) -> Tuple[bool, str]:
+        """Удаляет запись памяти по ID."""
+        return self.persistent.delete(entry_id)
+
+    def remember_result(
+        self,
+        result: Any,
+        title: Optional[str] = None,
+        tags: Optional[List[str]] = None,
+        source: str = MemorySource.AGENT
+    ) -> Tuple[bool, str, Optional[MemoryEntry]]:
+        """Явно сохраняет результат задачи в долговременную память."""
+        return self.persistent.remember_result(
+            result=result,
+            title=title,
+            tags=tags,
+            source=source
+        )
 
     def format_memories_summary(self, memory_list: Optional[List[Dict[str, Any]]] = None) -> str:
         """Форматирует список записей в наглядный текст для пользователя."""
@@ -434,3 +337,43 @@ def forget_memory(target: str) -> Dict[str, Any]:
         "success": success,
         "message": msg
     }
+
+
+def update_memory(
+    target: Union[int, str],
+    content: Optional[str] = None,
+    category: Optional[str] = None,
+    tags: Optional[List[str]] = None
+) -> Dict[str, Any]:
+    """Инструмент: обновляет существующую запись в долговременной памяти."""
+    mgr = get_memory_manager()
+    success, msg, entry = mgr.update_entry(
+        entry_id=target,
+        content=content,
+        type=category,
+        tags=tags
+    )
+    return {
+        "success": success,
+        "message": msg,
+        "entry": entry
+    }
+
+
+__all__ = [
+    "MemoryManager",
+    "get_memory_manager",
+    "remember",
+    "recall_memory",
+    "forget_memory",
+    "update_memory",
+    "MemoryEntry",
+    "PersistentMemory",
+    "MemoryType",
+    "MemorySource",
+    "normalize_for_comparison",
+    "is_valid_memory_text",
+    "DEFAULT_MEMORY_FILE",
+    "DEFAULT_PERSISTENT_MEMORY_FILE",
+]
+

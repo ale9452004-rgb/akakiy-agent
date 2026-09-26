@@ -6,9 +6,9 @@
 
 ## 1. Текущий статус проекта
 
-* **Текущая версия**: Акакий 2.0 (Desktop Hub + Voice UX + Household Assistant + Memory + Core Dev Tools + Notifications + Fast CLI REPL + Global Push-to-Talk + Backup & Restore + UI Filter & Pagination + Recurring Reminders & Tasks + Daily Briefing + Audio Notifications & Settings + Sub-Agent Foundation + ImageAgent v1 + VRAM Manager v1 + Image Request Routing + ImageAgent v2 Generation Parameters + Agent Router Robust Routing + AgentContext v2 Foundation Contract + AgentResult v2 & Artifacts Foundation + PresentationAgent v1 Foundation + DocumentAgent v1 Foundation + ResearchAgent v1 Foundation + CodingAgent v1 Foundation + FileAgent v1 Foundation + Agent Teamwork v1 Pipeline + Task Planner v2 Structured Plans + Task Executor v2 Execution Engine + Self-Healing Error Recovery).
-* **Состояние кодовой базы**: Стабильное, все тесты пройдены (558 тестов в `tests/`: 556 unit-тестов успешны, 2 интеграционных пропущены по умолчанию; 0 синтаксических ошибок в Python-файлах проекта).
-* **Последний этап**: Этап №15 — Self-Healing: контролируемый механизм восстановления ошибок поверх TaskExecutor v2 (сбор ErrorContext, детерминированная классификация recoverable/non-recoverable, ограниченные попытки retry с сохранением истории в AgentContext, соблюдение stop_on_error и защита от циклов).
+* **Текущая версия**: Акакий 2.0 (Desktop Hub + Voice UX + Household Assistant + Memory + Core Dev Tools + Notifications + Fast CLI REPL + Global Push-to-Talk + Backup & Restore + UI Filter & Pagination + Recurring Reminders & Tasks + Daily Briefing + Audio Notifications & Settings + Sub-Agent Foundation + ImageAgent v1 + VRAM Manager v1 + Image Request Routing + ImageAgent v2 Generation Parameters + Agent Router Robust Routing + AgentContext v2 Foundation Contract + AgentResult v2 & Artifacts Foundation + PresentationAgent v1 Foundation + DocumentAgent v1 Foundation + ResearchAgent v1 Foundation + CodingAgent v1 Foundation + FileAgent v1 Foundation + Agent Teamwork v1 Pipeline + Task Planner v2 Structured Plans + Task Executor v2 Execution Engine + Self-Healing Error Recovery + Persistent Memory Layer).
+* **Состояние кодовой базы**: Стабильное, все тесты пройдены (581 тест в `tests/`: 579 unit-тестов успешны, 2 интеграционных пропущены по умолчанию; 0 синтаксических ошибок в Python-файлах проекта).
+* **Последний этап**: Этап №16 — Persistent Memory: отдельный слой долговременной памяти (`PersistentMemory`), структурированная модель `MemoryEntry`, безопасный CRUD, валидация и дедупликация, многокритериальный поиск, атомарная персистентность с автомиграцией схемы v1 $\to$ v2, явная фиксация результатов `remember_result` и интеграция в `MemoryManager`.
 * **Ветка**: `master`, синхронизирована с `origin/master`.
 
 ---
@@ -352,6 +352,18 @@
   * Экспорт компонентов Self-Healing через PEP 562 в `tools/agents/__init__.py`.
   * Создан модульный тестовый набор `tests/test_self_healing.py` (18 тестов, 100% pass).
   * Всего 558 тестов в `tests/` (556 unit pass + 2 integration skip by default).
+* [x] **Persistent Memory: постоянная память, структурированная модель, CRUD и интеграция с MemoryManager (Этап 16)**:
+  * Разработан модуль `tools/persistent_memory.py`: изолированный слой долговременной памяти `PersistentMemory`, отделённый от `AgentContext` и сессионного контекста диалога (`short_term`).
+  * Реализована структурированная модель `MemoryEntry(dict)` с наследованием `dict` для 100% нативной сериализации в `tools/backup.py` и одновременным доступом через атрибуты (`m.content`, `m.type`, `m.tags`, `m.source`, `m.metadata`) и словарные ключи/алиасы (`m["text"]`, `m["category"]`, `m["id"]`).
+  * Определены классификаторы типов `MemoryType` (`FACT`, `PREFERENCE`, `RESULT`, `NOTE`, `GENERAL`, `ARTIFACT`) и источников `MemorySource` (`USER`, `AGENT`, `SUBAGENT`, `CLI`, `GUI`, `SYSTEM`).
+  * Реализованы безопасные операции CRUD: `create()` с валидацией входного текста `is_valid_memory_text` (фильтрация пустых строк, трейсбеков, JSON/HTML дампов) и проверкой дубликатов `normalize_for_comparison`; `get()` по числовым и строковым ID (`1`, `#1`, `№1`); `get_all()`; `update()` с контролем дубликатов и обновлением `updated_at`; `delete()` по ID или однозначному совпадению текста; `clear()`.
+  * Реализован многокритериальный поиск и фильтрация `search(query, type, tags, source)`.
+  * Реализована атомарная запись (`.tmp` $\to$ `os.replace`), восстановление при сбоях и прозрачная автомиграция схемы v1 $\to$ v2.
+  * Реализован метод `remember_result()` для контролируемой явной фиксации важных результатов задач (`AgentResult`) с метаданными (список созданных файлов, количество артефактов) без автоматического захламления памяти.
+  * Проведена фасадная интеграция в `tools/memory.py`: `MemoryManager` сохраняет ведение скользящего окна диалога (`short_term`), а долговременное хранение полностью делегирует в `self.persistent = PersistentMemory(...)`. Свойство `self.memories` связано с `self.persistent.entries`, обеспечивая 100% обратную совместимость для `ui/views/memory.py`, `tools/backup.py` и CLI. Экспортированы методы `get_entry`, `update_entry`, `delete_entry`, `remember_result` и инструмент `update_memory`.
+  * Экспорт компонентов Persistent Memory через PEP 562 в `tools/agents/__init__.py`.
+  * Создан модульный тестовый набор `tests/test_persistent_memory.py` (23 теста, 100% pass).
+  * Всего 581 тест в `tests/` (579 unit pass + 2 integration skip by default).
 * [ ] **Интеграционные E2E тесты с виртуальным микрофоном**:
   * Реализовать тестовый сценарий, прогоняющий синтезированные аудиофайлы (WAV) через живой конвейер `VoiceService` с проверкой реакции GUI.
 * [ ] **Очистка устаревших бэкап-файлов `*.bak` в корне**:
