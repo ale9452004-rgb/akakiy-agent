@@ -31,7 +31,6 @@ from tools.agents.research import ResearchAgent
 from tools.agents.coding import CodingAgent
 from tools.agents.file import FileAgent
 from tools.vram import VRAMManager, get_vram_manager, reset_vram_manager
-from tools.teamwork import PipelineStep, TeamworkPipeline, run_agent_pipeline
 
 __all__ = [
     "SubAgent",
@@ -52,6 +51,9 @@ __all__ = [
     "PipelineStep",
     "TeamworkPipeline",
     "run_agent_pipeline",
+    "PlanStep",
+    "TaskPlan",
+    "Planner",
     "ComfyUIClient",
     "RESOLUTION_PRESETS",
     "safe_validate_resolution",
@@ -60,4 +62,39 @@ __all__ = [
     "get_vram_manager",
     "reset_vram_manager",
 ]
+
+
+def __getattr__(name: str):
+    """
+    Ленивый импорт внешних компонентов (teamwork, planner)
+    для предотвращения циклических зависимостей при прямой загрузке submodules.
+    """
+    if name in ("PipelineStep", "TeamworkPipeline", "run_agent_pipeline"):
+        from tools.teamwork import (
+            PipelineStep as _PS,
+            TeamworkPipeline as _TP,
+            run_agent_pipeline as _RAP,
+        )
+        globals()["PipelineStep"] = _PS
+        globals()["TeamworkPipeline"] = _TP
+        globals()["run_agent_pipeline"] = _RAP
+        return globals()[name]
+
+    if name in ("PlanStep", "TaskPlan", "Planner"):
+        from tools.planner import (
+            PlanStep as _PStep,
+            TaskPlan as _TPlan,
+            Planner as _Pln,
+        )
+        globals()["PlanStep"] = _PStep
+        globals()["TaskPlan"] = _TPlan
+        globals()["Planner"] = _Pln
+        return globals()[name]
+
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+def __dir__():
+    return __all__
+
 

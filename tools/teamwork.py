@@ -401,6 +401,7 @@ class PipelineStep:
         self.metadata = dict(metadata or {})
         self.files = list(files or [])
         self.name = str(name) if name else self.agent_name
+        self.step_id = str(self.metadata.get("step_id") or name or self.agent_name)
         self.input_transform = input_transform
 
     def to_dict(self) -> Dict[str, Any]:
@@ -413,28 +414,43 @@ class PipelineStep:
         }
 
 
-def normalize_step(step: Union[PipelineStep, Tuple[str, str], Dict[str, Any]]) -> PipelineStep:
+def normalize_step(step: Union[PipelineStep, Tuple[str, str], Dict[str, Any], Any]) -> PipelineStep:
     """
-    Приводит произвольный шаг (объект, кортеж, словарь) к PipelineStep.
+    Приводит произвольный шаг (объект, кортеж, словарь, PlanStep) к PipelineStep.
     """
     if isinstance(step, PipelineStep):
         return step
+    if hasattr(step, "to_pipeline_step"):
+        return step.to_pipeline_step()
     if isinstance(step, (list, tuple)):
         agent = step[0]
         task = step[1] if len(step) > 1 else ""
         meta = step[2] if len(step) > 2 and isinstance(step[2], dict) else {}
         return PipelineStep(agent=agent, task=task, metadata=meta)
     if isinstance(step, dict):
-        agent = step.get("agent") or step.get("agent_name") or step.get("name")
+        agent = step.get("subagent") or step.get("agent") or step.get("agent_name") or step.get("name")
+        if not agent:
+            action = step.get("action")
+            known_agents = {"research", "document", "coding", "file", "presentation", "image", "echo"}
+            if action and str(action).lower() in known_agents:
+                agent = str(action).lower()
+            elif action in ("edit", "patch", "code"):
+                agent = "coding"
+            elif action in ("read", "create", "write", "copy", "move", "files", "search"):
+                agent = "file"
         if not agent:
             raise ValueError(f"В словаре шага не указан агент: {step}")
-        task = step.get("task") or step.get("instruction") or ""
+        task = step.get("task") or step.get("instruction") or step.get("details") or step.get("description") or ""
         meta = step.get("metadata") or {
             k: v for k, v in step.items()
-            if k not in ("agent", "agent_name", "task", "instruction", "files", "name", "input_transform")
+            if k not in ("agent", "agent_name", "subagent", "task", "instruction", "files", "name", "input_transform", "details", "description")
         }
         files = step.get("files")
-        name = step.get("name")
+        if step.get("target"):
+            files = list(files or [])
+            if step["target"] not in files:
+                files.append(step["target"])
+        name = step.get("name") or (f"step_{step['id']}" if "id" in step else None)
         transform = step.get("input_transform")
         return PipelineStep(
             agent=agent,
@@ -460,7 +476,7 @@ class TeamworkPipeline:
 
     def __init__(
         self,
-        steps: Optional[List[Union[PipelineStep, Tuple[str, str], Dict[str, Any]]]] = None,
+        steps: Optional[Union[List[Union[PipelineStep, Tuple[str, str], Dict[str, Any]]], Any]] = None,
         registry: Optional[AgentRegistry] = None,
         stop_on_error: bool = True
     ):
@@ -468,6 +484,8 @@ class TeamworkPipeline:
         self.stop_on_error = stop_on_error
         self.steps: List[PipelineStep] = []
         if steps:
+            if hasattr(steps, "to_pipeline_steps"):
+                steps = steps.to_pipeline_steps(registry=self.registry)
             for s in steps:
                 self.add_step(s)
 
@@ -621,6 +639,7 @@ class TeamworkPipeline:
             step_rec = {
                 "step": idx,
                 "name": step.name,
+                "step_id": getattr(step, "step_id", step.name),
                 "agent": agent.name,
                 "task": step_task,
                 "success": res.success,

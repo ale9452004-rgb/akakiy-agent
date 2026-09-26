@@ -114,8 +114,11 @@
   * Контекстное извлечение релевантных фактов из долговременной памяти по ключевым словам.
   * Потокобезопасность (`threading.RLock`).
 * [skills/registry.py](file:///c:/Akakiy%20agent/skills/registry.py): Реестр навыков (`SkillRegistry`). Управляет навыками `ProjectSkill`, `MemorySkill`, `HouseholdSkill`.
-* [tools/planner.py](file:///c:/Akakiy%20agent/tools/planner.py): Класс `Planner` — разложение многошаговых задач в структурированный JSON-план.
-* [tools/plan_executor.py](file:///c:/Akakiy%20agent/tools/plan_executor.py): Класс `PlanExecutor` — пошаговое исполнение действий с валидацией синтаксиса после каждого шага.
+* [tools/planner.py](file:///c:/Akakiy%20agent/tools/planner.py): Модуль планирования задач (Task Planner v2):
+  * `PlanStep`: структурированный шаг плана (`id`, `action`, `description`, `details`, `depends_on`, `subagent`, `target`, `command`, `query`, `task`, `files`, `metadata`), dict-like доступ для обратной совместимости (`__getitem__`), метод `to_pipeline_step()` для трансляции в `PipelineStep`.
+  * `TaskPlan`: модель структурированного плана (`goal`, `steps`, `expected_result`, `verification`, `metadata`, `status`). Включает строгую валидацию структуры, проверку зависимостей (запрет самозависимости, проверка существования ID, детекция циклов алгоритмом Кана), топологическую сортировку `get_execution_order()`, мост в multi-agent конвейеры через `to_pipeline_steps()` и `to_pipeline()`.
+  * `Planner`: эволюция планировщика до v2. Предоставляет программную фабрику `create_structured_plan()`, валидацию планов `validate_plan()`, интеграцию с Teamwork (`to_pipeline()`) и сохраняет 100% обратную совместимость с LLM-планированием (`create_plan`, `_validate_plan`).
+* [tools/plan_executor.py](file:///c:/Akakiy%20agent/tools/plan_executor.py): Класс `PlanExecutor` — пошаговое исполнение действий с валидацией синтаксиса после каждого шага. Поддерживает как legacy dict-планы, так и объекты `TaskPlan`/`PlanStep`. Интегрирован с Sub-Agent архитектурой: распознает субагентов по реестру и исполняет их шаги через `AgentContext` и `AgentRegistry` (`_execute_subagent`).
 * [tools/teamwork.py](file:///c:/Akakiy%20agent/tools/teamwork.py): Teamwork Preview — координация виртуальных ролей (Researcher, Architect, Implementer, Reviewer) для сложных задач.
 * [tools/edit_preparer.py](file:///c:/Akakiy%20agent/tools/edit_preparer.py): Класс `EditPreparer` — подготовка точечных диффов и хирургических замен в коде на базе AST.
 * [tools/summary.py](file:///c:/Akakiy%20agent/tools/summary.py): Форматирование агрегированных итоговых сводок выполнения плана.

@@ -319,6 +319,17 @@
   * Сопутствующие точечные укрепления: поддержка дисков Windows (`C:\...`) и путей с пробелами в `FileAgent.parse_task`, поддержка `base_path=None` в `tools.files.edit_file` с безопасным расчетом `backup_path.relative_to`, проброс `base_path=self.project_path` в `CodingAgent`.
   * Создан модульный тестовый набор `tests/test_agent_teamwork.py` (11 тестов, 100% pass).
   * Всего 507 тестов в `tests/` (505 unit pass + 2 integration skip by default).
+* [x] **Task Planner v2: структурированный план, граф зависимостей и интеграция с TeamworkPipeline (Этап 13)**:
+  * Разработан класс `PlanStep` (`tools/planner.py`): типизированный шаг плана (`id`, `action`, `description`, `details`, `depends_on`, `subagent`, `target`, `command`, `query`, `task`, `files`, `metadata`), dict-like интерфейс (`__getitem__`, `get`, `__contains__`), сериализация `to_dict()`/`from_dict()` и метод трансляции `to_pipeline_step(registry=None)` в `PipelineStep`.
+  * Разработан класс `TaskPlan` (`tools/planner.py`): структурированный план (`goal`, `steps`, `expected_result`, `verification`, `metadata`, `status`) с поддержкой dict-интерфейса и сериализации.
+  * Реализована строгая валидация плана (`TaskPlan.validate`): проверка обязательных полей, специфичных параметров действий (`query` для `search`, `target` для `read`/`edit`/`analyze`, `command` для `command`/`git`), запрет самозависимостей, проверка существования ID зависимостей и выявление циклических зависимостей алгоритмом Кана (in-degree).
+  * Реализована топологическая сортировка (`TaskPlan.get_execution_order`): гарантирует правильный порядок исполнения зависимых шагов с сохранением детерминированного порядка независимых действий.
+  * Создан мост в multi-agent конвейеры (`TaskPlan.to_pipeline_steps`, `TaskPlan.to_pipeline`): прямое преобразование плана в `TeamworkPipeline` и поддержка передачи `TaskPlan` в конструктор `TeamworkPipeline(steps=plan)`.
+  * Эволюция `Planner`: добавлен программный фабричный метод `create_structured_plan(steps, goal=...)`, валидатор `validate_plan()`, методы конвертации `to_pipeline_steps()` и `to_pipeline()`. Сохранена 100% обратная совместимость существующих методов `create_plan()`, `_validate_plan()`, `get_current_plan()`, `clear_plan()`.
+  * Интеграция `PlanExecutor` с Sub-Agent архитектурой: авто-распаковка `TaskPlan` и `PlanStep`, распознавание субагентов по реестру и прямое исполнение шагов через `AgentContext` и `AgentRegistry` (`_execute_subagent`).
+  * Ленивый экспорт `PlanStep`, `TaskPlan`, `Planner` в `tools/agents/__init__.py` через PEP 562 (`__getattr__`) для полной защиты от циклических зависимостей.
+  * Создан модульный тестовый набор `tests/test_task_planner_v2.py` (19 тестов, 100% pass).
+  * Всего 526 тестов в `tests/` (524 unit pass + 2 integration skip by default).
 * [ ] **Интеграционные E2E тесты с виртуальным микрофоном**:
   * Реализовать тестовый сценарий, прогоняющий синтезированные аудиофайлы (WAV) через живой конвейер `VoiceService` с проверкой реакции GUI.
 * [ ] **Очистка устаревших бэкап-файлов `*.bak` в корне**:

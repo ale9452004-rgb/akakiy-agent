@@ -1,3 +1,4 @@
+from typing import Any, Dict, List, Optional
 from tools.dispatcher import dispatch
 
 
@@ -16,6 +17,8 @@ class PlanExecutor:
         """
         Выполняет переданный план.
         """
+        if hasattr(plan, "to_dict"):
+            plan = plan.to_dict()
 
         if not isinstance(plan, dict):
             return {
@@ -86,6 +89,8 @@ class PlanExecutor:
         """
         Выполняет один шаг плана.
         """
+        if hasattr(step, "to_dict"):
+            step = step.to_dict()
 
         if not isinstance(step, dict):
             return {
@@ -94,6 +99,7 @@ class PlanExecutor:
             }
 
         action = step.get("action")
+        subagent = step.get("subagent")
         target = step.get("target")
         command = step.get("command")
         query = step.get("query")
@@ -102,6 +108,10 @@ class PlanExecutor:
         context = self._build_context(
             previous_results
         )
+
+        # Вызов специализированного Sub-Agent (Task Planner v2)
+        if subagent or action == "subagent" or self._is_registered_subagent(action):
+            return self._execute_subagent(step, previous_results, context)
 
         if action == "search":
             return self._execute_search(
@@ -658,8 +668,60 @@ class PlanExecutor:
                     f"{item.get('query')}\n"
                     f"Успешно: "
                     f"{item.get('success')}\n"
-                    f"Результат: "
-                    f"{item.get('result')}\n"
                 )
-
         return request
+
+    # =========================================================================
+    # Поддержка Sub-Agent в Task Planner v2
+    # =========================================================================
+
+    def _is_registered_subagent(self, action: Optional[str]) -> bool:
+        """Проверяет, зарегистрирован ли субагент с таким именем."""
+        if not action or not isinstance(action, str):
+            return False
+        if action in ("search", "analyze", "read", "edit", "command", "validate", "git"):
+            return False
+        from tools.agents.registry import get_agent_registry
+        reg = getattr(self.agent, "agent_registry", None) or get_agent_registry()
+        return reg.has(action)
+
+    def _execute_subagent(self, step, previous_results, context):
+        """
+        Выполняет шаг, привязанный к Sub-Agent (Task Planner v2).
+        """
+        agent_name = step.get("subagent") or step.get("action")
+        task_str = step.get("task") or step.get("details") or step.get("description") or ""
+        meta = dict(step.get("metadata") or {})
+        files = list(step.get("files") or [])
+        if step.get("target") and step.get("target") not in files:
+            files.append(step.get("target"))
+
+        from tools.agents.registry import get_agent_registry
+        from tools.agents.context import AgentContext
+        reg = getattr(self.agent, "agent_registry", None) or get_agent_registry()
+        subagent = reg.get(agent_name)
+
+        if not subagent:
+            return {
+                "success": False,
+                "message": f"Субагент '{agent_name}' не найден в реестре.",
+                "step": step
+            }
+
+        ctx = AgentContext(
+            task=task_str,
+            files=files,
+            metadata=meta
+        )
+        ctx.instruction = task_str
+
+        res = subagent.run(ctx)
+        return {
+            "success": res.success,
+            "message": res.message,
+            "result": res.to_dict(),
+            "data": res.data,
+            "subagent": agent_name,
+            "created_files": list(res.created_files),
+            "artifacts": [a.to_dict() for a in res.artifacts]
+        }
