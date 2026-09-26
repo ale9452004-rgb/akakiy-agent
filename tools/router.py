@@ -448,6 +448,57 @@ class CommandRouter:
 
         return None
 
+    def match_coding(self, user_input: str) -> Optional[Dict[str, Any]]:
+        """
+        Проверяет, является ли запрос командой для CodingAgent.
+        Распознает явные и естественные шаблоны:
+        - 'кодинг: <задача>'
+        - 'код: <задача>'
+        - 'измени код [в файле] ...'
+        - 'исправь код [в файле] ...'
+        - 'отредактируй [код в файле / файл] ...'
+        - 'проанализируй код [в файле] ...'
+        - 'примени правку / патч [к файлу] ...'
+        """
+        raw_trimmed = user_input.strip()
+        if not raw_trimmed:
+            return None
+
+        body = strip_call_prefixes(raw_trimmed)
+
+        # 1. Шаблоны с явным префиксом: "кодинг: ...", "код: ..."
+        prefix_pattern = re.compile(
+            r"^(?:кодинг|coding|код)(?:\s*:\s*|[,\s]+)(.+)$",
+            re.IGNORECASE
+        )
+        m1 = prefix_pattern.match(body)
+        if m1:
+            task_text = m1.group(1).strip()
+            if task_text:
+                return {
+                    "action": "coding",
+                    "prompt": task_text,
+                    "task": task_text
+                }
+
+        # 2. Шаблоны с управляющими глаголами модификации и анализа кода
+        verb_pattern = re.compile(
+            r"^(?:(?:измени|исправь|отредактируй|обнови|модифицируй|проанализируй|проверь)(?:\s+мне)?\s+(?:код|исходный\s+код|файл|скрипт)|(?:примени|выполни)(?:\s+мне)?\s+(?:правку|патч|изменени\w*))"
+            r"(?:\s+(?:в\s+файле|к\s+файлу|для\s+файла|в|к|по))?(?:\s*:\s*|[,\s]+)(.+)$",
+            re.IGNORECASE
+        )
+        m2 = verb_pattern.match(body)
+        if m2:
+            remainder = m2.group(1).strip()
+            if remainder:
+                return {
+                    "action": "coding",
+                    "prompt": remainder,
+                    "task": remainder
+                }
+
+        return None
+
     def match_image(self, user_input: str) -> Optional[Dict[str, Any]]:
         """
         Проверяет, является ли запрос командой генерации изображения,
@@ -872,6 +923,14 @@ class CommandRouter:
                     "prompt": task_txt,
                     "topic": task_txt
                 }
+            elif subagent_route.get("agent") in ("coding", "code"):
+                task_txt = subagent_route.get("task", "")
+                return {
+                    "type": "coding",
+                    "action": "coding",
+                    "prompt": task_txt,
+                    "task": task_txt
+                }
             return {
                 "type": "subagent",
                 **subagent_route
@@ -901,7 +960,15 @@ class CommandRouter:
                 **research_route
             }
 
-        # 8. Проверяем генерацию изображений (Image Sub-Agent Fast-Path)
+        # 8. Проверяем задачи по коду (Coding Sub-Agent Fast-Path)
+        coding_route = self.match_coding(cleaned)
+        if coding_route:
+            return {
+                "type": "coding",
+                **coding_route
+            }
+
+        # 9. Проверяем генерацию изображений (Image Sub-Agent Fast-Path)
         image_route = self.match_image(cleaned)
         if image_route:
             return {
@@ -909,7 +976,7 @@ class CommandRouter:
                 **image_route
             }
 
-        # 9. Естественный язык / сложные запросы -> Native Tool Calling
+        # 10. Естественный язык / сложные запросы -> Native Tool Calling
         return {
             "type": None,
             "tool": None,

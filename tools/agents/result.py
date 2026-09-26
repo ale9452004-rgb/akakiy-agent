@@ -136,6 +136,11 @@ class Artifact:
         return bool(self.metadata.get("topic") or "research" in self.name.lower())
 
     @property
+    def is_code(self) -> bool:
+        """Является ли артефакт исходным кодом."""
+        return self.type == ArtifactType.CODE
+
+    @property
     def is_file(self) -> bool:
         """Имеет ли артефакт привязку к физическому файлу на диске."""
         return self.path is not None
@@ -271,6 +276,22 @@ class Artifact:
         if sources_count is not None:
             meta["sources_count"] = sources_count
         return cls.from_file(path, name=name, type=ArtifactType.TEXT, **meta)
+
+    @classmethod
+    def from_code(
+        cls,
+        path: Union[str, Path],
+        name: Optional[str] = None,
+        language: str = "python",
+        **metadata
+    ) -> "Artifact":
+        """
+        Фабричный метод для создания артефакта исходного кода.
+        """
+        meta = dict(metadata)
+        if language is not None:
+            meta["language"] = language
+        return cls.from_file(path, name=name, type=ArtifactType.CODE, **meta)
 
     @classmethod
     def from_image(
@@ -454,7 +475,8 @@ class AgentResult:
         error: str,
         message: str = "",
         data: Optional[Dict[str, Any]] = None,
-        artifacts: Optional[List[Union[Artifact, Dict[str, Any]]]] = None
+        artifacts: Optional[List[Union[Artifact, Dict[str, Any]]]] = None,
+        created_files: Optional[List[str]] = None
     ) -> "AgentResult":
         """
         Фабричный метод для создания неуспешного результата.
@@ -463,7 +485,7 @@ class AgentResult:
         return cls(
             success=False,
             message=msg,
-            created_files=None,
+            created_files=created_files,
             data=data,
             error=error,
             artifacts=artifacts
@@ -556,6 +578,11 @@ class AgentResult:
             a for a in self.artifacts
             if a.is_research
         ]
+
+    @property
+    def code_artifacts(self) -> List[Artifact]:
+        """Список всех артефактов кода."""
+        return self.get_artifacts_by_type(ArtifactType.CODE)
 
     @property
     def has_artifacts(self) -> bool:

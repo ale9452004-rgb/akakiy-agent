@@ -116,6 +116,7 @@ def _init_default_registry() -> AgentRegistry:
     from tools.agents.presentation import PresentationAgent
     from tools.agents.document import DocumentAgent
     from tools.agents.research import ResearchAgent
+    from tools.agents.coding import CodingAgent
 
     reg = AgentRegistry()
     reg.register(EchoAgent())
@@ -123,6 +124,7 @@ def _init_default_registry() -> AgentRegistry:
     reg.register(PresentationAgent())
     reg.register(DocumentAgent())
     reg.register(ResearchAgent())
+    reg.register(CodingAgent())
     return reg
 
 
