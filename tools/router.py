@@ -12,6 +12,22 @@
 from typing import Any, Dict, Optional
 import re
 
+CALL_PREFIX_REGEX = re.compile(
+    r"^(?:(?:акакий|пожалуйста|плиз)[,\s:]*)+",
+    re.IGNORECASE
+)
+
+NON_IMAGE_TARGET_PATTERN = re.compile(
+    r"^(?:файл\w*|папк\w*|директори\w*|скрипт\w*|код\w*|класс\w*|функци\w*|модул\w*|тест\w*|коммит\w*|документ\w*|таблиц\w*|задач\w*|заметк\w*|напоминан\w*|список\w*|списк\w*|план\w*|проект\w*)\b",
+    re.IGNORECASE
+)
+
+
+def strip_call_prefixes(text: str) -> str:
+    """Удаляет обращения и вводные слова вежливости в начале запроса."""
+    stripped = CALL_PREFIX_REGEX.sub("", text).strip()
+    return stripped if stripped else text
+
 
 class CommandRouter:
     """
@@ -24,10 +40,14 @@ class CommandRouter:
     def __init__(self):
         self._init_patterns()
 
+    def strip_call_prefixes(self, text: str) -> str:
+        """Удаляет обращения и вводные слова вежливости в начале запроса."""
+        return strip_call_prefixes(text)
+
     def _init_patterns(self):
         # 1. Файлы проекта
         self.file_search_patterns = [
-            re.compile(r"^(?:найди|найти)(?:\s+в\s+проекте)?\s+файл\s+([^\s,!?;:]+)$", re.IGNORECASE),
+            re.compile(r"^(?:найди|найти)(?:\s+мне)?(?:\s+в\s+проекте)?\s+файл\s+([^\s,!?;:]+)$", re.IGNORECASE),
         ]
         self.list_files_exact = {
             "покажи список файлов проекта",
@@ -39,44 +59,62 @@ class CommandRouter:
             "список файлов",
             "перечисли файлы",
             "файлы проекта",
+            "покажи мне список файлов проекта",
+            "покажи мне файлы проекта",
+            "покажи мне список файлов",
+            "покажи мне файлы",
         }
         self.structure_exact = {
             "покажи структуру проекта",
             "покажи структуру проекта акакия",
             "структура проекта",
+            "покажи мне структуру проекта",
+            "покажи мне структуру проекта акакия",
         }
-        self.func_pattern = re.compile(r"^(?:найди|найти)\s+функцию\s+([a-zA-Z_0-9]+)$", re.IGNORECASE)
-        self.search_pattern = re.compile(r"^(?:поиск\s+по\s+проекту|(?:найди|найти)\s+в\s+проекте\s+текст)\s+(.+)$", re.IGNORECASE)
+        self.func_pattern = re.compile(r"^(?:найди|найти)(?:\s+мне)?\s+функцию\s+([a-zA-Z_0-9]+)$", re.IGNORECASE)
+        self.search_pattern = re.compile(r"^(?:поиск\s+по\s+проекту|(?:найди|найти)(?:\s+мне)?\s+в\s+проекте\s+текст)\s+(.+)$", re.IGNORECASE)
 
         # 2. Бытовые команды: Задачи
-        self.task_create_p1 = re.compile(r"^(?:создай|добавь|новая)\s+задач[ауе]\s+(.+)$", re.IGNORECASE)
+        self.task_create_p1 = re.compile(r"^(?:создай|добавь|новая)(?:\s+мне)?\s+задач[ауе]\s+(.+)$", re.IGNORECASE)
         self.task_create_p2 = re.compile(r"^задача:\s*(.+)$", re.IGNORECASE)
-        self.task_list_all = {"покажи задачи", "покажи все задачи", "список задач", "мои задачи", "задачи", "показать задачи"}
-        self.task_list_pending = {"активные задачи", "покажи активные задачи", "невыполненные задачи"}
-        self.task_list_completed = {"выполненные задачи", "покажи выполненные задачи", "завершенные задачи"}
+        self.task_list_all = {
+            "покажи задачи", "покажи все задачи", "список задач", "мои задачи", "задачи", "показать задачи",
+            "покажи мне задачи", "покажи мне все задачи", "показать мне задачи"
+        }
+        self.task_list_pending = {"активные задачи", "покажи активные задачи", "невыполненные задачи", "покажи мне активные задачи"}
+        self.task_list_completed = {"выполненные задачи", "покажи выполненные задачи", "завершенные задачи", "покажи мне выполненные задачи"}
         self.task_done_p = re.compile(r"^(?:выполни|отметь\s+(?:выполненной|сделанной)|закрой|сделай)\s+задач[уе]\s+([#№]?\d+|.+)$", re.IGNORECASE)
         self.task_del_p1 = re.compile(r"^(?:удали|удалить|сотри)\s+задач[уие]?\s+(.+)$", re.IGNORECASE)
         self.task_del_p2 = re.compile(r"^(?:удали|удалить|сотри)\s+(?:все\s+)?(последн(?:юю|ие|их|яя)(?:\s+(?:\d+|[а-яё]+))?)\s+задач[иа-я]*$", re.IGNORECASE)
 
         # 3. Бытовые команды: Заметки
-        self.note_create_p1 = re.compile(r"^(?:создай|добавь|новая|запиши)\s+заметк[ауе]\s+([^:]+?)(?:\s*:\s*|\s+текст\s+)(.+)$", re.IGNORECASE)
-        self.note_create_p2 = re.compile(r"^(?:создай|добавь|новая|запиши)\s+заметк[ауе]\s+(.+)$", re.IGNORECASE)
-        self.note_list_exact = {"покажи заметки", "список заметок", "мои заметки", "заметки", "показать заметки", "все заметки"}
+        self.note_create_p1 = re.compile(r"^(?:создай|добавь|новая|запиши)(?:\s+мне)?\s+заметк[ауе]\s+([^:]+?)(?:\s*:\s*|\s+текст\s+)(.+)$", re.IGNORECASE)
+        self.note_create_p2 = re.compile(r"^(?:создай|добавь|новая|запиши)(?:\s+мне)?\s+заметк[ауе]\s+(.+)$", re.IGNORECASE)
+        self.note_list_exact = {
+            "покажи заметки", "список заметок", "мои заметки", "заметки", "показать заметки", "все заметки",
+            "покажи мне заметки", "показать мне заметки", "покажи мне все заметки"
+        }
         self.note_search_p = re.compile(r"^(?:найди|поиск)(?:\s+в)?\s+заметк[а-я]*\s+(.+)$", re.IGNORECASE)
         self.note_del_p1 = re.compile(r"^(?:удали|удалить|сотри)\s+заметк[уие]?\s+(.+)$", re.IGNORECASE)
         self.note_del_p2 = re.compile(r"^(?:удали|удалить|сотри)\s+(?:все\s+)?(последн(?:юю|ие|их|яя)(?:\s+(?:\d+|[а-яё]+))?)\s+заметк[иа-я]*$", re.IGNORECASE)
 
         # 4. Бытовые команды: Напоминания
-        self.rem_create_p = re.compile(r"^(?:напомни|создай\s+напоминание|новое\s+напоминание)\s+(.+?)\s+((?:в|через|завтра|каждый|каждую|каждые|по\s+будням|ежедневно)\s+.+)$", re.IGNORECASE)
-        self.rem_list_exact = {"покажи напоминания", "список напоминаний", "мои напоминания", "напоминания", "показать напоминания"}
+        self.rem_create_p = re.compile(r"^(?:напомни(?:\s+мне)?|создай(?:\s+мне)?\s+напоминание|новое\s+напоминание)\s+(.+?)\s+((?:в|через|завтра|каждый|каждую|каждые|по\s+будням|ежедневно)\s+.+)$", re.IGNORECASE)
+        self.rem_list_exact = {
+            "покажи напоминания", "список напоминаний", "мои напоминания", "напоминания", "показать напоминания",
+            "покажи мне напоминания", "показать мне напоминания"
+        }
         self.rem_done_p = re.compile(r"^(?:выполни|отметь\s+(?:выполненным|сделанным)|закрой|сделай)\s+напоминани[ея]?\s+([#№]?\d+|.+)$", re.IGNORECASE)
         self.rem_del_p1 = re.compile(r"^(?:удали|удалить|сотри)\s+напоминани[ея]?\s+(.+)$", re.IGNORECASE)
         self.rem_del_p2 = re.compile(r"^(?:удали|удалить|сотри)\s+(?:все\s+)?(последн(?:ее|ие|их)(?:\s+(?:\d+|[а-яё]+))?)\s+напоминан[иеа-я]*$", re.IGNORECASE)
 
         # 5. Бытовые команды: Списки
-        self.list_show_all = {"покажи списки", "список списков", "списки", "показать списки"}
-        self.list_show_p = re.compile(r"^(?:покажи|открой)\s+список\s+(.+)$", re.IGNORECASE)
-        self.list_create_p = re.compile(r"^(?:создай|добавь|новый)\s+список\s+(.+)$", re.IGNORECASE)
+        self.list_show_all = {
+            "покажи списки", "список списков", "списки", "показать списки",
+            "покажи мне списки", "показать мне списки"
+        }
+        self.list_show_p = re.compile(r"^(?:покажи|открой)(?:\s+мне)?\s+список\s+(.+)$", re.IGNORECASE)
+        self.list_create_p = re.compile(r"^(?:создай|добавь|новый)(?:\s+мне)?\s+список\s+(.+)$", re.IGNORECASE)
         self.list_add_p = re.compile(r"^добавь\s+в\s+список\s+([^\s]+)\s+(.+)$", re.IGNORECASE)
 
         # 6. Команды памяти (Memory)
@@ -89,6 +127,8 @@ class CommandRouter:
             "что в памяти",
             "память",
             "показать память",
+            "покажи мне память",
+            "показать мне память",
         }
         self.mem_forg_p = re.compile(r"^(?:забудь|удали\s+из\s+памяти)[:\s]+(.+)$", re.IGNORECASE)
         self.mem_search_p = re.compile(r"^(?:найди\s+в\s+памяти|вспомни)[:\s]+(.+)$", re.IGNORECASE)
@@ -102,10 +142,10 @@ class CommandRouter:
         }
 
         # 7. Команды управления планами (Planning)
-        self.plan_create_p = re.compile(r"^(?:создай|составь|сделай)\s+план(?:\s*:\s*|\s+)(.+)$", re.IGNORECASE)
-        self.plan_create_exact = {"создай план", "создать план", "составь план", "составить план"}
+        self.plan_create_p = re.compile(r"^(?:создай|составь|сделай)(?:\s+мне)?\s+план(?:\s*:\s*|\s+)(.+)$", re.IGNORECASE)
+        self.plan_create_exact = {"создай план", "создать план", "составь план", "составить план", "создай мне план", "составь мне план"}
         self.plan_execute_exact = {"выполни план", "выполнить план", "запусти план"}
-        self.plan_get_exact = {"покажи план", "текущий план", "показать план"}
+        self.plan_get_exact = {"покажи план", "текущий план", "показать план", "покажи мне план"}
         self.plan_clear_exact = {"очисти план", "удали план", "сбрось план"}
 
         # 8. Дневной брифинг (Daily Briefing)
@@ -135,12 +175,18 @@ class CommandRouter:
             re.IGNORECASE
         )
 
+        # 10. Явный вызов субагента (Sub-Agent invocation)
+        self.subagent_explicit_p = re.compile(
+            r"^(?:(?:запусти|вызови|делегируй|передай)\s+(?:субагент[уа]?|агент[уа]?)|субагент|агент)\s+([a-zA-Z0-9_\-]+)(?:\s*:\s*|\s+)(.+)$",
+            re.IGNORECASE
+        )
+
     def match_memory(self, user_input: str) -> Optional[Dict[str, Any]]:
         """
         Проверяет, является ли запрос детерминированной командой памяти.
         Возвращает словарь с параметрами действия или None.
         """
-        raw_trimmed = user_input.strip()
+        raw_trimmed = strip_call_prefixes(user_input.strip())
         normalized = raw_trimmed.lower().rstrip(".,!?;:")
 
         # 1. Очистить память (проверяем перед forget, чтобы "забудь всё" трактовалось как clear)
@@ -186,7 +232,7 @@ class CommandRouter:
         Проверяет, является ли запрос командой создания или управления планом.
         Возвращает словарь с параметрами действия или None.
         """
-        raw_trimmed = user_input.strip()
+        raw_trimmed = strip_call_prefixes(user_input.strip())
         u_lower = raw_trimmed.lower()
 
         if u_lower.startswith("план:"):
@@ -227,6 +273,30 @@ class CommandRouter:
 
         return None
 
+    def match_subagent(self, user_input: str) -> Optional[Dict[str, Any]]:
+        """
+        Проверяет явный вызов специализированного sub-agent'а.
+        Например:
+        - 'субагент echo: тестовое сообщение'
+        - 'запусти субагента image: нарисуй кота'
+        - 'вызови агента echo привет'
+        """
+        raw_trimmed = strip_call_prefixes(user_input.strip())
+        if not raw_trimmed:
+            return None
+
+        m = self.subagent_explicit_p.match(raw_trimmed)
+        if m:
+            agent_name = m.group(1).strip().lower()
+            task_text = m.group(2).strip()
+            if agent_name and task_text:
+                return {
+                    "action": "run",
+                    "agent": agent_name,
+                    "task": task_text
+                }
+        return None
+
     def match_image(self, user_input: str) -> Optional[Dict[str, Any]]:
         """
         Проверяет, является ли запрос командой генерации изображения,
@@ -237,11 +307,7 @@ class CommandRouter:
             return None
 
         # Нормализованная проверка обращения в начале: "Акакий, ...", "Пожалуйста, ..."
-        prefix_pattern = re.compile(
-            r"^(?:акакий[,\s]+)?(?:пожалуйста[,\s]+)?",
-            re.IGNORECASE
-        )
-        body = prefix_pattern.sub("", raw_trimmed).strip()
+        body = strip_call_prefixes(raw_trimmed)
 
         # 1. Проверяем наличие управляющего глагола генерации/рисования в начале
         verb_pattern = re.compile(
@@ -252,8 +318,18 @@ class CommandRouter:
         if not verb_match:
             return None
 
+        is_pure_draw = bool(re.match(
+            r"^(?:нарисуй|нарисуйте|нарисовать|изобрази|изобразите|изобразить|отрисуй|отрисуйте|отрисовать)\b",
+            body,
+            re.IGNORECASE
+        ))
+
         remainder = body[verb_match.end():].strip()
         if not remainder:
+            return None
+
+        # Исключаем запросы к файловой системе, коду и бытовым сущностям
+        if NON_IMAGE_TARGET_PATTERN.match(remainder):
             return None
 
         # Инициализация параметров по умолчанию
@@ -308,6 +384,7 @@ class CommandRouter:
             remainder = remainder[:c_start] + " " + remainder[c_end:]
 
         # 2.3. Поиск ориентации / пресета (если не было явного WxH)
+        has_aspect_preset = False
         if aspect_ratio != "custom":
             # Landscape
             m_land = re.search(
@@ -320,6 +397,7 @@ class CommandRouter:
             )
             if m_land:
                 aspect_ratio = "landscape"
+                has_aspect_preset = True
                 width = 1216
                 height = 832
                 for g_idx in range(1, 5):
@@ -338,6 +416,7 @@ class CommandRouter:
                 )
                 if m_port:
                     aspect_ratio = "portrait"
+                    has_aspect_preset = True
                     width = 832
                     height = 1216
                     for g_idx in range(1, 5):
@@ -356,6 +435,7 @@ class CommandRouter:
                     )
                     if m_sq:
                         aspect_ratio = "square"
+                        has_aspect_preset = True
                         width = 1024
                         height = 1024
                         for g_idx in range(1, 5):
@@ -368,6 +448,7 @@ class CommandRouter:
             rf"^\s*{img_noun}(?:\s*:\s*|[,\s]+|$)",
             re.IGNORECASE
         )
+        has_leading_img_noun = bool(noun_pattern.search(remainder))
         remainder = noun_pattern.sub(" ", remainder)
 
         # 2.5. Очистка предлогов и концевой пунктуации
@@ -378,12 +459,13 @@ class CommandRouter:
         if len(clean_prompt) < 2:
             return None
 
-        # Дополнительная валидация: наличие существительного или глагола рисования
-        has_image_noun = bool(re.search(rf"\b{img_noun}\b", body, re.IGNORECASE))
-        has_draw_verb = bool(re.match(r"^(?:акакий[,\s]+)?(?:пожалуйста[,\s]+)?(?:нарисуй|нарисуйте|нарисовать|изобрази|изобразите|изобразить|отрисуй|отрисуйте|отрисовать)", raw_trimmed, re.IGNORECASE))
-
-        if not has_image_noun and not has_draw_verb:
-            return None
+        # Для не-рисовальных глаголов (создай, сгенерируй, сделай)
+        # цель должна быть явно визуальной:
+        # либо служебное существительное (изображение, фото, картинка, арт и т.д.),
+        # либо явное разрешение / пресет ориентации / количество изображений.
+        if not is_pure_draw:
+            if not has_leading_img_noun and not count_match and not has_aspect_preset and aspect_ratio != "custom":
+                return None
 
         return {
             "action": "generate",
@@ -399,7 +481,7 @@ class CommandRouter:
         Определяет инструмент для детерминированных fast-path команд (CLI, Household, Memory).
         Возвращает словарь вида {"tool": str | None, "arguments": dict}.
         """
-        raw_trimmed = user_input.strip()
+        raw_trimmed = strip_call_prefixes(user_input.strip())
         raw_clean = raw_trimmed.rstrip(".,!?;:")
         normalized = raw_clean.lower()
 
@@ -569,14 +651,18 @@ class CommandRouter:
         1. {"type": "memory", "action": ..., ...}
         2. {"type": "plan", "action": ..., ...}
         3. {"type": "tool", "tool": ..., "arguments": ...}
-        4. {"type": None, "tool": None, "arguments": {}}
+        4. {"type": "subagent", "agent": ..., "task": ...}
+        5. {"type": "image", "action": "generate", "prompt": ..., ...}
+        6. {"type": None, "tool": None, "arguments": {}}
         """
         raw_trimmed = user_input.strip()
         if not raw_trimmed:
             return {"type": None, "tool": None, "arguments": {}}
 
+        cleaned = strip_call_prefixes(raw_trimmed)
+
         # 1. Проверяем команды памяти
-        mem = self.match_memory(raw_trimmed)
+        mem = self.match_memory(cleaned)
         if mem:
             return {
                 "type": "memory",
@@ -584,7 +670,7 @@ class CommandRouter:
             }
 
         # 2. Проверяем команды планирования
-        plan = self.match_plan(raw_trimmed)
+        plan = self.match_plan(cleaned)
         if plan:
             return {
                 "type": "plan",
@@ -592,7 +678,7 @@ class CommandRouter:
             }
 
         # 3. Проверяем детерминированные инструменты (Fast-Path)
-        tool_res = self.choose_tool(raw_trimmed)
+        tool_res = self.choose_tool(cleaned)
         if tool_res.get("tool"):
             return {
                 "type": "tool",
@@ -600,15 +686,31 @@ class CommandRouter:
                 "arguments": tool_res.get("arguments", {})
             }
 
-        # 4. Проверяем генерацию изображений (Image Sub-Agent Fast-Path)
-        image_route = self.match_image(raw_trimmed)
+        # 4. Проверяем явный вызов субагента (Sub-Agent Fast-Path)
+        subagent_route = self.match_subagent(cleaned)
+        if subagent_route:
+            if subagent_route.get("agent") == "image":
+                task_txt = subagent_route.get("task", "")
+                img_data = self.match_image(task_txt) or self.match_image(f"нарисуй {task_txt}")
+                if img_data:
+                    return {
+                        "type": "image",
+                        **img_data
+                    }
+            return {
+                "type": "subagent",
+                **subagent_route
+            }
+
+        # 5. Проверяем генерацию изображений (Image Sub-Agent Fast-Path)
+        image_route = self.match_image(cleaned)
         if image_route:
             return {
                 "type": "image",
                 **image_route
             }
 
-        # 5. Естественный язык / сложные запросы -> Native Tool Calling
+        # 6. Естественный язык / сложные запросы -> Native Tool Calling
         return {
             "type": None,
             "tool": None,

@@ -6,9 +6,9 @@
 
 ## 1. Текущий статус проекта
 
-* **Текущая версия**: Акакий 2.0 (Desktop Hub + Voice UX + Household Assistant + Memory + Core Dev Tools + Notifications + Fast CLI REPL + Global Push-to-Talk + Backup & Restore + UI Filter & Pagination + Recurring Reminders & Tasks + Daily Briefing + Audio Notifications & Settings + Sub-Agent Foundation + ImageAgent v1 + VRAM Manager v1 + Image Request Routing + ImageAgent v2 Generation Parameters).
-* **Состояние кодовой базы**: Стабильное, все тесты пройдены (372 теста в `tests/`: 370 unit-тестов успешны, 2 интеграционных пропущены по умолчанию; 0 синтаксических ошибок в 1022 Python-файлах).
-* **Последний этап**: Этап №3 — ImageAgent v2: базовые параметры генерации изображений (соотношение сторон/пресеты, явное безопасное разрешение WxH, количество изображений 1..4).
+* **Текущая версия**: Акакий 2.0 (Desktop Hub + Voice UX + Household Assistant + Memory + Core Dev Tools + Notifications + Fast CLI REPL + Global Push-to-Talk + Backup & Restore + UI Filter & Pagination + Recurring Reminders & Tasks + Daily Briefing + Audio Notifications & Settings + Sub-Agent Foundation + ImageAgent v1 + VRAM Manager v1 + Image Request Routing + ImageAgent v2 Generation Parameters + Agent Router Robust Routing).
+* **Состояние кодовой базы**: Стабильное, все тесты пройдены (384 теста в `tests/`: 382 unit-теста успешны, 2 интеграционных пропущены по умолчанию; 0 синтаксических ошибок в 1023 Python-файлах).
+* **Последний этап**: Этап №4 — Agent Router: robust routing (нормализация обращений/вежливости, поддержка местоимения «мне», устранение ложных срабатываний ImageAgent, явная маршрутизация субагентов).
 * **Ветка**: `master`, синхронизирована с `origin/master`.
 
 ---
@@ -218,6 +218,15 @@
   * Возврат путей ко всем сохранённым файлам в `AgentResult.created_files`, чистое форматирование вывода в CLI REPL (`main.py`).
   * Добавлено 10 новых unit-тестов (6 в `tests/test_image_routing.py` и 4 в `tests/test_image_agent.py`), 100% pass.
   * Всего 372 теста в `tests/` (370 unit pass + 2 integration skip by default).
+* [x] **Agent Router: Robust Routing (Этап 4)**:
+  * Централизованная нормализация обращений («Акакий, ...», «Пожалуйста, ...», «Плиз, ...») через `strip_call_prefixes` во всех методах маршрутизатора (`choose_tool`, `match_memory`, `match_plan`, `match_image`, `route`).
+  * Поддержка косвенного местоимения «мне» в бытовых командах (`создай мне задачу ...`, `создай мне заметку ...`, `напомни мне ...`, `создай мне список ...`) и планах (`создай мне план ...`).
+  * Полное исключение ложных срабатываний ImageAgent на запросах создания файлов, скриптов, папок, кода, тестов, документов и таблиц (`NON_IMAGE_TARGET_PATTERN`).
+  * Требование явного визуального объекта (существительное, пресет, разрешение или количество) для универсальных глаголов создания (`создай`, `сгенерируй`, `сделай`).
+  * Реализована явная маршрутизация специализированных субагентов (`match_subagent`: `субагент <name>: <task>`, `запусти субагента <name>: <task>`) и диспетчеризация в `Agent.process()`.
+  * Сохранение естественного диалога при общих приветствиях и вопросах («Акакий, привет!», «Как дела?»).
+  * Создан специализированный тестовый набор `tests/test_router_robustness.py` (12 тестов, latency < 1 мс, 100% pass).
+  * Всего 384 теста в `tests/` (382 unit pass + 2 integration skip by default).
 * [ ] **Интеграционные E2E тесты с виртуальным микрофоном**:
   * Реализовать тестовый сценарий, прогоняющий синтезированные аудиофайлы (WAV) через живой конвейер `VoiceService` с проверкой реакции GUI.
 * [ ] **Очистка устаревших бэкап-файлов `*.bak` в корне**:

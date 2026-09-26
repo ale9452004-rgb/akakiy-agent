@@ -560,6 +560,31 @@ class Agent:
             self._record_interaction(user_input, answer, tool_name="image")
             return resp
 
+        # 1.4. Явный запуск субагента (Sub-Agent Fast-Path)
+        if route_type == "subagent":
+            sub_name = route.get("agent", "")
+            sub_task = route.get("task", "")
+            subagent_res = self.run_subagent(sub_name, task=sub_task)
+            if subagent_res.success:
+                answer = subagent_res.message
+            else:
+                err_detail = subagent_res.error or subagent_res.message or "Ошибка выполнения субагента"
+                answer = f"Ошибка выполнения субагента: {err_detail}"
+
+            resp = {
+                "type": "subagent",
+                "agent": sub_name,
+                "result": subagent_res,
+                "answer": answer,
+                "success": subagent_res.success,
+                "created_files": list(subagent_res.created_files),
+            }
+            if not subagent_res.success:
+                resp["error"] = subagent_res.error or subagent_res.message
+
+            self._record_interaction(user_input, answer, tool_name=f"subagent:{sub_name}")
+            return resp
+
         # 2. Teamwork Preview для сложных многошаговых задач
         if self.teamwork.is_complex_task(user_input):
             execution_result = self.teamwork.run(user_input)
