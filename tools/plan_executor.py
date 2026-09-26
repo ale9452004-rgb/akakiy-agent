@@ -5,29 +5,48 @@ from tools.agents.result import AgentResult, Artifact, ArtifactType
 from tools.agents.registry import get_agent_registry, AgentRegistry
 from tools.planner import PlanStep, TaskPlan
 from tools.teamwork import TeamworkPipeline, PipelineStep
+from tools.self_healing import ErrorCategory, ErrorContext, ErrorClassifier, SelfHealingManager
 
 
 class PlanExecutor:
     """
-    Выполняет структурированный план по шагам (Task Executor v2).
+    Выполняет структурированный план по шагам (Task Executor v2 + Self-Healing).
 
     Поддерживает:
     - TaskPlan (v2) с валидацией целостности графа и топологическим порядком исполнения;
     - Legacy-планы (словари и списки) с сохранением обратной совместимости;
     - Делегирование Sub-Agent шагов в TeamworkPipeline;
     - Накопление результатов, созданных файлов и артефактов в AgentContext и итоговом AgentResult;
-    - Контроль ошибок и досрочной остановки (stop_on_error).
+    - Контроль ошибок и досрочной остановки (stop_on_error);
+    - Контролируемый механизм восстановления ошибок (Self-Healing) с защитой от циклов.
     """
 
-    def __init__(self, agent=None, stop_on_error: bool = True):
+    def __init__(
+        self,
+        agent=None,
+        stop_on_error: bool = True,
+        max_retries: int = 1,
+        enable_self_healing: bool = True,
+        max_total_recoveries: int = 5,
+        healing_manager: Optional[SelfHealingManager] = None
+    ):
         self.agent = agent
         self.stop_on_error = stop_on_error
+        self.max_retries = max(0, int(max_retries))
+        self.enable_self_healing = bool(enable_self_healing)
+        self.max_total_recoveries = max(0, int(max_total_recoveries))
+        self.healing_manager = healing_manager or SelfHealingManager(
+            default_max_retries=self.max_retries,
+            max_total_recoveries=self.max_total_recoveries
+        )
 
     def execute(
         self,
         plan: Any,
         initial_context: Optional[AgentContext] = None,
         stop_on_error: Optional[bool] = None,
+        max_retries: Optional[int] = None,
+        enable_self_healing: Optional[bool] = None,
         **kwargs
     ) -> AgentResult:
         """
@@ -35,6 +54,13 @@ class PlanExecutor:
         Возвращает стандартизированный итоговый AgentResult.
         """
         should_stop = self.stop_on_error if stop_on_error is None else bool(stop_on_error)
+        self_healing_enabled = self.enable_self_healing if enable_self_healing is None else bool(enable_self_healing)
+        effective_max_retries = self.max_retries if max_retries is None else max(0, int(max_retries))
+
+        healing_mgr = SelfHealingManager(
+            default_max_retries=effective_max_retries if self_healing_enabled else 0,
+            max_total_recoveries=self.max_total_recoveries
+        )
         reg = getattr(self.agent, "agent_registry", None) or get_agent_registry()
 
         # 1. Приведение плана к TaskPlan
@@ -109,7 +135,7 @@ class PlanExecutor:
         mutations_executed: List[str] = []
         has_failures = False
 
-        # 5. Цикл выполнения шагов плана
+        # 5. Цикл выполнения шагов плана с контролируемым механизмом Self-Healing
         for idx, step in enumerate(ordered_steps, start=1):
             step_dict = step.to_dict() if hasattr(step, "to_dict") else dict(step)
             step_id = step.id if hasattr(step, "id") else step_dict.get("id", idx)
@@ -122,65 +148,162 @@ class PlanExecutor:
                 or self._is_registered_subagent(step_action, registry=reg)
             )
 
+            step_retries = healing_mgr.get_step_max_retries(step) if self_healing_enabled else 0
+            max_attempts = 1 + step_retries
+            attempt = 1
+            step_success = False
+            last_error_context: Optional[ErrorContext] = None
+            step_recovery_attempts: List[Dict[str, Any]] = []
+            pipeline_res: Optional[AgentResult] = None
+            tool_res: Optional[Dict[str, Any]] = None
+
+            # 5.1. Цикл попыток исполнения шага с детерминированным recovery
+            while attempt <= max_attempts:
+                if is_subagent:
+                    # Sub-Agent шаг: делегирование в TeamworkPipeline
+                    step_pipeline = TeamworkPipeline(
+                        steps=[step],
+                        registry=reg,
+                        stop_on_error=True
+                    )
+                    pipeline_res = step_pipeline.run(
+                        initial_task=step.task or step.details or step.description,
+                        initial_context=current_context
+                    )
+                    step_success = pipeline_res.success
+                    last_step_res = pipeline_res
+                else:
+                    # Стандартный шаг инструмента (search, analyze, read, edit, command, validate, git)
+                    tool_res = self._execute_step(step, results)
+                    step_success = bool(tool_res.get("success", False))
+                    last_step_res = tool_res
+
+                if step_success:
+                    break
+
+                # Шаг завершился с ошибкой: строим структурированный контекст ошибки
+                error_ctx = healing_mgr.classify_error(
+                    step=step,
+                    result=last_step_res,
+                    attempt=attempt,
+                    max_attempts=max_attempts
+                )
+                last_error_context = error_ctx
+                attempt_record = error_ctx.to_dict()
+
+                # Сохраняем попытку в AgentContext перед повтором
+                current_context.record_recovery_attempt(attempt_record)
+                step_recovery_attempts.append(attempt_record)
+
+                # Проверяем возможность повторной попытки восстановления
+                if (
+                    self_healing_enabled
+                    and error_ctx.is_recoverable
+                    and attempt < max_attempts
+                    and healing_mgr.can_attempt_recovery()
+                ):
+                    healing_mgr.record_recovery()
+                    attempt += 1
+                    continue
+                else:
+                    break
+
+            was_recovered = bool(step_success and len(step_recovery_attempts) > 0)
+
+            # 5.2. Обработка завершения шага
             if is_subagent:
-                # Sub-Agent шаг: делегирование в TeamworkPipeline
-                step_pipeline = TeamworkPipeline(
-                    steps=[step],
-                    registry=reg,
-                    stop_on_error=True
-                )
-                pipeline_res = step_pipeline.run(
-                    initial_task=step.task or step.details or step.description,
-                    initial_context=current_context
-                )
+                assert pipeline_res is not None
+                if step_success:
+                    # Аккумулируем артефакты и созданные файлы
+                    for art in pipeline_res.artifacts:
+                        if art not in accumulated_artifacts:
+                            accumulated_artifacts.append(art)
+                    for cf in pipeline_res.created_files:
+                        if cf not in accumulated_files:
+                            accumulated_files.append(cf)
 
-                # Аккумулируем артефакты и созданные файлы
-                for art in pipeline_res.artifacts:
-                    if art not in accumulated_artifacts:
-                        accumulated_artifacts.append(art)
-                for cf in pipeline_res.created_files:
-                    if cf not in accumulated_files:
-                        accumulated_files.append(cf)
+                    # Фиксируем результат в AgentContext
+                    current_context.add_result(
+                        pipeline_res,
+                        agent_name=step_subagent or step_action
+                    )
 
-                # Фиксируем результат в AgentContext
-                current_context.add_result(
-                    pipeline_res,
-                    agent_name=step_subagent or step_action
-                )
+                    step_res_dict = {
+                        "success": True,
+                        "message": pipeline_res.message,
+                        "result": pipeline_res.to_dict(),
+                        "data": pipeline_res.data,
+                        "subagent": step_subagent or step_action,
+                        "action": step_action,
+                        "id": step_id,
+                        "created_files": list(pipeline_res.created_files),
+                        "artifacts": [a.to_dict() for a in pipeline_res.artifacts],
+                        "error": None,
+                        "attempts": attempt,
+                        "recovered": was_recovered,
+                        "recovery_attempts": len(step_recovery_attempts)
+                    }
+                    results.append(step_res_dict)
 
-                step_res_dict = {
-                    "success": pipeline_res.success,
-                    "message": pipeline_res.message,
-                    "result": pipeline_res.to_dict(),
-                    "data": pipeline_res.data,
-                    "subagent": step_subagent or step_action,
-                    "action": step_action,
-                    "id": step_id,
-                    "created_files": list(pipeline_res.created_files),
-                    "artifacts": [a.to_dict() for a in pipeline_res.artifacts],
-                    "error": pipeline_res.error
-                }
-                results.append(step_res_dict)
-
-                step_history.append({
-                    "step": idx,
-                    "id": step_id,
-                    "name": str(step_id),
-                    "step_id": str(step_id),
-                    "action": step_action,
-                    "subagent": step_subagent or step_action,
-                    "task": step.task or step.details or step.description,
-                    "success": pipeline_res.success,
-                    "message": pipeline_res.message,
-                    "created_files": list(pipeline_res.created_files),
-                    "artifacts": [a.to_dict() for a in pipeline_res.artifacts],
-                    "error": pipeline_res.error
-                })
-
-                if not pipeline_res.success:
+                    step_history.append({
+                        "step": idx,
+                        "id": step_id,
+                        "name": str(step_id),
+                        "step_id": str(step_id),
+                        "action": step_action,
+                        "subagent": step_subagent or step_action,
+                        "task": step.task or step.details or step.description,
+                        "success": True,
+                        "message": pipeline_res.message,
+                        "created_files": list(pipeline_res.created_files),
+                        "artifacts": [a.to_dict() for a in pipeline_res.artifacts],
+                        "error": None,
+                        "attempts": attempt,
+                        "recovered": was_recovered,
+                        "recovery_attempts": len(step_recovery_attempts)
+                    })
+                else:
                     has_failures = True
                     if mutations_executed:
                         dispatch("validate_project")
+
+                    step_res_dict = {
+                        "success": False,
+                        "message": pipeline_res.message,
+                        "result": pipeline_res.to_dict(),
+                        "data": pipeline_res.data,
+                        "subagent": step_subagent or step_action,
+                        "action": step_action,
+                        "id": step_id,
+                        "created_files": list(pipeline_res.created_files),
+                        "artifacts": [a.to_dict() for a in pipeline_res.artifacts],
+                        "error": pipeline_res.error or pipeline_res.message,
+                        "attempts": attempt,
+                        "recovered": False,
+                        "recovery_attempts": len(step_recovery_attempts),
+                        "error_context": last_error_context.to_dict() if last_error_context else None
+                    }
+                    results.append(step_res_dict)
+
+                    step_history.append({
+                        "step": idx,
+                        "id": step_id,
+                        "name": str(step_id),
+                        "step_id": str(step_id),
+                        "action": step_action,
+                        "subagent": step_subagent or step_action,
+                        "task": step.task or step.details or step.description,
+                        "success": False,
+                        "message": pipeline_res.message,
+                        "created_files": list(pipeline_res.created_files),
+                        "artifacts": [a.to_dict() for a in pipeline_res.artifacts],
+                        "error": pipeline_res.error or pipeline_res.message,
+                        "attempts": attempt,
+                        "recovered": False,
+                        "recovery_attempts": len(step_recovery_attempts),
+                        "error_context": last_error_context.to_dict() if last_error_context else None
+                    })
+
                     if should_stop:
                         err_msg = f"Выполнение остановлено на шаге {step_id}: {pipeline_res.error or pipeline_res.message}"
                         return AgentResult.fail(
@@ -194,6 +317,7 @@ class PlanExecutor:
                                 "step": step_dict,
                                 "results": results,
                                 "history": step_history,
+                                "recovery_history": current_context.recovery_history,
                                 "failed_step": step_id,
                                 "plan": task_plan.to_dict()
                             }
@@ -201,46 +325,92 @@ class PlanExecutor:
 
             else:
                 # Стандартный шаг инструмента (search, analyze, read, edit, command, validate, git)
-                tool_res = self._execute_step(step, results)
-                results.append(tool_res)
-
+                assert tool_res is not None
                 target = step.target if hasattr(step, "target") else step_dict.get("target")
-                if step_action in ("edit", "write") and target:
-                    mutations_executed.append(target)
-                    if target not in accumulated_files:
-                        accumulated_files.append(target)
-                    accumulated_artifacts.append(Artifact.from_file(target, type=ArtifactType.CODE))
-                elif step_action == "read" and target:
-                    if target not in accumulated_files:
-                        accumulated_files.append(target)
-                    accumulated_artifacts.append(Artifact.from_file(target, type=ArtifactType.FILE))
 
-                tool_agent_res = AgentResult(
-                    success=tool_res.get("success", False),
-                    message=tool_res.get("message", ""),
-                    created_files=[target] if target else [],
-                    data=tool_res,
-                    error=tool_res.get("error") if not tool_res.get("success") else None
-                )
-                current_context.add_result(tool_agent_res, agent_name=step_action)
+                if step_success:
+                    if step_action in ("edit", "write") and target:
+                        mutations_executed.append(target)
+                        if target not in accumulated_files:
+                            accumulated_files.append(target)
+                        accumulated_artifacts.append(Artifact.from_file(target, type=ArtifactType.CODE))
+                    elif step_action == "read" and target:
+                        if target not in accumulated_files:
+                            accumulated_files.append(target)
+                        accumulated_artifacts.append(Artifact.from_file(target, type=ArtifactType.FILE))
 
-                step_history.append({
-                    "step": idx,
-                    "id": step_id,
-                    "name": str(step_id),
-                    "step_id": str(step_id),
-                    "action": step_action,
-                    "success": tool_res.get("success", False),
-                    "message": tool_res.get("message", ""),
-                    "created_files": [target] if target else [],
-                    "artifacts": [a.to_dict() for a in tool_agent_res.artifacts],
-                    "error": tool_res.get("error")
-                })
+                    tool_agent_res = AgentResult(
+                        success=True,
+                        message=tool_res.get("message", ""),
+                        created_files=[target] if target else [],
+                        data=tool_res,
+                        error=None
+                    )
+                    current_context.add_result(tool_agent_res, agent_name=step_action)
 
-                if not tool_res.get("success"):
+                    tool_res_dict = dict(tool_res)
+                    tool_res_dict.update({
+                        "attempts": attempt,
+                        "recovered": was_recovered,
+                        "recovery_attempts": len(step_recovery_attempts)
+                    })
+                    results.append(tool_res_dict)
+
+                    step_history.append({
+                        "step": idx,
+                        "id": step_id,
+                        "name": str(step_id),
+                        "step_id": str(step_id),
+                        "action": step_action,
+                        "success": True,
+                        "message": tool_res.get("message", ""),
+                        "created_files": [target] if target else [],
+                        "artifacts": [a.to_dict() for a in tool_agent_res.artifacts],
+                        "error": None,
+                        "attempts": attempt,
+                        "recovered": was_recovered,
+                        "recovery_attempts": len(step_recovery_attempts)
+                    })
+                else:
                     has_failures = True
                     if mutations_executed:
                         dispatch("validate_project")
+
+                    tool_agent_res = AgentResult(
+                        success=False,
+                        message=tool_res.get("message", ""),
+                        created_files=[],
+                        data=tool_res,
+                        error=tool_res.get("error") or tool_res.get("message")
+                    )
+                    current_context.add_result(tool_agent_res, agent_name=step_action)
+
+                    tool_res_dict = dict(tool_res)
+                    tool_res_dict.update({
+                        "attempts": attempt,
+                        "recovered": False,
+                        "recovery_attempts": len(step_recovery_attempts),
+                        "error_context": last_error_context.to_dict() if last_error_context else None
+                    })
+                    results.append(tool_res_dict)
+
+                    step_history.append({
+                        "step": idx,
+                        "id": step_id,
+                        "name": str(step_id),
+                        "step_id": str(step_id),
+                        "action": step_action,
+                        "success": False,
+                        "message": tool_res.get("message", ""),
+                        "created_files": [],
+                        "artifacts": [],
+                        "error": tool_res.get("error") or tool_res.get("message"),
+                        "attempts": attempt,
+                        "recovered": False,
+                        "recovery_attempts": len(step_recovery_attempts),
+                        "error_context": last_error_context.to_dict() if last_error_context else None
+                    })
+
                     is_cancelled = (
                         "отменил" in str(tool_res.get("result", {}).get("error", ""))
                         or "отменил" in str(tool_res.get("message", ""))
@@ -266,12 +436,14 @@ class PlanExecutor:
                                 "step": step_dict,
                                 "results": results,
                                 "history": step_history,
+                                "recovery_history": current_context.recovery_history,
                                 "failed_step": step_id,
                                 "plan": task_plan.to_dict()
                             }
                         )
 
         # 6. Формирование итогового AgentResult
+        has_recovered_steps = any(bool(r.get("recovered")) for r in results)
         if has_failures:
             return AgentResult.fail(
                 error="Один или несколько шагов плана завершились с ошибкой.",
@@ -283,6 +455,8 @@ class PlanExecutor:
                     "message": "План завершён с ошибками.",
                     "results": results,
                     "history": step_history,
+                    "recovery_history": current_context.recovery_history,
+                    "recovered": has_recovered_steps,
                     "plan": task_plan.to_dict(),
                     "total_steps": len(ordered_steps),
                     "completed_steps": len([r for r in results if r.get("success")])
@@ -298,6 +472,8 @@ class PlanExecutor:
                 "message": "План выполнен успешно.",
                 "results": results,
                 "history": step_history,
+                "recovery_history": current_context.recovery_history,
+                "recovered": has_recovered_steps,
                 "plan": task_plan.to_dict(),
                 "total_steps": len(ordered_steps),
                 "completed_steps": len(results)

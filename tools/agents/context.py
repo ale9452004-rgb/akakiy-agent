@@ -14,7 +14,7 @@
 import copy
 import json
 import uuid
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 
 class AgentContext:
@@ -36,6 +36,7 @@ class AgentContext:
         root_task_id: Optional[str] = None,
         file_metadata: Optional[Dict[str, Dict[str, Any]]] = None,
         parent_context: Optional["AgentContext"] = None,
+        recovery_history: Optional[List[Dict[str, Any]]] = None,
     ):
         self.task_id = str(task_id) if task_id else str(uuid.uuid4())
         self.root_task_id = str(root_task_id) if root_task_id else self.task_id
@@ -61,6 +62,7 @@ class AgentContext:
         self.metadata: Dict[str, Any] = dict(metadata) if metadata is not None else {}
         self.parent_agent = parent_agent
         self.parent_context = parent_context
+        self._recovery_history: List[Dict[str, Any]] = list(recovery_history) if recovery_history else []
 
     def _index_result(self, result: Any, agent_name: Optional[str] = None) -> None:
         """Внутренний метод индексации результата по имени агента."""
@@ -159,6 +161,22 @@ class AgentContext:
             elif isinstance(r, dict) and "artifacts" in r and isinstance(r["artifacts"], list):
                 accumulated.extend(r["artifacts"])
         return accumulated
+
+    def record_recovery_attempt(self, attempt_data: Union[Dict[str, Any], Any]) -> None:
+        """
+        Фиксирует попытку восстановления в истории контекста (Self-Healing).
+        """
+        rec = attempt_data.to_dict() if hasattr(attempt_data, "to_dict") and callable(attempt_data.to_dict) else dict(attempt_data)
+        self._recovery_history.append(rec)
+        if "recovery_history" in self.metadata:
+            self.metadata["recovery_history"].append(rec)
+
+    @property
+    def recovery_history(self) -> List[Dict[str, Any]]:
+        """История попыток восстановления ошибок (Self-Healing)."""
+        if self._recovery_history:
+            return list(self._recovery_history)
+        return list(self.metadata.get("recovery_history", []))
 
     # =========================================================================
     # Метаданные и параметры (dict-like protocol)
@@ -268,6 +286,7 @@ class AgentContext:
             root_task_id=self.root_task_id,
             file_metadata=child_file_metadata,
             parent_context=self,
+            recovery_history=list(self.recovery_history),
         )
 
     def copy(self) -> "AgentContext":
@@ -299,7 +318,7 @@ class AgentContext:
             else:
                 serialized_results.append(str(res))
 
-        return {
+        res: Dict[str, Any] = {
             "task_id": self.task_id,
             "root_task_id": self.root_task_id,
             "task": self.task,
@@ -311,6 +330,9 @@ class AgentContext:
             "previous_results": serialized_results,
             "metadata": dict(self.metadata),
         }
+        if self.recovery_history:
+            res["recovery_history"] = self.recovery_history
+        return res
 
     @classmethod
     def from_dict(
@@ -339,6 +361,7 @@ class AgentContext:
             root_task_id=data.get("root_task_id"),
             file_metadata=data.get("file_metadata"),
             parent_context=parent_context,
+            recovery_history=data.get("recovery_history"),
         )
 
     def to_json(self, indent: Optional[int] = None) -> str:

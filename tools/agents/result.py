@@ -600,6 +600,21 @@ class AgentResult:
         """Первый артефакт в результате (если есть)."""
         return self.artifacts[0] if self.artifacts else None
 
+    @property
+    def recovery_history(self) -> List[Dict[str, Any]]:
+        """История попыток восстановления ошибок (Self-Healing)."""
+        return list(self.data.get("recovery_history", []))
+
+    @property
+    def was_recovered(self) -> bool:
+        """Были ли успешные попытки восстановления при исполнении шагов."""
+        if self.data.get("recovered"):
+            return True
+        results = self.data.get("results")
+        if isinstance(results, list):
+            return any(bool(r.get("recovered")) for r in results if isinstance(r, dict))
+        return False
+
     # =========================================================================
     # Сериализация и десериализация
     # =========================================================================

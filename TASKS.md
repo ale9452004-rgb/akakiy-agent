@@ -6,9 +6,9 @@
 
 ## 1. Текущий статус проекта
 
-* **Текущая версия**: Акакий 2.0 (Desktop Hub + Voice UX + Household Assistant + Memory + Core Dev Tools + Notifications + Fast CLI REPL + Global Push-to-Talk + Backup & Restore + UI Filter & Pagination + Recurring Reminders & Tasks + Daily Briefing + Audio Notifications & Settings + Sub-Agent Foundation + ImageAgent v1 + VRAM Manager v1 + Image Request Routing + ImageAgent v2 Generation Parameters + Agent Router Robust Routing + AgentContext v2 Foundation Contract + AgentResult v2 & Artifacts Foundation + PresentationAgent v1 Foundation + DocumentAgent v1 Foundation + ResearchAgent v1 Foundation + CodingAgent v1 Foundation + FileAgent v1 Foundation + Agent Teamwork v1 Pipeline + Task Planner v2 Structured Plans + Task Executor v2 Execution Engine).
-* **Состояние кодовой базы**: Стабильное, все тесты пройдены (540 тестов в `tests/`: 538 unit-тестов успешны, 2 интеграционных пропущены по умолчанию; 0 синтаксических ошибок в Python-файлах проекта).
-* **Последний этап**: Этап №14 — Task Executor v2: эволюция `PlanExecutor` для полноценного исполнения `TaskPlan` v2, предварительная валидация, топологический порядок зависимостей, исполнение Sub-Agent шагов через `TeamworkPipeline`, агрегация артефактов и результатов в `AgentResult`.
+* **Текущая версия**: Акакий 2.0 (Desktop Hub + Voice UX + Household Assistant + Memory + Core Dev Tools + Notifications + Fast CLI REPL + Global Push-to-Talk + Backup & Restore + UI Filter & Pagination + Recurring Reminders & Tasks + Daily Briefing + Audio Notifications & Settings + Sub-Agent Foundation + ImageAgent v1 + VRAM Manager v1 + Image Request Routing + ImageAgent v2 Generation Parameters + Agent Router Robust Routing + AgentContext v2 Foundation Contract + AgentResult v2 & Artifacts Foundation + PresentationAgent v1 Foundation + DocumentAgent v1 Foundation + ResearchAgent v1 Foundation + CodingAgent v1 Foundation + FileAgent v1 Foundation + Agent Teamwork v1 Pipeline + Task Planner v2 Structured Plans + Task Executor v2 Execution Engine + Self-Healing Error Recovery).
+* **Состояние кодовой базы**: Стабильное, все тесты пройдены (558 тестов в `tests/`: 556 unit-тестов успешны, 2 интеграционных пропущены по умолчанию; 0 синтаксических ошибок в Python-файлах проекта).
+* **Последний этап**: Этап №15 — Self-Healing: контролируемый механизм восстановления ошибок поверх TaskExecutor v2 (сбор ErrorContext, детерминированная классификация recoverable/non-recoverable, ограниченные попытки retry с сохранением истории в AgentContext, соблюдение stop_on_error и защита от циклов).
 * **Ветка**: `master`, синхронизирована с `origin/master`.
 
 ---
@@ -341,6 +341,17 @@
   * Добавлено свойство `artifacts` в `AgentContext` для агрегации артефактов всех предшествующих результатов.
   * Создан модульный тестовый набор `tests/test_task_executor_v2.py` (14 тестов, 100% pass).
   * Всего 540 тестов в `tests/` (538 unit pass + 2 integration skip by default).
+* [x] **Self-Healing: контролируемый механизм восстановления ошибок в Task Executor (Этап 15)**:
+  * Разработан модуль `tools/self_healing.py`: структурированный контекст `ErrorContext`, детерминированный классификатор `ErrorClassifier` и менеджер `SelfHealingManager`.
+  * Стандартизированы категории ошибок `ErrorCategory`: `TRANSIENT`, `RESOURCE_BUSY`, `FILE_LOCKED`, `VALIDATION_SYNTAX`, `FATAL`, `USER_CANCELLED`, `SECURITY_VIOLATION`, `UNSUPPORTED`, `EXHAUSTED`, `UNKNOWN`.
+  * Интеграция цикла Self-Healing в `PlanExecutor.execute()`: каждый шаг (Sub-Agent шаг через `TeamworkPipeline` или инструмент) исполняется с контролируемыми повторными попытками `attempt <= max_attempts`.
+  * Перед каждым повтором история попыток фиксируется в `AgentContext.record_recovery_attempt()`, что делает процесс полностью прозрачным.
+  * Защита от бесконечных циклов: строгий лимит попыток на уровне шага (`step.metadata["max_retries"]` или default) и глобальный лимит плана `max_total_recoveries`.
+  * Соблюдение `stop_on_error`: при `stop_on_error=True` исполнение останавливается после исчерпания попыток или при non-recoverable ошибках; при `stop_on_error=False` независимые шаги продолжают выполняться с итоговым возвратом `AgentResult.fail()`.
+  * Расширение `AgentResult`: добавлены свойства `recovery_history` и `was_recovered`, отражающие статус восстановления шагов.
+  * Экспорт компонентов Self-Healing через PEP 562 в `tools/agents/__init__.py`.
+  * Создан модульный тестовый набор `tests/test_self_healing.py` (18 тестов, 100% pass).
+  * Всего 558 тестов в `tests/` (556 unit pass + 2 integration skip by default).
 * [ ] **Интеграционные E2E тесты с виртуальным микрофоном**:
   * Реализовать тестовый сценарий, прогоняющий синтезированные аудиофайлы (WAV) через живой конвейер `VoiceService` с проверкой реакции GUI.
 * [ ] **Очистка устаревших бэкап-файлов `*.bak` в корне**:

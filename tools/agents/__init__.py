@@ -61,12 +61,17 @@ __all__ = [
     "VRAMManager",
     "get_vram_manager",
     "reset_vram_manager",
+    "PlanExecutor",
+    "ErrorCategory",
+    "ErrorContext",
+    "ErrorClassifier",
+    "SelfHealingManager",
 ]
 
 
 def __getattr__(name: str):
     """
-    Ленивый импорт внешних компонентов (teamwork, planner)
+    Ленивый импорт внешних компонентов (teamwork, planner, executor, self_healing)
     для предотвращения циклических зависимостей при прямой загрузке submodules.
     """
     if name in ("PipelineStep", "TeamworkPipeline", "run_agent_pipeline"):
@@ -89,6 +94,24 @@ def __getattr__(name: str):
         globals()["PlanStep"] = _PStep
         globals()["TaskPlan"] = _TPlan
         globals()["Planner"] = _Pln
+        return globals()[name]
+
+    if name == "PlanExecutor":
+        from tools.plan_executor import PlanExecutor as _PE
+        globals()["PlanExecutor"] = _PE
+        return globals()[name]
+
+    if name in ("ErrorCategory", "ErrorContext", "ErrorClassifier", "SelfHealingManager"):
+        from tools.self_healing import (
+            ErrorCategory as _EC,
+            ErrorContext as _ECtx,
+            ErrorClassifier as _EClf,
+            SelfHealingManager as _SHM,
+        )
+        globals()["ErrorCategory"] = _EC
+        globals()["ErrorContext"] = _ECtx
+        globals()["ErrorClassifier"] = _EClf
+        globals()["SelfHealingManager"] = _SHM
         return globals()[name]
 
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
