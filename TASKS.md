@@ -6,9 +6,9 @@
 
 ## 1. Текущий статус проекта
 
-* **Текущая версия**: Акакий 2.0 (Desktop Hub + Voice UX + Household Assistant + Memory + Core Dev Tools + Notifications + Fast CLI REPL + Global Push-to-Talk + Backup & Restore + UI Filter & Pagination + Recurring Reminders & Tasks + Daily Briefing + Audio Notifications & Settings + Sub-Agent Foundation + ImageAgent v1 + VRAM Manager v1 + Image Request Routing + ImageAgent v2 Generation Parameters + Agent Router Robust Routing + AgentContext v2 Foundation Contract + AgentResult v2 & Artifacts Foundation + PresentationAgent v1 Foundation).
-* **Состояние кодовой базы**: Стабильное, все тесты пройдены (429 тестов в `tests/`: 427 unit-тестов успешны, 2 интеграционных пропущены по умолчанию; 0 синтаксических ошибок в 1026 Python-файлах).
-* **Последний этап**: Этап №7 — PresentationAgent v1: первый специализированный Sub-Agent создания презентаций (.pptx) на базе чистой стандартной библиотеки Python (модель OpenXML, авторазбор задач, интеграция с Artifacts, регистрация в AgentRegistry, роутинг).
+* **Текущая версия**: Акакий 2.0 (Desktop Hub + Voice UX + Household Assistant + Memory + Core Dev Tools + Notifications + Fast CLI REPL + Global Push-to-Talk + Backup & Restore + UI Filter & Pagination + Recurring Reminders & Tasks + Daily Briefing + Audio Notifications & Settings + Sub-Agent Foundation + ImageAgent v1 + VRAM Manager v1 + Image Request Routing + ImageAgent v2 Generation Parameters + Agent Router Robust Routing + AgentContext v2 Foundation Contract + AgentResult v2 & Artifacts Foundation + PresentationAgent v1 Foundation + DocumentAgent v1 Foundation + ResearchAgent v1 Foundation + CodingAgent v1 Foundation + FileAgent v1 Foundation + Agent Teamwork v1 Pipeline).
+* **Состояние кодовой базы**: Стабильное, все тесты пройдены (507 тестов в `tests/`: 505 unit-тестов успешны, 2 интеграционных пропущены по умолчанию; 0 синтаксических ошибок в Python-файлах проекта).
+* **Последний этап**: Этап №12 — Agent Teamwork v1: реализация последовательного конвейера взаимодействия Sub-Agent'ов (`TeamworkPipeline`, `PipelineStep`, `run_agent_pipeline`, автотрансфер контекста и артефактов).
 * **Ветка**: `master`, синхронизирована с `origin/master`.
 
 ---
@@ -307,10 +307,21 @@
   * В `CommandRouter` добавлен метод `match_file(user_input)` для естественных русскоязычных команд («файл: ...», «файлы: ...», «скопируй файл ...», «перемести файл ...», «метаданные файла ...», «прочитай файл ...», «создай файл ...») и вызовов `субагент file: ...`.
   * В `Agent.process()` подключена обработка маршрута `route_type == "file"` с вызовом субагента, возвратом артефактов и фиксацией в контексте диалога.
   * В `main.py` добавлен вывод созданных файлов и артефактов файловых операций в CLI REPL.
-  * Создан модульный тестовый набор `tests/test_file_agent.py` (19 тестов, 100% pass).
-  * Всего 496 тестов в `tests/` (494 unit pass + 2 integration skip by default).
+* [x] **Agent Teamwork v1: последовательный конвейер взаимодействия Sub-Agent'ов (Этап 12)**:
+  * Реализован класс `PipelineStep` (`tools/teamwork.py`) с гибкой нормализацией шагов из объектов `PipelineStep`, кортежей `(agent, task[, meta])` и словарей `dict`.
+  * Реализован исполнитель `TeamworkPipeline` (`tools/teamwork.py`) для последовательного выполнения цепочки из 2–3+ разнородных субагентов.
+  * Наследование контекста каждого шага через `current_context.create_child_context()` с изоляцией состояния и сохранением сквозного `root_task_id`.
+  * Автоматический трансфер данных между субагентами: передача `topic`, `title`, `findings` $\to$ `sections` (для `DocumentAgent`) / `slides` (для `PresentationAgent`).
+  * Динамическое форматирование строки задачи через шаблоны `{previous_file}`, `{previous_message}`, `{task}` и поддержка пользовательских хуков `input_transform(context, last_result) -> context`.
+  * Накопление всех артефактов `Artifact` и созданных файлов `created_files` каждого шага без дубликатов.
+  * Безопасная обработка сбоев: при ошибке любого шага конвейер досрочно останавливается (`stop_on_error=True`) и возвращает `AgentResult.fail()` с сохранением всех артефактов и файлов предшествующих шагов и полной истории выполнения.
+  * Минимальный публичный функциональный API: функция `run_agent_pipeline()`, метод `TeamworkCoordinator.run_pipeline()`, реэкспорт в `tools/agents/__init__.py`.
+  * Сопутствующие точечные укрепления: поддержка дисков Windows (`C:\...`) и путей с пробелами в `FileAgent.parse_task`, поддержка `base_path=None` в `tools.files.edit_file` с безопасным расчетом `backup_path.relative_to`, проброс `base_path=self.project_path` в `CodingAgent`.
+  * Создан модульный тестовый набор `tests/test_agent_teamwork.py` (11 тестов, 100% pass).
+  * Всего 507 тестов в `tests/` (505 unit pass + 2 integration skip by default).
 * [ ] **Интеграционные E2E тесты с виртуальным микрофоном**:
   * Реализовать тестовый сценарий, прогоняющий синтезированные аудиофайлы (WAV) через живой конвейер `VoiceService` с проверкой реакции GUI.
 * [ ] **Очистка устаревших бэкап-файлов `*.bak` в корне**:
   * Согласовать с пользователем удаление временных скриптов и резервных копий (`*.bak`) из корня репозитория.
+
 

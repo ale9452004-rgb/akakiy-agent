@@ -31,6 +31,7 @@ from tools.agents.research import ResearchAgent
 from tools.agents.coding import CodingAgent
 from tools.agents.file import FileAgent
 from tools.vram import VRAMManager, get_vram_manager, reset_vram_manager
+from tools.teamwork import PipelineStep, TeamworkPipeline, run_agent_pipeline
 
 __all__ = [
     "SubAgent",
@@ -48,6 +49,9 @@ __all__ = [
     "ResearchAgent",
     "CodingAgent",
     "FileAgent",
+    "PipelineStep",
+    "TeamworkPipeline",
+    "run_agent_pipeline",
     "ComfyUIClient",
     "RESOLUTION_PRESETS",
     "safe_validate_resolution",

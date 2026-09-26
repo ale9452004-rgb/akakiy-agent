@@ -1,6 +1,12 @@
-import re
 import json
 from pathlib import Path
+import re
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+
+from tools.agents.base import SubAgent
+from tools.agents.context import AgentContext
+from tools.agents.registry import AgentRegistry, get_agent_registry
+from tools.agents.result import AgentResult, Artifact
 from tools.dispatcher import dispatch
 from tools.registry import get_tool
 
@@ -345,3 +351,345 @@ class TeamworkCoordinator:
         self.reset()
 
         return exec_res
+
+    def run_pipeline(
+        self,
+        steps: List[Union["PipelineStep", Tuple[str, str], Dict[str, Any]]],
+        initial_context: Optional[AgentContext] = None,
+        stop_on_error: bool = True,
+        **kwargs
+    ) -> AgentResult:
+        """
+        Запускает последовательный конвейер Sub-Agent'ов через внутренний TeamworkPipeline.
+        """
+        reg = getattr(self.agent, "agent_registry", None) or get_agent_registry()
+        return run_agent_pipeline(
+            steps=steps,
+            initial_context=initial_context,
+            registry=reg,
+            stop_on_error=stop_on_error,
+            **kwargs
+        )
+
+
+# =============================================================================
+# Agent Teamwork Foundation v1: Последовательный Sub-Agent Pipeline
+# =============================================================================
+
+class PipelineStep:
+    """
+    Описание одного шага в конвейере взаимодействия субагентов.
+    """
+
+    def __init__(
+        self,
+        agent: Union[str, SubAgent],
+        task: str = "",
+        metadata: Optional[Dict[str, Any]] = None,
+        files: Optional[List[str]] = None,
+        name: Optional[str] = None,
+        input_transform: Optional[Callable[[AgentContext, Optional[AgentResult]], AgentContext]] = None,
+    ):
+        if hasattr(agent, "name"):
+            self.agent_name = str(agent.name).strip()
+            self.agent_instance = agent
+        else:
+            self.agent_name = str(agent).strip()
+            self.agent_instance = None
+
+        self.task = str(task)
+        self.metadata = dict(metadata or {})
+        self.files = list(files or [])
+        self.name = str(name) if name else self.agent_name
+        self.input_transform = input_transform
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "name": self.name,
+            "agent": self.agent_name,
+            "task": self.task,
+            "metadata": dict(self.metadata),
+            "files": list(self.files)
+        }
+
+
+def normalize_step(step: Union[PipelineStep, Tuple[str, str], Dict[str, Any]]) -> PipelineStep:
+    """
+    Приводит произвольный шаг (объект, кортеж, словарь) к PipelineStep.
+    """
+    if isinstance(step, PipelineStep):
+        return step
+    if isinstance(step, (list, tuple)):
+        agent = step[0]
+        task = step[1] if len(step) > 1 else ""
+        meta = step[2] if len(step) > 2 and isinstance(step[2], dict) else {}
+        return PipelineStep(agent=agent, task=task, metadata=meta)
+    if isinstance(step, dict):
+        agent = step.get("agent") or step.get("agent_name") or step.get("name")
+        if not agent:
+            raise ValueError(f"В словаре шага не указан агент: {step}")
+        task = step.get("task") or step.get("instruction") or ""
+        meta = step.get("metadata") or {
+            k: v for k, v in step.items()
+            if k not in ("agent", "agent_name", "task", "instruction", "files", "name", "input_transform")
+        }
+        files = step.get("files")
+        name = step.get("name")
+        transform = step.get("input_transform")
+        return PipelineStep(
+            agent=agent,
+            task=task,
+            metadata=meta,
+            files=files,
+            name=name,
+            input_transform=transform
+        )
+    raise ValueError(f"Некорректный формат шага pipeline: {step}")
+
+
+class TeamworkPipeline:
+    """
+    Конвейер последовательного взаимодействия нескольких Sub-Agent'ов.
+
+    Обеспечивает:
+    - передачу результатов и контекста от шага к шагу через AgentContext.previous_results;
+    - аккумуляцию артефактов и созданных файлов каждого шага;
+    - обработку ошибок и досрочную остановку при сбое любого шага;
+    - формирование единого итогового AgentResult со структурированной историей.
+    """
+
+    def __init__(
+        self,
+        steps: Optional[List[Union[PipelineStep, Tuple[str, str], Dict[str, Any]]]] = None,
+        registry: Optional[AgentRegistry] = None,
+        stop_on_error: bool = True
+    ):
+        self.registry = registry or get_agent_registry()
+        self.stop_on_error = stop_on_error
+        self.steps: List[PipelineStep] = []
+        if steps:
+            for s in steps:
+                self.add_step(s)
+
+    def add_step(
+        self,
+        step: Union[PipelineStep, Tuple[str, str], Dict[str, Any]]
+    ) -> "TeamworkPipeline":
+        """Добавляет шаг в конвейер (fluent API)."""
+        self.steps.append(normalize_step(step))
+        return self
+
+    def run(
+        self,
+        initial_task: str = "",
+        initial_context: Optional[AgentContext] = None,
+        **kwargs
+    ) -> AgentResult:
+        """
+        Исполняет конвейер шагов субагентов.
+        """
+        if not self.steps:
+            return AgentResult.fail(
+                error="Pipeline не содержит шагов для выполнения.",
+                message="Пустой pipeline."
+            )
+
+        root_context = initial_context or AgentContext(
+            task=initial_task,
+            metadata=kwargs
+        )
+
+        accumulated_artifacts: List[Artifact] = []
+        accumulated_files: List[str] = list(root_context.files)
+        step_history: List[Dict[str, Any]] = []
+        last_result: Optional[AgentResult] = None
+        current_context = root_context
+
+        for idx, step in enumerate(self.steps, start=1):
+            # 1. Поиск агента в реестре
+            agent = step.agent_instance or self.registry.get(step.agent_name)
+            if agent is None:
+                err_msg = f"Субагент '{step.agent_name}' не найден в реестре (шаг {idx})."
+                return AgentResult.fail(
+                    error=err_msg,
+                    message=f"Pipeline прерван: {err_msg}",
+                    created_files=accumulated_files,
+                    artifacts=accumulated_artifacts,
+                    data={
+                        "total_steps": len(self.steps),
+                        "completed_steps": idx - 1,
+                        "failed_step": idx,
+                        "failed_agent": step.agent_name,
+                        "history": step_history
+                    }
+                )
+
+            # 2. Подготовка метаданных и контекста для текущего шага
+            step_meta = dict(step.metadata)
+            if last_result:
+                step_meta["previous_result"] = last_result.data
+                step_meta["previous_message"] = last_result.message
+                if last_result.created_files:
+                    step_meta["previous_files"] = list(last_result.created_files)
+
+                # Умный трансфер данных между связанными агентами
+                if isinstance(last_result.data, dict):
+                    if "topic" in last_result.data and not step_meta.get("topic") and not step_meta.get("title"):
+                        step_meta["topic"] = last_result.data["topic"]
+                    if "title" in last_result.data and not step_meta.get("title"):
+                        step_meta["title"] = last_result.data["title"]
+                    if "findings" in last_result.data:
+                        findings = last_result.data["findings"]
+                        if isinstance(findings, list):
+                            if not step_meta.get("sections"):
+                                step_meta["sections"] = [
+                                    {"title": f.get("question", "Тезис"), "content": f.get("finding", "")}
+                                    if isinstance(f, dict) else {"title": "Тезис", "content": str(f)}
+                                    for f in findings
+                                ]
+                            if not step_meta.get("slides"):
+                                step_meta["slides"] = [
+                                    {"title": f.get("question", "Тезис"), "bullets": [f.get("finding", "")]}
+                                    if isinstance(f, dict) else {"title": "Тезис", "bullets": [str(f)]}
+                                    for f in findings
+                                ]
+
+            # Разрешение текста задачи шага
+            step_task = step.task
+            if not step_task and last_result:
+                step_task = last_result.message
+            elif last_result and ("{" in step_task and "}" in step_task):
+                try:
+                    format_vars = {
+                        "previous_message": last_result.message,
+                        "previous_file": last_result.created_files[0] if last_result.created_files else "",
+                        "task": root_context.task,
+                    }
+                    if isinstance(last_result.data, dict):
+                        format_vars.update(last_result.data)
+                    step_task = step_task.format(**format_vars)
+                except Exception:
+                    pass
+
+            step_context = current_context.create_child_context(
+                task=step_task,
+                files=list(dict.fromkeys(accumulated_files + step.files)),
+                metadata=step_meta
+            )
+            step_context.instruction = step_task
+
+            # Пользовательская трансформация (если передана)
+            if callable(step.input_transform):
+                try:
+                    old_inst = step_context.instruction
+                    old_task = step_context.task
+                    step_context = step.input_transform(step_context, last_result) or step_context
+                    if step_context.instruction != old_inst and step_context.task == old_task:
+                        step_context.task = step_context.instruction
+                    elif step_context.task != old_task and step_context.instruction == old_inst:
+                        step_context.instruction = step_context.task
+                    elif step_context.instruction and not step_context.task:
+                        step_context.task = step_context.instruction
+                    elif step_context.task and not step_context.instruction:
+                        step_context.instruction = step_context.task
+                    step_task = step_context.instruction or step_context.task
+                except Exception as ex:
+                    err_msg = f"Ошибка input_transform на шаге {idx} ({step.agent_name}): {ex}"
+                    return AgentResult.fail(
+                        error=err_msg,
+                        message=err_msg,
+                        created_files=accumulated_files,
+                        artifacts=accumulated_artifacts,
+                        data={
+                            "total_steps": len(self.steps),
+                            "completed_steps": idx - 1,
+                            "failed_step": idx,
+                            "history": step_history
+                        }
+                    )
+
+            # 3. Исполнение шага субагентом
+            try:
+                res = agent.run(step_context)
+            except Exception as ex:
+                res = AgentResult.fail(
+                    error=f"Исключение при выполнении {step.agent_name}: {ex}",
+                    message=f"Ошибка на шаге {idx}: {ex}"
+                )
+
+            # 4. Регистрация шага в истории и аккумуляция артефактов
+            step_rec = {
+                "step": idx,
+                "name": step.name,
+                "agent": agent.name,
+                "task": step_task,
+                "success": res.success,
+                "message": res.message,
+                "created_files": list(res.created_files),
+                "artifacts": [a.to_dict() for a in res.artifacts],
+                "error": res.error
+            }
+            step_history.append(step_rec)
+
+            for art in res.artifacts:
+                accumulated_artifacts.append(art)
+            for cf in res.created_files:
+                if cf not in accumulated_files:
+                    accumulated_files.append(cf)
+
+            # Индексируем результат в контексте
+            current_context.add_result(res, agent_name=agent.name)
+            last_result = res
+
+            # 5. Обработка ошибки
+            if not res.success:
+                if self.stop_on_error:
+                    err_msg = f"Сбой на шаге {idx} ({agent.name}): {res.error or res.message}"
+                    return AgentResult.fail(
+                        error=err_msg,
+                        message=f"Pipeline прерван: {err_msg}",
+                        created_files=accumulated_files,
+                        artifacts=accumulated_artifacts,
+                        data={
+                            "total_steps": len(self.steps),
+                            "completed_steps": idx - 1,
+                            "failed_step": idx,
+                            "failed_agent": agent.name,
+                            "history": step_history,
+                            "last_result": res.to_dict()
+                        }
+                    )
+
+        # 6. Успешный финал
+        agents_flow = " -> ".join(s["agent"] for s in step_history)
+        msg = f"Pipeline из {len(self.steps)} шагов успешно выполнен ({agents_flow})."
+
+        return AgentResult.ok(
+            message=msg,
+            created_files=accumulated_files,
+            artifacts=accumulated_artifacts,
+            data={
+                "total_steps": len(self.steps),
+                "completed_steps": len(self.steps),
+                "pipeline": [s["agent"] for s in step_history],
+                "history": step_history,
+                "last_result": last_result.to_dict() if last_result else None
+            }
+        )
+
+
+def run_agent_pipeline(
+    steps: List[Union[PipelineStep, Tuple[str, str], Dict[str, Any]]],
+    initial_context: Optional[AgentContext] = None,
+    registry: Optional[AgentRegistry] = None,
+    stop_on_error: bool = True,
+    **kwargs
+) -> AgentResult:
+    """
+    Минимальный публичный API для запуска последовательного конвейера взаимодействия субагентов.
+    """
+    pipeline = TeamworkPipeline(registry=registry, stop_on_error=stop_on_error)
+    for s in steps:
+        pipeline.add_step(s)
+    return pipeline.run(initial_context=initial_context, **kwargs)
+

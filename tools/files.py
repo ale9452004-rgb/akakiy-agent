@@ -208,8 +208,8 @@ def validate_python_file(file_path):
         }
 
 
-def edit_file(filename, old_text, new_text):
-    file_path, error = resolve_safe_path(filename)
+def edit_file(filename, old_text, new_text, base_path=None):
+    file_path, error = resolve_safe_path(filename, base_path=base_path)
 
     if error:
         return error
@@ -284,13 +284,18 @@ def edit_file(filename, old_text, new_text):
         )
 
 
+        target_base = Path(base_path).resolve() if base_path else PROJECT_PATH.resolve()
+        backup_str = (
+            str(backup_path.relative_to(target_base))
+            if backup_path.is_relative_to(target_base)
+            else str(backup_path)
+        )
+
         return {
             "success": True,
             "filename": filename,
             "message": "Изменение применено.",
-            "backup": str(
-                backup_path.relative_to(PROJECT_PATH)
-            )
+            "backup": backup_str
         }
 
     except Exception as error:

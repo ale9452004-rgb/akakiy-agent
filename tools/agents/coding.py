@@ -102,21 +102,26 @@ class CodingAgent(SubAgent):
         raw_edits = meta.get("edits") or meta.get("replacements")
         if raw_edits and isinstance(raw_edits, list):
             for e in raw_edits:
-                if isinstance(e, dict) and "old_text" in e and "new_text" in e:
-                    e_file = e.get("file") or (target_files[0] if target_files else None)
-                    if e_file:
-                        edits.append({
-                            "file": e_file,
-                            "old_text": str(e["old_text"]),
-                            "new_text": str(e["new_text"])
-                        })
-        elif "old_text" in meta and "new_text" in meta:
+                if isinstance(e, dict):
+                    old_t = e.get("old_text") if "old_text" in e else (e.get("old_str") if "old_str" in e else e.get("target"))
+                    new_t = e.get("new_text") if "new_text" in e else (e.get("new_str") if "new_str" in e else e.get("replacement"))
+                    if old_t is not None and new_t is not None:
+                        e_file = e.get("file") or (target_files[0] if target_files else None)
+                        if e_file:
+                            edits.append({
+                                "file": e_file,
+                                "old_text": str(old_t),
+                                "new_text": str(new_t)
+                            })
+        elif ("old_text" in meta or "old_str" in meta) and ("new_text" in meta or "new_str" in meta):
+            old_t = meta.get("old_text") if "old_text" in meta else meta.get("old_str")
+            new_t = meta.get("new_text") if "new_text" in meta else meta.get("new_str")
             e_file = meta.get("file") or (target_files[0] if target_files else None)
-            if e_file:
+            if e_file and old_t is not None and new_t is not None:
                 edits.append({
                     "file": e_file,
-                    "old_text": str(meta["old_text"]),
-                    "new_text": str(meta["new_text"])
+                    "old_text": str(old_t),
+                    "new_text": str(new_t)
                 })
 
         # Парсинг простых шаблонов замены из текста задачи:
@@ -189,7 +194,7 @@ class CodingAgent(SubAgent):
             return problems, plan_steps
 
         for filename in target_files:
-            file_path, err = resolve_safe_path(filename)
+            file_path, err = resolve_safe_path(filename, base_path=self.project_path)
             if err:
                 problems.append({
                     "file": filename,
@@ -209,7 +214,7 @@ class CodingAgent(SubAgent):
                 continue
 
             # Читаем файл
-            read_res = read_file(filename)
+            read_res = read_file(filename, base_path=self.project_path)
             if not read_res.get("success"):
                 problems.append({
                     "file": filename,
@@ -270,7 +275,8 @@ class CodingAgent(SubAgent):
             res = edit_file(
                 filename=fname,
                 old_text=old_text,
-                new_text=new_text
+                new_text=new_text,
+                base_path=self.project_path
             )
 
             edit_results.append({
@@ -446,8 +452,8 @@ class CodingAgent(SubAgent):
             # 6. Формирование артефактов и итогового результата
             artifacts: List[Artifact] = []
             for mf in modified_files:
-                fpath, _ = resolve_safe_path(mf)
-                if fpath.exists():
+                fpath, _ = resolve_safe_path(mf, base_path=self.project_path)
+                if fpath and fpath.exists():
                     artifacts.append(
                         Artifact.from_code(
                             path=str(fpath),

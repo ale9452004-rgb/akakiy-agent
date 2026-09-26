@@ -143,67 +143,78 @@ class FileAgent(SubAgent):
             elif re.search(r"^(?:скопируй|скопировать|копируй|копировать|copy|cp)\b", task_str, re.IGNORECASE):
                 action = "copy"
                 cp_m = re.match(
-                    r"^(?:скопируй|скопировать|копируй|копировать|copy|cp)\s+(?:файл\s+)?([^\s]+)\s+(?:в|to|в\s+файл)\s+([^\s]+)$",
+                    r"^(?:скопируй|скопировать|копируй|копировать|copy|cp)\s+(?:файл\s+)?(.+?)\s+(?:в|to|в\s+файл)\s+(.+)$",
                     task_str,
                     re.IGNORECASE
                 )
                 if cp_m:
-                    source = source or cp_m.group(1).strip()
-                    destination = destination or cp_m.group(2).strip()
+                    source = source or cp_m.group(1).strip().strip("\"'")
+                    destination = destination or cp_m.group(2).strip().strip("\"'")
 
             # 3. Перемещение / переименование: перемести [файл] <src> в <dst>
             elif re.search(r"^(?:перемести|переместить|переименуй|переименовать|move|mv|rename)\b", task_str, re.IGNORECASE):
                 action = "move"
                 mv_m = re.match(
-                    r"^(?:перемести|переместить|переименуй|переименовать|move|mv|rename)\s+(?:файл\s+)?([^\s]+)\s+(?:в|to|на|в\s+файл)\s+([^\s]+)$",
+                    r"^(?:перемести|переместить|переименуй|переименовать|move|mv|rename)\s+(?:файл\s+)?(.+?)\s+(?:в|to|на|в\s+файл)\s+(.+)$",
                     task_str,
                     re.IGNORECASE
                 )
                 if mv_m:
-                    source = source or mv_m.group(1).strip()
-                    destination = destination or mv_m.group(2).strip()
+                    source = source or mv_m.group(1).strip().strip("\"'")
+                    destination = destination or mv_m.group(2).strip().strip("\"'")
 
             # 4. Метаданные / stat / info: метаданные [файла] <path>
             elif re.search(r"^(?:метаданные|информация|инфо|статистика|stat|metadata|info)\b", task_str, re.IGNORECASE):
                 action = "metadata"
                 st_m = re.match(
-                    r"^(?:метаданные|информация|инфо|статистика|stat|metadata|info)\s+(?:о\s+файле\s+|файла\s+|файл\s+)?([^\s]+)$",
+                    r"^(?:метаданные|информация|инфо|статистика|stat|metadata|info)\s+(?:о\s+файле\s+|файла\s+|файл\s+)?(.+)$",
                     task_str,
                     re.IGNORECASE
                 )
                 if st_m:
-                    target_file = target_file or st_m.group(1).strip()
+                    target_file = target_file or st_m.group(1).strip().strip("\"'")
 
             # 5. Создание / запись: создай [файл] <path> [: <content> / с содержимым <content>]
             elif re.search(r"^(?:создай|создать|запиши|записать|create|write)\b", task_str, re.IGNORECASE):
                 action = "create"
-                cr_m = re.match(
-                    r"^(?:создай|создать|запиши|записать|create|write)\s+(?:файл\s+)?([^\s:]+)(?:\s*:\s*|\s+(?:с\s+содержимым|содержимое)\s+)(.+)$",
+                # Сначала проверяем явный разделитель 'с содержимым' / 'содержимое'
+                cr_m_content = re.match(
+                    r"^(?:создай|создать|запиши|записать|create|write)\s+(?:файл\s+)?(.+?)\s+(?:с\s+содержимым|содержимое)\s+(.+)$",
                     task_str,
-                    re.IGNORECASE
+                    re.IGNORECASE | re.DOTALL
                 )
-                if cr_m:
-                    target_file = target_file or cr_m.group(1).strip()
-                    content = content if content is not None else cr_m.group(2).strip()
+                if cr_m_content:
+                    target_file = target_file or cr_m_content.group(1).strip().strip("\"'")
+                    content = content if content is not None else cr_m_content.group(2).strip()
                 else:
-                    cr_single = re.match(
-                        r"^(?:создай|создать|create)\s+файл\s+([^\s:]+)$",
+                    # Разделитель ':' с поддержкой Windows диска C:\...
+                    cr_m_colon = re.match(
+                        r"^(?:создай|создать|запиши|записать|create|write)\s+(?:файл\s+)?((?:[a-zA-Z]:[\\/][^:]+|[^:]+))\s*:\s*(.+)$",
                         task_str,
-                        re.IGNORECASE
+                        re.IGNORECASE | re.DOTALL
                     )
-                    if cr_single:
-                        target_file = target_file or cr_single.group(1).strip()
+                    if cr_m_colon:
+                        target_file = target_file or cr_m_colon.group(1).strip().strip("\"'")
+                        content = content if content is not None else cr_m_colon.group(2).strip()
+                    else:
+                        cr_single = re.match(
+                            r"^(?:создай|создать|create)\s+файл\s+(.+)$",
+                            task_str,
+                            re.IGNORECASE
+                        )
+                        if cr_single:
+                            target_file = target_file or cr_single.group(1).strip().strip("\"'")
 
             # 6. Чтение: прочитай [файл] <path>
             elif re.search(r"^(?:прочитай|прочитать|чтение|read|покажи\s+содержимое|содержимое)\b", task_str, re.IGNORECASE):
                 action = "read"
                 rd_m = re.match(
-                    r"^(?:прочитай|прочитать|чтение|read|покажи\s+содержимое|содержимое)\s+(?:файла\s+|файл\s+)?([^\s]+)$",
+                    r"^(?:прочитай|прочитать|чтение|read|покажи\s+содержимое|содержимое)\s+(?:файла\s+|файл\s+)?(.+)$",
                     task_str,
                     re.IGNORECASE
                 )
                 if rd_m:
-                    target_file = target_file or rd_m.group(1).strip()
+                    target_file = target_file or rd_m.group(1).strip().strip("\"'")
 
             # 7. Поиск: найди [файл] <query> / поиск <query>
             elif re.search(r"^(?:найди|найти|поиск|search|find)\b", task_str, re.IGNORECASE):
