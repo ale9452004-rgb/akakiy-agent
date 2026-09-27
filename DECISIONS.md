@@ -994,3 +994,46 @@
   * **Плюсы**: Централизованная архитектура безопасности (Single Responsibility Principle); гарантированная защита от случайной перезаписи файлов и опасных команд ОС; субагенты теперь полностью подконтрольны системе безопасности; отсутствие дублирования в инструментах; 100% обратная совместимость.
   * **Минусы**: Для разграничения прав пользователей или сетевого sandboxing в будущем потребуется отдельный этап OS-level изоляции.
 
+---
+
+## ADR-037: Финальная интеграция архитектуры Акакия в единое ядро (Akakiy 2.0 Core)
+
+* **Статус**: Принято
+* **Контекст**:
+  В ходе эволюционных этапов №11–19 были разработаны и обособлены ключевые подсистемы:
+  - Реестр и базовые контракты субагентов (`AgentRegistry`, `SubAgent`, `AgentContext v2`, `AgentResult v2 / Artifacts`);
+  - Специализированные Sub-Agent'ы (`ImageAgent`, `PresentationAgent`, `DocumentAgent`, `ResearchAgent`, `CodingAgent`, `FileAgent`, `EchoAgent`);
+  - Multi-agent конвейеры (`TeamworkPipeline`, `TeamworkCoordinator`);
+  - Структурированное планирование (`TaskPlan v2`, `PlanStep`, `Planner v2`);
+  - Исполнитель планов с поддержкой графа зависимостей (`PlanExecutor v2`);
+  - Контролируемый механизм восстановления сбоев (`SelfHealingManager`, `ErrorClassifier`);
+  - Долговременная фактологическая память (`PersistentMemory`);
+  - Сквозной голосовой конвейер (`VoicePipeline`);
+  - Десктопный хаб (`AkakiyGUI Desktop Hub 2.0`);
+  - Централизованный слой безопасности (`PermissionManager`).
+  Однако между отдельными модулями сохранялись локальные разрывы:
+  1. `execute_plan` и `TeamworkCoordinator.run` возвращали `AgentResult`, но метод `format_task_summary` ожидал словарь и терял шаги объекта `TaskPlan`;
+  2. Выходные структуры `Agent.process` для планов, инструментов и субагентов различались по составу верхнеуровневых полей (`success`, `answer`, `created_files`, `artifacts`), что требовало неоднородных проверок в `VoicePipeline` и `AkakiyGUI`;
+  3. `AkakiyGUI.record_work_result` проверял `"error" in res_obj` по оператору членства ключа, что при `res_obj.error is None` в объектах `AgentResult` ошибочно маркировало успешный результат как ошибку;
+  4. В `Agent` отсутствовал фасадный метод `remember_result` для явной фиксации итогов задач в `PersistentMemory`, а в `CommandRouter` не было распознавания естественных команд «сохрани результат в память»;
+  5. Передача `AgentContext` между Teamwork Coordinator и PlanExecutor требовала сквозного проброса `initial_context`.
+* **Решение**:
+  1. **Гармонизация и стандартизация `Agent.process()`**:
+     * Унифицированы возвращаемые контракты для всех веток маршрутизации (`plan_execution`, `subagent`, `tool`, `memory`, `image`, `chat`): гарантировано наличие верхнеуровневых полей `type`, `success`, `answer`/`message`, `created_files`, `artifacts`, `error`, `result`.
+     * В `Agent` добавлен атрибут `_last_result`, фиксирующий последний результат любой операции (субагент, план, teamwork, инструмент).
+     * Добавлен фасад `Agent.remember_result(result, title=None, tags=None)` с делегированием в `PersistentMemory.remember_result()`.
+     * В `CommandRouter` и `Agent.process` добавлена маршрутизация команд «запомни результат», «сохрани результат в память», «запомни последний результат» в `action == "remember_result"`.
+  2. **Устранение разрывов в `tools/summary.py` и `gui.py`**:
+     * `format_task_summary`: поддержано извлечение шагов из объектов `TaskPlan` (через `.get("steps")` и `.steps`), что вернуло полную наглядность сводки плана.
+     * `AkakiyGUI.record_work_result`: проверка наличия ошибки изменена с `"error" in res_obj` на строгую проверку истинности `bool(res_obj.get("error"))`, устранив ложное срабатывание на объектах с `error=None`.
+  3. **Непрерывность `AgentContext`**:
+     * `TeamworkCoordinator.run(user_request, initial_context=None)` теперь принимает начальный контекст и передает его в `TeamworkImplementer.implement(plan_data, context=initial_context)` и далее в `PlanExecutor.execute(plan, context=context)`.
+     * `VoicePipelineResult` дополнен свойствами `created_files` и `artifacts`, позволяя напрямую извлекать артефакты голосовых задач.
+  4. **Единый конвейер безопасности**:
+     * `Agent.__init__` принимает и сохраняет `self.permission_manager`.
+     * Все пути исполнения (прямой запуск через `Agent.run_subagent`, шаги плана в `PlanExecutor`, конвейер `TeamworkPipeline` и вызовы инструментов через `Dispatcher`) обращаются к единому экземпляру `PermissionManager`, гарантируя перехват опасных операций ДО их выполнения.
+* **Последствия**:
+  * **Плюсы**: Все 10 подсистем Акакия соединены в единый детерминированный конвейер без архитектурных швов; CLI, GUI и Voice используют единое ядро `Agent.process`; устранены скрытые несовместимости контрактов; 100% обратная совместимость API; 0 новых сторонних библиотек.
+  * **Минусы**: Не выявлено.
+
+

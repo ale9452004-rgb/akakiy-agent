@@ -385,6 +385,43 @@ Agent.run_subagent("image", task="промпт", aspect_ratio="landscape", count
 AgentResult(success=True, created_files=[...], data={count, width, height, saved_to, seed, seeds, ...})
 ```
 
+### Поток 5: Сквозной конвейер ядра Акакий 2.0 (Akakiy 2.0 Core Pipeline)
+```
+Пользователь / CLI / GUI (Desktop Hub) / VoicePipeline
+    │
+    ▼
+Agent.process(user_input)
+    ├─► CommandRouter (детерминированная маршрутизация и fast-paths):
+    │      ├─ Долговременная память ──────► PersistentMemory (remember, recall, search, forget, clear, remember_result)
+    │      ├─ Планирование (Planner v2) ──► TaskPlan v2 (валидация графа, depends_on) -> PlanExecutor
+    │      ├─ Sub-Agents (8 агентов)   ──► run_subagent() -> AgentContext -> AgentResult / Artifacts
+    │      ├─ Teamwork Preview          ──► TeamworkCoordinator.run(user_request, initial_context)
+    │      ├─ Быстрые инструменты       ──► execute_tool() -> Dispatcher
+    │      └─ Чат / Свободный диалог    ──► SkillRegistry -> Ollama Native Tool Calling
+    │
+    ├─► Единый слой безопасности (PermissionManager):
+    │      ├─ Оценка риска (RiskLevel: SAFE, LOW, MEDIUM, HIGH, CRITICAL) строго ДО выполнения действия;
+    │      ├─ Защита критических файлов (.git, .env, ключи) и блокировка деструктивных команд ОС;
+    │      └─ Запрос подтверждения (GUI request_confirmation / CLI input) при модификациях.
+    │
+    ├─► Исполнение задач и планов (PlanExecutor v2 + Self-Healing):
+    │      ├─ Топологический порядок выполнения шагов;
+    │      ├─ Непрерывность и наследование AgentContext (parent_agent, previous_results, files);
+    │      ├─ Субагенты выполняются через TeamworkPipeline;
+    │      ├─ SelfHealingManager: классификация recoverable/non-recoverable ошибок и безопасный retry;
+    │      └─ Аккумуляция артефактов и созданных файлов в итоговом AgentResult.
+    │
+    ├─► Сохранение результатов и память:
+    │      ├─ Фиксация self._last_result для быстрого доступа;
+    │      ├─ Сохранение хода диалога в ContextManager (краткосрочная память);
+    │      └─ Явная фиксация важных результатов через remember_result в PersistentMemory (переживает перезапуск).
+    │
+    └─► Стандартизированный выходной контракт:
+           ├─ VoicePipeline: extract_speech_text() -> очистка текста -> TTS (фоновая озвучка);
+           ├─ Desktop Hub GUI: record_work_result() -> реактивное обновление HomeView/ChatView/StatusBar;
+           └─ CLI REPL: форматированный вывод summary, статусов и путей к созданным артефактам.
+```
+
 ---
 
 ## 5. Политика изоляции и безопасность

@@ -37,17 +37,20 @@ class Agent:
     - координацию единого контекста диалога и памяти.
     """
 
-    def __init__(self, memory_manager=None, context_manager=None, ai_client=None, skill_registry=None, router=None, agent_registry=None):
+    def __init__(self, memory_manager=None, context_manager=None, ai_client=None, skill_registry=None, router=None, agent_registry=None, permission_manager=None):
         mem = memory_manager or get_memory_manager()
         self.context_manager = context_manager or ContextManager(memory_manager=mem)
         self.ai = ai_client or OllamaClient()
         self.skill_registry = skill_registry or get_skill_registry()
         self.router = router or CommandRouter()
         self.agent_registry = agent_registry or get_agent_registry()
+        from tools.permissions import get_permission_manager
+        self.permission_manager = permission_manager or get_permission_manager()
         self.edit_preparer = EditPreparer(self.ai)
         self.planner = Planner(context_manager=self.context_manager, ai_client=self.ai)
         self.executor = PlanExecutor(self)
         self.teamwork = TeamworkCoordinator(self)
+        self._last_result = None
         self._sync_memory_to_system_prompt()
 
     @property
@@ -57,6 +60,17 @@ class Agent:
     @memory.setter
     def memory(self, val):
         self.context_manager.memory_manager = val
+
+    def remember_result(self, result, title=None, tags=None, source="agent"):
+        """
+        Явно сохраняет результат задачи в долговременную Persistent Memory.
+        """
+        return self.memory.remember_result(
+            result=result,
+            title=title,
+            tags=tags,
+            source=source
+        )
 
     def _sync_memory_to_system_prompt(self):
         """
@@ -225,10 +239,12 @@ class Agent:
         # Выполняем инструмент
         # =================================================
 
-        return dispatch(
+        res = dispatch(
             tool_name,
             **normalized_arguments
         )
+        self._last_result = res
+        return res
 
     def serialize_tool_result(self, result):
         """
@@ -310,8 +326,11 @@ class Agent:
                 context.parent_agent = self
 
         # Централизованная проверка разрешений и безопасности
-        from tools.permissions import get_permission_manager
-        perm_mgr = get_permission_manager()
+        perm_mgr = getattr(self, "permission_manager", None)
+        if perm_mgr is None:
+            from tools.permissions import get_permission_manager
+            perm_mgr = get_permission_manager()
+            self.permission_manager = perm_mgr
         assessment = perm_mgr.assess_subagent(name.strip(), context=context)
 
         if not assessment.allowed:
@@ -329,7 +348,9 @@ class Agent:
                 )
 
         context.metadata["_permission_approved"] = True
-        return agent.run(context)
+        res = agent.run(context)
+        self._last_result = res
+        return res
 
     execute_subagent = run_subagent
 
@@ -395,7 +416,7 @@ class Agent:
             "validation_result": val_res
         }
 
-    def execute_plan(self, plan=None):
+    def execute_plan(self, plan=None, context=None):
         """
         Выполняет переданный план.
 
@@ -411,11 +432,12 @@ class Agent:
 
             plan = current.get("plan")
 
-        execution_result = self.executor.execute(plan)
+        execution_result = self.executor.execute(plan, context=context)
 
         # Формируем и прикрепляем агрегированную сводку
         summary = self.format_task_summary(plan, execution_result)
         execution_result["summary"] = summary
+        self._last_result = execution_result
 
         return execution_result
 
@@ -489,6 +511,27 @@ class Agent:
                     "type": "chat",
                     "answer": msg
                 }
+            elif action == "remember_result":
+                explicit_text = route.get("text")
+                res_to_save = explicit_text or getattr(self, "_last_result", None)
+                if res_to_save is not None:
+                    title = "Результат задачи" if not explicit_text else None
+                    success, msg, entry = self.remember_result(res_to_save, title=title)
+                    self._record_interaction(user_input, msg)
+                    return {
+                        "type": "memory",
+                        "answer": msg,
+                        "success": success,
+                        "entry": entry.to_dict() if entry else None
+                    }
+                else:
+                    msg = "Нет сохранённых результатов предыдущих задач для фиксации в памяти."
+                    self._record_interaction(user_input, msg)
+                    return {
+                        "type": "memory",
+                        "answer": msg,
+                        "success": False
+                    }
 
         # 1.2. Управление планами (Planning Fast-Path)
         if route_type == "plan":
@@ -505,6 +548,7 @@ class Agent:
                         }
                     }
                 result = self.create_plan(request)
+                self._last_result = result
                 plan_res = {
                     "type": "plan",
                     "tool": "plan",
@@ -514,11 +558,29 @@ class Agent:
                 return plan_res
             elif action == "execute":
                 result = self.execute_plan()
+                is_success = bool(result.get("success", False)) if hasattr(result, "get") else getattr(result, "success", False)
+                ans = (
+                    result.get("summary") or result.get("message")
+                    if hasattr(result, "get")
+                    else (getattr(result, "summary", None) or getattr(result, "message", ""))
+                )
+                c_files = list(result.get("created_files", [])) if hasattr(result, "get") else list(getattr(result, "created_files", []))
+                raw_arts = result.get("artifacts", []) if hasattr(result, "get") else getattr(result, "artifacts", [])
+                arts = [a.to_dict() if hasattr(a, "to_dict") else a for a in raw_arts]
+                err = result.get("error") if hasattr(result, "get") else getattr(result, "error", None)
+
                 exec_res = {
                     "type": "plan_execution",
                     "tool": "execute_plan",
-                    "result": result
+                    "result": result,
+                    "success": is_success,
+                    "answer": ans,
+                    "message": ans,
+                    "created_files": c_files,
+                    "artifacts": arts,
                 }
+                if not is_success and err:
+                    exec_res["error"] = err
                 self._record_interaction(user_input, exec_res)
                 return exec_res
             elif action == "get":
@@ -572,6 +634,7 @@ class Agent:
                 "answer": answer,
                 "success": subagent_res.success,
                 "created_files": list(subagent_res.created_files),
+                "artifacts": [a.to_dict() for a in subagent_res.artifacts],
                 "width": width,
                 "height": height,
                 "count": len(subagent_res.created_files) if subagent_res.success else count,
@@ -725,6 +788,7 @@ class Agent:
                 "answer": answer,
                 "success": subagent_res.success,
                 "created_files": list(subagent_res.created_files),
+                "artifacts": [a.to_dict() for a in subagent_res.artifacts],
             }
             if not subagent_res.success:
                 resp["error"] = subagent_res.error or subagent_res.message
@@ -735,11 +799,30 @@ class Agent:
         # 2. Teamwork Preview для сложных многошаговых задач
         if self.teamwork.is_complex_task(user_input):
             execution_result = self.teamwork.run(user_input)
+            self._last_result = execution_result
+            is_success = bool(execution_result.get("success", False)) if hasattr(execution_result, "get") else getattr(execution_result, "success", False)
+            ans = (
+                execution_result.get("summary") or execution_result.get("message")
+                if hasattr(execution_result, "get")
+                else (getattr(execution_result, "summary", None) or getattr(execution_result, "message", ""))
+            )
+            c_files = list(execution_result.get("created_files", [])) if hasattr(execution_result, "get") else list(getattr(execution_result, "created_files", []))
+            raw_arts = execution_result.get("artifacts", []) if hasattr(execution_result, "get") else getattr(execution_result, "artifacts", [])
+            arts = [a.to_dict() if hasattr(a, "to_dict") else a for a in raw_arts]
+            err = execution_result.get("error") if hasattr(execution_result, "get") else getattr(execution_result, "error", None)
+
             resp = {
                 "type": "plan_execution",
                 "tool": "execute_plan",
-                "result": execution_result
+                "result": execution_result,
+                "success": is_success,
+                "answer": ans,
+                "message": ans,
+                "created_files": c_files,
+                "artifacts": arts,
             }
+            if not is_success and err:
+                resp["error"] = err
             self._record_interaction(user_input, resp)
             return resp
 
@@ -755,11 +838,18 @@ class Agent:
                 if tool_name in ("remember", "forget_memory"):
                     self._sync_memory_to_system_prompt()
 
+                is_success = bool(result.get("success", True)) if isinstance(result, dict) else True
                 resp = {
                     "type": "tool",
                     "tool": tool_name,
-                    "result": result
+                    "result": result,
+                    "success": is_success,
                 }
+                if isinstance(result, dict):
+                    if result.get("message"):
+                        resp["answer"] = result["message"]
+                    if not is_success and result.get("error"):
+                        resp["error"] = result["error"]
                 self._record_interaction(user_input, resp, tool_name=tool_name)
                 return resp
 

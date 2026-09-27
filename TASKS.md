@@ -412,6 +412,21 @@
     * Модальное окно подтверждения в `AkakiyGUI` (`request_confirmation`) через очередь `queue.Queue` и `messagebox.askyesno` функционирует бесшовно.
   * Создан модульный тестовый набор `tests/test_permissions_and_safety.py` (25 тестов, 100% pass).
   * Всего 636 тестов в `tests/` (634 unit pass + 2 integration skip by default).
+* [x] **Akakiy 2.0 Core: финальная интеграция архитектуры Акакия в единое ядро (Этап 20)**:
+  * Проведена сквозная интеграция всех ключевых подсистем: `Router → Planner → Executor → Sub-Agents → Self-Healing → Persistent Memory → Voice → GUI → Permissions`.
+  * Унифицированы точки входа и контекстные потоки ядра:
+    * `Agent.__init__` принимает `permission_manager` и связывает все компоненты в едином графе зависимостей.
+    * Добавлен сквозной трекинг `Agent._last_result` через все типы маршрутов и методы исполнения (`execute_tool`, `run_subagent`, `execute_plan`, `TeamworkCoordinator.run`, `create_plan`).
+    * Реализован фасад `Agent.remember_result()` для долговременного сохранения результатов работы в `PersistentMemory`.
+    * В `tools/router.py` добавлены детерминированные паттерны для фиксации результатов («запомни результат», «сохрани результат в память», «запомни последний результат»).
+    * `TeamworkImplementer` и `TeamworkCoordinator` теперь принимают и пробрасывают родительский контекст `AgentContext` в `PlanExecutor.execute(context=context)`.
+    * `tools/summary.py` (`format_task_summary`) адаптирован под объекты `TaskPlan` (v2), исключая пустые отчеты для планов v2.
+    * `VoicePipelineResult` в `voice/pipeline.py` расширен свойствами `created_files` и `artifacts`, обеспечивая передачу артефактов при голосовом взаимодействии.
+    * В `gui.py` исправлена проверка ошибок (`bool(res_obj.get("error"))`), предотвращающая ложное отображение ошибок при успешных `AgentResult` с `error=None`.
+  * Стандартизированы контракты ответов `Agent.process()` для всех типов маршрутов (`plan_execution`, `subagent`, `tool`, `memory`, `image`, `chat`) с гарантированными полями: `type`, `success`, `answer`/`message`, `created_files`, `artifacts`, `error`, `result`.
+  * Сохранена 100% обратная совместимость CLI, GUI, существующих инструментов и субагентов.
+  * Разработан интеграционный тестовый набор `tests/test_akakiy_core_integration.py` (11 сквозных сценариев, 100% pass).
+  * Всего 647 тестов в `tests/` (645 unit pass + 2 integration skip by default).
 * [ ] **Интеграционные E2E тесты с виртуальным микрофоном**:
   * Реализовать тестовый сценарий, прогоняющий синтезированные аудиофайлы (WAV) через живой конвейер `VoiceService` с проверкой реакции GUI.
 * [ ] **Очистка устаревших бэкап-файлов `*.bak` в корне**:

@@ -128,11 +128,11 @@ class TeamworkImplementer:
     def __init__(self, agent):
         self.agent = agent
 
-    def implement(self, plan):
+    def implement(self, plan, context=None):
         """
         Выполняет план через существующий PlanExecutor.
         """
-        return self.agent.execute_plan(plan)
+        return self.agent.execute_plan(plan, context=context)
 
 
 class TeamworkVerifier:
@@ -271,7 +271,7 @@ class TeamworkCoordinator:
 
         return False
 
-    def run(self, user_request):
+    def run(self, user_request, initial_context=None):
         """
         Запускает полный цикл Teamwork Preview:
         Research -> Planning -> Implementation -> Verification -> Result
@@ -322,7 +322,7 @@ class TeamworkCoordinator:
         # -------------------------------------------------------------
         # 3. IMPLEMENTATION
         # -------------------------------------------------------------
-        exec_res = self.implementer.implement(plan_data)
+        exec_res = self.implementer.implement(plan_data, context=initial_context)
         self.context["execution_results"] = exec_res
 
         # -------------------------------------------------------------

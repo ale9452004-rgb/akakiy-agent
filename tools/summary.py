@@ -43,11 +43,21 @@ def format_task_summary(plan_data, exec_result, research_info=None):
 
     # 2. План
     lines.append("## План")
-    steps = plan_data.get("steps", []) if isinstance(plan_data, dict) else []
+    if hasattr(plan_data, "get"):
+        steps = plan_data.get("steps", [])
+    elif hasattr(plan_data, "steps"):
+        steps = plan_data.steps
+    else:
+        steps = []
+
     if steps:
         for s in steps:
-            s_id = s.get("id")
-            s_desc = s.get("description") or s.get("details", "")
+            if hasattr(s, "get"):
+                s_id = s.get("id")
+                s_desc = s.get("description") or s.get("details", "")
+            else:
+                s_id = getattr(s, "id", "")
+                s_desc = getattr(s, "description", None) or getattr(s, "details", "")
             lines.append(f"{s_id}. {s_desc}")
     else:
         lines.append("План не содержит отдельных шагов.")

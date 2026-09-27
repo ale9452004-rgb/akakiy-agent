@@ -893,12 +893,12 @@ class AkakiyGUI:
 
             res_obj = payload.get("result")
             if isinstance(res_obj, dict) or hasattr(res_obj, "get"):
-                if res_obj.get("success") is False or "error" in res_obj:
+                if res_obj.get("success") is False or bool(res_obj.get("error")):
                     success = False
                     error = res_obj.get("error") or res_obj.get("message")
                 inner_res = res_obj.get("result")
                 if isinstance(inner_res, dict) or hasattr(inner_res, "get"):
-                    if inner_res.get("success") is False or "error" in inner_res:
+                    if inner_res.get("success") is False or bool(inner_res.get("error")):
                         success = False
                         error = inner_res.get("error") or inner_res.get("message")
             elif hasattr(res_obj, "success") and not res_obj.success:

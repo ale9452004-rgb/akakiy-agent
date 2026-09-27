@@ -214,6 +214,22 @@ class VoicePipelineResult:
     def is_error(self) -> bool:
         return self.status == "error"
 
+    @property
+    def created_files(self) -> list:
+        if isinstance(self.agent_result, dict):
+            return list(self.agent_result.get("created_files", []))
+        if hasattr(self.agent_result, "created_files"):
+            return list(self.agent_result.created_files)
+        return []
+
+    @property
+    def artifacts(self) -> list:
+        if isinstance(self.agent_result, dict):
+            return list(self.agent_result.get("artifacts", []))
+        if hasattr(self.agent_result, "artifacts"):
+            return list(self.agent_result.artifacts)
+        return []
+
     def to_dict(self) -> Dict[str, Any]:
         return {
             "status": self.status,
@@ -223,6 +239,8 @@ class VoicePipelineResult:
             "spoken_text": self.spoken_text,
             "error": self.error,
             "duration_seconds": self.duration_seconds,
+            "created_files": self.created_files,
+            "artifacts": self.artifacts,
         }
 
     def __getitem__(self, key: str) -> Any:

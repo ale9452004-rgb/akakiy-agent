@@ -119,6 +119,25 @@ class CommandRouter:
 
         # 6. Команды памяти (Memory)
         self.mem_rem_p = re.compile(r"^(?:запомни|сохрани\s+в\s+память)[:\s]+(.+)$", re.IGNORECASE)
+        self.mem_rem_result_exact = {
+            "запомни результат",
+            "сохрани результат",
+            "сохрани результат в память",
+            "сохранить результат в память",
+            "запомни последний результат",
+            "сохрани последний результат",
+            "сохрани последний результат в память",
+            "запомнить результат",
+            "запомнить результат в память",
+            "запомнить результат задачи",
+            "сохрани результат задачи в память",
+            "запомни результат задачи",
+            "сохранить результат задачи",
+        }
+        self.mem_rem_result_p = re.compile(
+            r"^(?:запомни|сохрани(?:\s+в\s+память)?)\s+(?:последний\s+)?результат(?:\s+задачи)?(?:\s+в\s+память)?\s*[:\s]+\s*(.+)$",
+            re.IGNORECASE
+        )
         self.mem_recall_exact = {
             "что ты помнишь",
             "что помнишь",
@@ -199,6 +218,19 @@ class CommandRouter:
         if normalized in self.mem_recall_exact:
             return {
                 "action": "recall"
+            }
+
+        # 2.1. Сохранить результат в долговременную память
+        if normalized in self.mem_rem_result_exact:
+            return {
+                "action": "remember_result"
+            }
+
+        m_res = self.mem_rem_result_p.match(raw_trimmed)
+        if m_res:
+            return {
+                "action": "remember_result",
+                "text": m_res.group(1).strip()
             }
 
         # 3. Запомнить
