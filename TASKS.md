@@ -6,9 +6,9 @@
 
 ## 1. Текущий статус проекта
 
-* **Текущая версия**: Акакий 2.0 (Desktop Hub + Voice UX + Household Assistant + Memory + Core Dev Tools + Notifications + Fast CLI REPL + Global Push-to-Talk + Backup & Restore + UI Filter & Pagination + Recurring Reminders & Tasks + Daily Briefing + Audio Notifications & Settings + Sub-Agent Foundation + ImageAgent v1 + VRAM Manager v1 + Image Request Routing + ImageAgent v2 Generation Parameters + Agent Router Robust Routing + AgentContext v2 Foundation Contract + AgentResult v2 & Artifacts Foundation + PresentationAgent v1 Foundation + DocumentAgent v1 Foundation + ResearchAgent v1 Foundation + CodingAgent v1 Foundation + FileAgent v1 Foundation + Agent Teamwork v1 Pipeline + Task Planner v2 Structured Plans + Task Executor v2 Execution Engine + Self-Healing Error Recovery + Persistent Memory Layer).
-* **Состояние кодовой базы**: Стабильное, все тесты пройдены (581 тест в `tests/`: 579 unit-тестов успешны, 2 интеграционных пропущены по умолчанию; 0 синтаксических ошибок в Python-файлах проекта).
-* **Последний этап**: Этап №16 — Persistent Memory: отдельный слой долговременной памяти (`PersistentMemory`), структурированная модель `MemoryEntry`, безопасный CRUD, валидация и дедупликация, многокритериальный поиск, атомарная персистентность с автомиграцией схемы v1 $\to$ v2, явная фиксация результатов `remember_result` и интеграция в `MemoryManager`.
+* **Текущая версия**: Акакий 2.0 (Desktop Hub + Voice UX + Household Assistant + Memory + Core Dev Tools + Notifications + Fast CLI REPL + Global Push-to-Talk + Backup & Restore + UI Filter & Pagination + Recurring Reminders & Tasks + Daily Briefing + Audio Notifications & Settings + Sub-Agent Foundation + ImageAgent v1 + VRAM Manager v1 + Image Request Routing + ImageAgent v2 Generation Parameters + Agent Router Robust Routing + AgentContext v2 Foundation Contract + AgentResult v2 & Artifacts Foundation + PresentationAgent v1 Foundation + DocumentAgent v1 Foundation + ResearchAgent v1 Foundation + CodingAgent v1 Foundation + FileAgent v1 Foundation + Agent Teamwork v1 Pipeline + Task Planner v2 Structured Plans + Task Executor v2 Execution Engine + Self-Healing Error Recovery + Persistent Memory Layer + Voice Pipeline Engine).
+* **Состояние кодовой базы**: Стабильное, все тесты пройдены (605 тестов в `tests/`: 603 unit-теста успешны, 2 интеграционных пропущены по умолчанию; 0 синтаксических ошибок в Python-файлах проекта).
+* **Последний этап**: Этап №17 — Voice Pipeline: полноценный голосовой конвейер STT → Agent → TTS (`voice/pipeline.py`), класс `VoicePipeline`, стандартизированная модель `VoicePipelineResult`, универсальный экстрактор озвучиваемого текста `extract_speech_text`, интеграция в `VoiceService`, обработка фраз выхода, ошибок и отмены, 100% обратная совместимость с GUI и CLI.
 * **Ветка**: `master`, синхронизирована с `origin/master`.
 
 ---
@@ -58,6 +58,12 @@
   - [x] Голосовые команды выхода («стоп», «хватит», «отключись»).
   - [x] Очистка текстов от разметки Markdown, путей и спецсимволов перед озвучкой (`voice/cleaner.py`).
   - [x] Защита от ложных успешных ответов: ошибки (`success=False`) строго озвучиваются и логируются как ошибки.
+- [x] **Голосовой конвейер Voice Pipeline (`voice/pipeline.py`)**:
+  - [x] Единый модульный конвейер: STT → Agent → TTS (`VoicePipeline`).
+  - [x] Стандартизированная модель `VoicePipelineResult` со словарной совместимостью.
+  - [x] Универсальный экстрактор озвучиваемого текста `extract_speech_text` (поддержка `AgentResult`, `Artifact`, словарей субагентов, инструментов и ошибок).
+  - [x] Обработка фраз выхода («стоп», «хватит», «отключись», «выключи голос»), тишины, ошибок и отмены (`stop_event`).
+  - [x] Интеграция в `VoiceService` с автоматической синхронизацией моков в тестах.
 
 ### 2.3. Инструменты и бытовой контекст (Household & Memory)
 - [x] **Подсистема долговременной памяти (`tools/memory.py`)**:
@@ -364,6 +370,16 @@
   * Экспорт компонентов Persistent Memory через PEP 562 в `tools/agents/__init__.py`.
   * Создан модульный тестовый набор `tests/test_persistent_memory.py` (23 теста, 100% pass).
   * Всего 581 тест в `tests/` (579 unit pass + 2 integration skip by default).
+* [x] **Voice Pipeline: полноценный голосовой конвейер STT → Agent → TTS (Этап 17)**:
+  * Разработан независимый модуль `voice/pipeline.py` с координатором `VoicePipeline`.
+  * Реализована стандартизированная модель `VoicePipelineResult` (`status`, `recognized_text`, `cleaned_command`, `agent_result`, `spoken_text`, `duration_seconds`, `error`) с доступом по атрибутам и через словарный протокол (`res["key"]`).
+  * Реализован универсальный экстрактор озвучиваемого текста `extract_speech_text(payload)`: извлечение реплики из строк, объектов `AgentResult` (приоритет `result.message`), словарей чата (`answer`, `reply`), специализированных субагентов (`image`, `presentation`, `document`, `research`, `coding`, `file`), планов (`plan_id`, `steps`), результатов инструментов и сообщений об ошибках.
+  * Реализован детектор фраз выхода `is_voice_exit_command(text)` и `VOICE_EXIT_COMMANDS`.
+  * Интеграция в `VoiceService`: делегирование шага голосового цикла в `VoicePipeline.run_step()`, метод `process_phrase()`, свойство `is_running`, алиас `speak_phrase = speak_text`, механизм синхронизации моков `_sync_pipeline()` и устранение race condition в `is_busy()`.
+  * Экспорт всех компонентов конвейера в `voice/__init__.py`.
+  * Сохранение 100% обратной совместимости с GUI, CLI, глобальным хоткеем `Ctrl+Shift+Space` и Push-to-Talk API.
+  * Создан модульный тестовый набор `tests/test_voice_pipeline.py` (24 теста, 100% pass).
+  * Всего 605 тестов в `tests/` (603 unit pass + 2 integration skip by default).
 * [ ] **Интеграционные E2E тесты с виртуальным микрофоном**:
   * Реализовать тестовый сценарий, прогоняющий синтезированные аудиофайлы (WAV) через живой конвейер `VoiceService` с проверкой реакции GUI.
 * [ ] **Очистка устаревших бэкап-файлов `*.bak` в корне**:
