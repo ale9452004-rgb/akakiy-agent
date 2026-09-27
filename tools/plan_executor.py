@@ -304,16 +304,28 @@ class PlanExecutor:
                         "error_context": last_error_context.to_dict() if last_error_context else None
                     })
 
+                    is_cancelled = (
+                        "отменил" in str(pipeline_res.error or "")
+                        or "отменил" in str(pipeline_res.message or "")
+                    )
+                    if is_cancelled:
+                        msg = (
+                            f"План остановлен. "
+                            f"Действие {step_id} отменено пользователем. "
+                            f"Последующие действия не выполнены."
+                        )
+                    else:
+                        msg = f"Выполнение остановлено на шаге {step_id}: {pipeline_res.error or pipeline_res.message}"
+
                     if should_stop:
-                        err_msg = f"Выполнение остановлено на шаге {step_id}: {pipeline_res.error or pipeline_res.message}"
                         return AgentResult.fail(
-                            error=pipeline_res.error or pipeline_res.message,
-                            message=err_msg,
+                            error=pipeline_res.error or msg,
+                            message=msg,
                             created_files=accumulated_files,
                             artifacts=accumulated_artifacts,
                             data={
                                 "success": False,
-                                "message": err_msg,
+                                "message": msg,
                                 "step": step_dict,
                                 "results": results,
                                 "history": step_history,

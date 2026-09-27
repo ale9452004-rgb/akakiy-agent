@@ -186,9 +186,14 @@
   * Потокобезопасная атомарная запись через `.tmp` и `os.replace`.
   * Хранит флаги звуковых уведомлений (`notification_sound`), озвучивания напоминаний (`speak_reminders`) и произвольные параметры приложения.
 
-### 3.5. Инструментальный слой (Tools Layer)
-* [tools/registry.py](file:///c:/Akakiy%20agent/tools/registry.py): Центральный реестр `TOOLS` (24 зарегистрированных инструмента) с описаниями, схемами параметров и флагами подтверждения `requires_confirmation`.
-* [tools/dispatcher.py](file:///c:/Akakiy%20agent/tools/dispatcher.py): Функция `dispatch()` — вызов инструментов по имени с перехватом подтверждений через коллбэк.
+### 3.5. Инструментальный слой и безопасность (Tools & Safety Layer)
+* [tools/permissions.py](file:///c:/Akakiy%20agent/tools/permissions.py): Централизованный слой разрешений и безопасности (Permissions & Safety Layer):
+  * Перечисление уровней риска `RiskLevel` (`SAFE`, `LOW`, `MEDIUM`, `HIGH`, `CRITICAL`) и политик `SecurityPolicy` (`NORMAL`, `STRICT`, `PERMISSIVE`, `READ_ONLY`).
+  * Централизованная оценка действий (`PermissionAssessment`) ДО их фактического выполнения.
+  * Контекстный анализ риска (детекция перезаписи существующих файлов, анализ опасных команд PowerShell, git-мутаций и удалений).
+  * Интеграция с `Dispatcher`, `TeamworkPipeline`, `PlanExecutor`, `Agent.run_subagent` и модальными окнами подтверждения GUI `request_confirmation`.
+* [tools/registry.py](file:///c:/Akakiy%20agent/tools/registry.py): Центральный реестр `TOOLS` (24 зарегистрированных инструмента) с описаниями, схемами параметров и хелпером `get_tool_risk_level`.
+* [tools/dispatcher.py](file:///c:/Akakiy%20agent/tools/dispatcher.py): Функция `dispatch()` — вызов инструментов по имени с обязательным централизованным перехватом разрешений через `PermissionManager`.
 * [tools/daily_briefing.py](file:///c:/Akakiy%20agent/tools/daily_briefing.py): `daily_briefing` — сводка дня.
 * [tools/files.py](file:///c:/Akakiy%20agent/tools/files.py): `list_files`, `find_file`, `read_file`, `write_file`, `edit_file`, `search_files`.
 * [tools/terminal.py](file:///c:/Akakiy%20agent/tools/terminal.py): Безопасное исполнение команд PowerShell `run_command`.
@@ -386,5 +391,5 @@ AgentResult(success=True, created_files=[...], data={count, width, height, saved
 
 1. **Изоляция пользовательских данных**: Все пользовательские заметки, задачи, списки и факты долговременной памяти хранятся строго в `data/*.json`, которые добавлены в `.gitignore` и никогда не попадают в систему контроля версий.
 2. **Защита от перезаписи и потери данных**: Все операции модификации JSON используют атомарную запись: сериализация во временный файл (`.tmp`) с последующей заменой целевого файла через `os.replace`.
-3. **Подтверждение опасных действий**: Инструменты с потенциально деструктивным эффектом (`delete_*`, `write_file`, `edit_file`, `git_commit`, `git_push`, `run_command`) имеют флаг `requires_confirmation = True` и блокируют выполнение до получения явного согласия пользователя.
+3. **Единый слой разрешений и безопасности (Permissions & Safety Layer)**: Все потенциально опасные инструменты и действия Sub-Agent'ов (`delete_*`, `write_file`, `edit_file`, `git_commit`, `git_push`, `run_command`, модифицирующие действия `FileAgent` и `CodingAgent`) проходят предварительную оценку риска (`RiskLevel: SAFE, LOW, MEDIUM, HIGH, CRITICAL`) через `PermissionManager`. Проверка и запрос подтверждения (`request_confirmation`) происходят строго **ДО** фактического выполнения действия, блокируя исполнение при отказе пользователя или нарушении политики безопасности.
 4. **Защита от prompt injection**: Пользовательские данные памяти передаются в LLM строго в отдельной секции справочной информации (с маркировкой доверия), не модифицируя неизменяемый системный промпт ассистента.

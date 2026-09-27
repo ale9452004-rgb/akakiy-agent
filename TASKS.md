@@ -6,9 +6,9 @@
 
 ## 1. Текущий статус проекта
 
-* **Текущая версия**: Акакий 2.0 (Desktop Hub + Voice UX + Household Assistant + Memory + Core Dev Tools + Notifications + Fast CLI REPL + Global Push-to-Talk + Backup & Restore + UI Filter & Pagination + Recurring Reminders & Tasks + Daily Briefing + Audio Notifications & Settings + Sub-Agent Foundation + ImageAgent v1 + VRAM Manager v1 + Image Request Routing + ImageAgent v2 Generation Parameters + Agent Router Robust Routing + AgentContext v2 Foundation Contract + AgentResult v2 & Artifacts Foundation + PresentationAgent v1 Foundation + DocumentAgent v1 Foundation + ResearchAgent v1 Foundation + CodingAgent v1 Foundation + FileAgent v1 Foundation + Agent Teamwork v1 Pipeline + Task Planner v2 Structured Plans + Task Executor v2 Execution Engine + Self-Healing Error Recovery + Persistent Memory Layer + Voice Pipeline Engine + Desktop Hub GUI 2.0).
-* **Состояние кодовой базы**: Стабильное, все тесты пройдены (611 тестов в `tests/`: 609 unit-тестов успешны, 2 интеграционных пропущены по умолчанию; 0 синтаксических ошибок в Python-файлах проекта).
-* **Последний этап**: Этап №18 — GUI 2.0 (Desktop Hub): эволюция GUI в полноценный автономный рабочий центр, децентрализация экрана чата (пользователь остаётся на текущем экране при отправке команд), структурированная регистрация рабочих результатов (`record_work_result`), обновлённый дашборд `HomeView` с состоянием дня, ближайшими событиями и активностью Акакия со статусами субагентов и артефактами, форматирование артефактов в `ChatView`.
+* **Текущая версия**: Акакий 2.0 (Desktop Hub + Voice UX + Household Assistant + Memory + Core Dev Tools + Notifications + Fast CLI REPL + Global Push-to-Talk + Backup & Restore + UI Filter & Pagination + Recurring Reminders & Tasks + Daily Briefing + Audio Notifications & Settings + Sub-Agent Foundation + ImageAgent v1 + VRAM Manager v1 + Image Request Routing + ImageAgent v2 Generation Parameters + Agent Router Robust Routing + AgentContext v2 Foundation Contract + AgentResult v2 & Artifacts Foundation + PresentationAgent v1 Foundation + DocumentAgent v1 Foundation + ResearchAgent v1 Foundation + CodingAgent v1 Foundation + FileAgent v1 Foundation + Agent Teamwork v1 Pipeline + Task Planner v2 Structured Plans + Task Executor v2 Execution Engine + Self-Healing Error Recovery + Persistent Memory Layer + Voice Pipeline Engine + Desktop Hub GUI 2.0 + Permissions & Safety Layer).
+* **Состояние кодовой базы**: Стабильное, все тесты пройдены (636 тестов в `tests/`: 634 unit-тестов успешны, 2 интеграционных пропущены по умолчанию; 0 синтаксических ошибок в Python-файлах проекта).
+* **Последний этап**: Этап №19 — Permissions & Safety: единый централизованный слой разрешений и безопасности (`PermissionManager`, `RiskLevel`, `SecurityPolicy`, `PermissionAssessment`), контекстный анализ опасности (перезапись файлов, опасные команды PowerShell, git-мутации), интеграция проверок ДО фактического выполнения действия с `Dispatcher`, `TeamworkPipeline`, `PlanExecutor`, `Agent.run_subagent` и модальными окнами GUI `request_confirmation` без дублирования логики в инструментах.
 * **Ветка**: `master`, синхронизирована с `origin/master`.
 
 ---
@@ -391,6 +391,27 @@
   * 100% сохранение существующих фасадов, словарных контрактов и обратной совместимости API.
   * Создан модульный тестовый набор `tests/test_desktop_hub_gui.py` (6 тестов, 100% pass).
   * Всего 611 тестов в `tests/` (609 unit pass + 2 integration skip by default).
+* [x] **Permissions & Safety: единый слой разрешений и безопасности для действий Акакия (Этап 19)**:
+  * Разработан модуль `tools/permissions.py`:
+    * Шкала уровней риска `RiskLevel` (`SAFE`, `LOW`, `MEDIUM`, `HIGH`, `CRITICAL`) и политики безопасности `SecurityPolicy` (`NORMAL`, `STRICT`, `PERMISSIVE`, `READ_ONLY`).
+    * Структурированная модель оценки `PermissionAssessment` (`action_type`, `name`, `risk_level`, `requires_confirmation`, `allowed`, `reason`, `details`, `is_destructive`).
+    * Централизованный сервис `PermissionManager` с методами `assess_tool`, `assess_subagent`, `check_and_confirm`, `request_confirmation`.
+  * Реализован контекстный анализ опасности:
+    * Файлы: проверка существования файла до записи (`write_file` / `FileAgent.create` / `FileAgent.move`), повышение уровня риска до `HIGH` при риске перезаписи и предупреждение в `details`.
+    * Системные файлы: блокировка доступа/модификации `.env`, `.git/`, SSH-ключей (`allowed = False`, `RiskLevel.CRITICAL`).
+    * PowerShell: безопасные проверочные команды (`git status`, `python -m py_compile ...`) получают `RiskLevel.SAFE`; деструктивные команды (`Remove-Item -Recurse`, `rm -rf`, `git reset --hard`) получают `RiskLevel.CRITICAL`.
+    * Субагенты: разграничение безопасных действий (инспекция `FileAgent`, анализ `CodingAgent`, `EchoAgent`, `ResearchAgent`) и модифицирующих (создание, перезапись, перемещение файлов, применение правок кода). Удаление файлов через `FileAgent` строго заблокировано.
+  * Централизация проверок строго ДО фактического выполнения действия:
+    * Инструментальный слой: `tools/dispatcher.py` (`dispatch`) вызывает `PermissionManager.assess_tool()`.
+    * Конвейер субагентов: `tools/teamwork.py` (`TeamworkPipeline.run()`) проверяет `perm_mgr.assess_subagent()` строго ДО вызова `agent.run(step_context)`. При отказе пользователя выполнение прерывается без изменений на диске.
+    * Оркестратор агента: `tools/agent.py` (`Agent.run_subagent()`) осуществляет предварительную валидацию.
+    * Планировщик и исполнитель: `tools/plan_executor.py` корректно обрабатывает прерывание и отмену пользователем шагов субагентов и инструментов.
+    * Защита от дублирования: в низкоуровневых инструментах и субагентах дублирующая permission-логика исключена.
+  * Сохранение обратной совместимости:
+    * Сигнатуры `set_confirmation_handler()`, `get_confirmation_handler()`, `get_confirmation_details_text()` в `tools/dispatcher.py` сохранены.
+    * Модальное окно подтверждения в `AkakiyGUI` (`request_confirmation`) через очередь `queue.Queue` и `messagebox.askyesno` функционирует бесшовно.
+  * Создан модульный тестовый набор `tests/test_permissions_and_safety.py` (25 тестов, 100% pass).
+  * Всего 636 тестов в `tests/` (634 unit pass + 2 integration skip by default).
 * [ ] **Интеграционные E2E тесты с виртуальным микрофоном**:
   * Реализовать тестовый сценарий, прогоняющий синтезированные аудиофайлы (WAV) через живой конвейер `VoiceService` с проверкой реакции GUI.
 * [ ] **Очистка устаревших бэкап-файлов `*.bak` в корне**:

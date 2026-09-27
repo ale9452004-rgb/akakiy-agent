@@ -5,6 +5,9 @@ _confirmation_handler = None
 _action_observer = None
 
 
+from tools.permissions import get_permission_manager, PermissionAssessment, RiskLevel
+
+
 def set_confirmation_handler(handler):
     """
     Устанавливает обработчик запроса подтверждения (например, для GUI).
@@ -13,6 +16,10 @@ def set_confirmation_handler(handler):
     """
     global _confirmation_handler
     _confirmation_handler = handler
+    try:
+        get_permission_manager().set_confirmation_handler(handler)
+    except Exception:
+        pass
 
 
 def set_action_observer(observer):
@@ -35,7 +42,15 @@ def get_action_observer():
 def get_confirmation_details_text(tool_name, kwargs):
     """
     Формирует текстовое описание параметров инструмента для запроса подтверждения.
+    Делегирует в PermissionManager для централизованной оценки риска и деталей.
     """
+    try:
+        assessment = get_permission_manager().assess_tool(tool_name, kwargs or {})
+        if assessment and assessment.details:
+            return assessment.details
+    except Exception:
+        pass
+
     lines = []
     if tool_name == "run_command":
         command = kwargs.get("command", "")
@@ -115,7 +130,7 @@ def format_confirmation_details(tool_name, kwargs):
 
 def dispatch(tool_name, **kwargs):
     """
-    Находит инструмент по имени и запускает его.
+    Централизованно проверяет безопасность действия через PermissionManager и запускает инструмент.
     """
     if _action_observer:
         try:
@@ -133,11 +148,30 @@ def dispatch(tool_name, **kwargs):
 
     function = tool["function"]
 
-    if tool.get("requires_confirmation"):
-        if _confirmation_handler is not None:
+    # Централизованная оценка безопасности и разрешений
+    perm_mgr = get_permission_manager()
+    assessment = perm_mgr.assess_tool(tool_name, kwargs)
+
+    # 1. Если действие заблокировано политикой безопасности
+    if not assessment.allowed:
+        if _action_observer:
+            try:
+                _action_observer("action_blocked", {"tool": tool_name, "reason": assessment.reason})
+            except Exception:
+                pass
+        return {
+            "success": False,
+            "error": f"Заблокировано политикой безопасности: {assessment.reason}"
+        }
+
+    # 2. Если инструмент требует подтверждения пользователя
+    needs_confirm = bool(tool.get("requires_confirmation") or assessment.requires_confirmation)
+    if needs_confirm:
+        handler = _confirmation_handler or perm_mgr.get_confirmation_handler()
+        if handler is not None:
             # Вызываем кастомный обработчик подтверждения (GUI)
-            approved = _confirmation_handler(tool_name, kwargs)
-            if not approved or (isinstance(approved, str) and approved.strip().lower() not in ["да", "д", "yes", "y"]):
+            approved = handler(tool_name, kwargs)
+            if not approved or (isinstance(approved, str) and approved.strip().lower() not in ["да", "д", "yes", "y", "true", "1"]):
                 if _action_observer:
                     try:
                         _action_observer("confirmation_rejected", {"tool": tool_name})
@@ -148,13 +182,14 @@ def dispatch(tool_name, **kwargs):
                     "error": "Пользователь отменил выполнение."
                 }
         else:
-            print("\n--- Требуется подтверждение ---")
-            print(f"Инструмент: {tool_name}")
-            format_confirmation_details(tool_name, kwargs)
-
-            confirmation = input("\nРазрешить выполнение? (да/нет): ").strip().lower()
-
-            if confirmation not in ["да", "д", "yes", "y"]:
+            # Консольный интерактивный запрос через PermissionManager
+            approved = perm_mgr.request_confirmation(assessment)
+            if not approved:
+                if _action_observer:
+                    try:
+                        _action_observer("confirmation_rejected", {"tool": tool_name})
+                    except Exception:
+                        pass
                 return {
                     "success": False,
                     "error": "Пользователь отменил выполнение."

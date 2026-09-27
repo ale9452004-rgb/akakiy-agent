@@ -256,6 +256,15 @@ def get_tool(name):
     return TOOLS.get(name)
 
 
+def get_tool_risk_level(name):
+    """
+    Возвращает строковый уровень риска инструмента через PermissionManager.
+    """
+    from tools.permissions import get_permission_manager
+    assessment = get_permission_manager().assess_tool(name, {})
+    return assessment.risk_level.value
+
+
 def get_tools_description():
     descriptions = []
 

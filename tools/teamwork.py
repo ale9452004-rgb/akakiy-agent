@@ -626,6 +626,55 @@ class TeamworkPipeline:
                         }
                     )
 
+            # 2.5. Централизованная проверка разрешений и безопасности (Permissions & Safety)
+            from tools.permissions import get_permission_manager
+            perm_mgr = get_permission_manager()
+            assessment = perm_mgr.assess_subagent(
+                agent_name=step.agent_name,
+                context=step_context,
+                step=step
+            )
+
+            if not assessment.allowed:
+                err_msg = f"Заблокировано политикой безопасности: {assessment.reason}"
+                return AgentResult.fail(
+                    error=err_msg,
+                    message=f"Pipeline прерван: {err_msg}",
+                    created_files=accumulated_files,
+                    artifacts=accumulated_artifacts,
+                    data={
+                        "total_steps": len(self.steps),
+                        "completed_steps": idx - 1,
+                        "failed_step": idx,
+                        "failed_agent": step.agent_name,
+                        "blocked": True,
+                        "history": step_history
+                    }
+                )
+
+            if assessment.requires_confirmation:
+                approved = perm_mgr.request_confirmation(assessment)
+                if not approved:
+                    err_msg = "Пользователь отменил выполнение."
+                    cancel_msg = f"План остановлен. Действие sub-agent '{step.agent_name}' (шаг {idx}) отменено пользователем."
+                    return AgentResult.fail(
+                        error=err_msg,
+                        message=cancel_msg,
+                        created_files=accumulated_files,
+                        artifacts=accumulated_artifacts,
+                        data={
+                            "total_steps": len(self.steps),
+                            "completed_steps": idx - 1,
+                            "failed_step": idx,
+                            "failed_agent": step.agent_name,
+                            "cancelled": True,
+                            "history": step_history
+                        }
+                    )
+
+            # Помечаем контекст как подтверждённый, чтобы избежать повторных запросов
+            step_context.metadata["_permission_approved"] = True
+
             # 3. Исполнение шага субагентом
             try:
                 res = agent.run(step_context)

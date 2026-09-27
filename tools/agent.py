@@ -309,7 +309,29 @@ class Agent:
             if not getattr(context, "parent_agent", None):
                 context.parent_agent = self
 
+        # Централизованная проверка разрешений и безопасности
+        from tools.permissions import get_permission_manager
+        perm_mgr = get_permission_manager()
+        assessment = perm_mgr.assess_subagent(name.strip(), context=context)
+
+        if not assessment.allowed:
+            return AgentResult.fail(
+                error=f"Заблокировано политикой безопасности: {assessment.reason}",
+                message=f"Действие sub-agent '{name}' заблокировано: {assessment.reason}"
+            )
+
+        if assessment.requires_confirmation and not context.metadata.get("_permission_approved"):
+            approved = perm_mgr.request_confirmation(assessment)
+            if not approved:
+                return AgentResult.fail(
+                    error="Пользователь отменил выполнение.",
+                    message=f"Действие sub-agent '{name}' отменено пользователем."
+                )
+
+        context.metadata["_permission_approved"] = True
         return agent.run(context)
+
+    execute_subagent = run_subagent
 
     def run_single_correction(self, errors):
         """
