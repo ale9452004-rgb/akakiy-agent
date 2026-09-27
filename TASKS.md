@@ -6,9 +6,9 @@
 
 ## 1. Текущий статус проекта
 
-* **Текущая версия**: Акакий 2.0 (Desktop Hub + Voice UX + Household Assistant + Memory + Core Dev Tools + Notifications + Fast CLI REPL + Global Push-to-Talk + Backup & Restore + UI Filter & Pagination + Recurring Reminders & Tasks + Daily Briefing + Audio Notifications & Settings + Sub-Agent Foundation + ImageAgent v1 + VRAM Manager v1 + Image Request Routing + ImageAgent v2 Generation Parameters + Agent Router Robust Routing + AgentContext v2 Foundation Contract + AgentResult v2 & Artifacts Foundation + PresentationAgent v1 Foundation + DocumentAgent v1 Foundation + ResearchAgent v1 Foundation + CodingAgent v1 Foundation + FileAgent v1 Foundation + Agent Teamwork v1 Pipeline + Task Planner v2 Structured Plans + Task Executor v2 Execution Engine + Self-Healing Error Recovery + Persistent Memory Layer + Voice Pipeline Engine).
-* **Состояние кодовой базы**: Стабильное, все тесты пройдены (605 тестов в `tests/`: 603 unit-теста успешны, 2 интеграционных пропущены по умолчанию; 0 синтаксических ошибок в Python-файлах проекта).
-* **Последний этап**: Этап №17 — Voice Pipeline: полноценный голосовой конвейер STT → Agent → TTS (`voice/pipeline.py`), класс `VoicePipeline`, стандартизированная модель `VoicePipelineResult`, универсальный экстрактор озвучиваемого текста `extract_speech_text`, интеграция в `VoiceService`, обработка фраз выхода, ошибок и отмены, 100% обратная совместимость с GUI и CLI.
+* **Текущая версия**: Акакий 2.0 (Desktop Hub + Voice UX + Household Assistant + Memory + Core Dev Tools + Notifications + Fast CLI REPL + Global Push-to-Talk + Backup & Restore + UI Filter & Pagination + Recurring Reminders & Tasks + Daily Briefing + Audio Notifications & Settings + Sub-Agent Foundation + ImageAgent v1 + VRAM Manager v1 + Image Request Routing + ImageAgent v2 Generation Parameters + Agent Router Robust Routing + AgentContext v2 Foundation Contract + AgentResult v2 & Artifacts Foundation + PresentationAgent v1 Foundation + DocumentAgent v1 Foundation + ResearchAgent v1 Foundation + CodingAgent v1 Foundation + FileAgent v1 Foundation + Agent Teamwork v1 Pipeline + Task Planner v2 Structured Plans + Task Executor v2 Execution Engine + Self-Healing Error Recovery + Persistent Memory Layer + Voice Pipeline Engine + Desktop Hub GUI 2.0).
+* **Состояние кодовой базы**: Стабильное, все тесты пройдены (611 тестов в `tests/`: 609 unit-тестов успешны, 2 интеграционных пропущены по умолчанию; 0 синтаксических ошибок в Python-файлах проекта).
+* **Последний этап**: Этап №18 — GUI 2.0 (Desktop Hub): эволюция GUI в полноценный автономный рабочий центр, децентрализация экрана чата (пользователь остаётся на текущем экране при отправке команд), структурированная регистрация рабочих результатов (`record_work_result`), обновлённый дашборд `HomeView` с состоянием дня, ближайшими событиями и активностью Акакия со статусами субагентов и артефактами, форматирование артефактов в `ChatView`.
 * **Ветка**: `master`, синхронизирована с `origin/master`.
 
 ---
@@ -380,6 +380,17 @@
   * Сохранение 100% обратной совместимости с GUI, CLI, глобальным хоткеем `Ctrl+Shift+Space` и Push-to-Talk API.
   * Создан модульный тестовый набор `tests/test_voice_pipeline.py` (24 теста, 100% pass).
   * Всего 605 тестов в `tests/` (603 unit pass + 2 integration skip by default).
+* [x] **Desktop Hub: GUI 2.0, децентрализация чата, состояние дня и визуализация рабочих результатов (Этап 18)**:
+  * В `gui.py` реализована децентрализация командной панели: устранён принудительный переход в Чат при отправке команд, пользователь остаётся в текущем контексте (Главная, Задачи, Напоминания, Заметки, Списки, Память, Настройки), а активный экран реактивно обновляется через `refresh_current_view()`.
+  * Реализован централизованный менеджер регистрации рабочих результатов `record_work_result(payload, query)`: извлечение типа, статуса, сообщения, артефактов и созданных файлов (`created_files`, `artifacts`) для всех 8 специализированных субагентов, планов, инструментов и голоса с сохранением истории в `self.recent_work_results`.
+  * Эволюция главного дашборда `HomeView` (`ui/views/home.py`):
+    * Блок «Состояние дня»: сводка счётчиков активных задач, ближайших событий, списков и заметок с кнопкой «⚡ Сводка дня» и 3D Neural Core.
+    * Карточки задач (с быстрым чекбоксом `quick_complete_task`), ближайших событий и напоминаний (с детекцией и подсветкой наступивших событий `[Наступило!]`), списков дел.
+    * Нижний блок: левая секция «⚡ Активность и рабочие результаты Акакия» (лента недавних действий со статусами, типами субагентов и бейджами файлов артефактов `📁 filename.ext`) и правая секция «📝 Последние заметки».
+  * Форматирование артефактов в `ChatView` (`ui/views/chat.py`): теги `artifact`, визуальное выделение блоков сгенерированных файлов субагентов.
+  * 100% сохранение существующих фасадов, словарных контрактов и обратной совместимости API.
+  * Создан модульный тестовый набор `tests/test_desktop_hub_gui.py` (6 тестов, 100% pass).
+  * Всего 611 тестов в `tests/` (609 unit pass + 2 integration skip by default).
 * [ ] **Интеграционные E2E тесты с виртуальным микрофоном**:
   * Реализовать тестовый сценарий, прогоняющий синтезированные аудиофайлы (WAV) через живой конвейер `VoiceService` с проверкой реакции GUI.
 * [ ] **Очистка устаревших бэкап-файлов `*.bak` в корне**:

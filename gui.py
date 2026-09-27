@@ -23,6 +23,7 @@ import threading
 import time
 import tkinter as tk
 from tkinter import messagebox, ttk
+from typing import Any, Dict, List, Optional, Tuple
 
 # Добавляем корень проекта в sys.path
 PROJECT_ROOT = Path(r"c:\Akakiy agent")
@@ -143,6 +144,8 @@ class AkakiyGUI:
         self.mem_list_frame = None
         self.chat_messages: List[Tuple[str, str, str]] = []  # [(author, message, time_str)]
         self.log_messages: List[Tuple[str, str, str]] = []   # [(prefix, text, time_str)]
+        self.recent_work_results: list = []  # Структурированные результаты Agent/Sub-Agent/Planner/Tools
+        self._last_submitted_query: str = ""
         self._is_closing = False
 
         # Голосовой сервис
@@ -863,6 +866,122 @@ class AkakiyGUI:
     # Выполнение команд (Command Bar & Worker)
     # =========================================================================
 
+    def record_work_result(self, payload: Any, query: str = "") -> dict:
+        """
+        Регистрирует структурированный рабочий результат выполнения Agent/Sub-Agent/Planner/Tools
+        для отображения на Главном экране (Desktop Hub) и в истории сеанса.
+        """
+        t_str = time.strftime("%H:%M:%S")
+        r_type = "chat"
+        title = "Выполнение команды"
+        message = ""
+        success = True
+        artifacts = []
+        created_files = []
+        error = None
+
+        if isinstance(payload, dict) or hasattr(payload, "get"):
+            r_type = payload.get("type", "chat")
+            tool_name = payload.get("tool", "")
+            if tool_name and r_type == "tool":
+                r_type = tool_name
+
+            # Проверка ошибок на верхнем и вложенных уровнях
+            if payload.get("success") is False or payload.get("error"):
+                success = False
+                error = payload.get("error") or "Ошибка выполнения"
+
+            res_obj = payload.get("result")
+            if isinstance(res_obj, dict) or hasattr(res_obj, "get"):
+                if res_obj.get("success") is False or "error" in res_obj:
+                    success = False
+                    error = res_obj.get("error") or res_obj.get("message")
+                inner_res = res_obj.get("result")
+                if isinstance(inner_res, dict) or hasattr(inner_res, "get"):
+                    if inner_res.get("success") is False or "error" in inner_res:
+                        success = False
+                        error = inner_res.get("error") or inner_res.get("message")
+            elif hasattr(res_obj, "success") and not res_obj.success:
+                success = False
+                error = getattr(res_obj, "error", None) or getattr(res_obj, "message", None)
+
+            # Извлечение основного сообщения
+            ans = payload.get("answer")
+            if not ans and (isinstance(res_obj, dict) or hasattr(res_obj, "get")):
+                ans = res_obj.get("message") or res_obj.get("summary") or res_obj.get("error")
+            elif not ans and hasattr(res_obj, "message"):
+                ans = getattr(res_obj, "message", None)
+            message = str(ans or "")
+
+            # Извлечение созданных файлов
+            c_files = payload.get("created_files") or []
+            if isinstance(c_files, list):
+                for f in c_files:
+                    f_str = str(f)
+                    if f_str not in created_files:
+                        created_files.append(f_str)
+
+            # Извлечение артефактов
+            arts = payload.get("artifacts") or []
+            if isinstance(arts, list):
+                for a in arts:
+                    if isinstance(a, dict):
+                        artifacts.append(a)
+                    elif hasattr(a, "to_dict"):
+                        artifacts.append(a.to_dict())
+                    elif isinstance(a, str):
+                        artifacts.append({"name": Path(a).name, "path": a})
+
+            if res_obj and hasattr(res_obj, "artifacts"):
+                for a in res_obj.artifacts:
+                    a_dict = a.to_dict() if hasattr(a, "to_dict") else {"name": getattr(a, "name", str(a))}
+                    if a_dict not in artifacts:
+                        artifacts.append(a_dict)
+            if res_obj and hasattr(res_obj, "created_files"):
+                for f in res_obj.created_files:
+                    f_str = str(f)
+                    if f_str not in created_files:
+                        created_files.append(f_str)
+
+            # Человекочитаемые заголовки типов
+            titles_map = {
+                "image": "Генерация изображения",
+                "presentation": "Создание презентации",
+                "document": "Создание документа",
+                "research": "Аналитическое исследование",
+                "coding": "Задача по коду",
+                "file": "Файловая операция",
+                "plan": "Планирование задач",
+                "plan_execution": "Исполнение плана",
+                "chat": "Диалог с ассистентом",
+            }
+            title = titles_map.get(r_type, f"Действие: {r_type}")
+        elif isinstance(payload, str):
+            message = payload
+        else:
+            message = str(payload)
+
+        if not message:
+            message = "Действие успешно завершено." if success else (error or "Ошибка обработки запроса.")
+
+        entry = {
+            "type": r_type,
+            "title": title,
+            "message": message,
+            "query": query,
+            "success": success,
+            "error": error,
+            "created_files": created_files,
+            "artifacts": artifacts,
+            "time": t_str,
+        }
+
+        self.recent_work_results.append(entry)
+        if len(self.recent_work_results) > 25:
+            self.recent_work_results.pop(0)
+
+        return entry
+
     def _on_send_command(self):
         text = self.cmd_input.get().strip()
         if not text or text == self.cmd_placeholder:
@@ -871,10 +990,11 @@ class AkakiyGUI:
         self.cmd_input.delete(0, tk.END)
         self._append_chat("Вы", text)
         self._append_log("USER", text)
+        self._last_submitted_query = text
 
-        # Переключаемся на Чат, если мы не на нём
-        if self.current_section != "chat":
-            self._switch_section("chat")
+        # Чат остаётся отдельным рабочим экраном, а не центром всего приложения.
+        # Пользователь остаётся на текущем активном экране (Главная, Задачи и т.д.),
+        # а результаты и изменения отображаются реактивно через refresh_current_view.
 
         self.is_busy = True
         self.btn_send.config(state="disabled")
@@ -1069,22 +1189,9 @@ class AkakiyGUI:
                     self.is_busy = False
                     self.btn_send.config(state="normal")
 
-                    # Проверяем, завершилась ли операция ошибкой
-                    has_err = False
-                    err_msg = ""
-                    if isinstance(data, dict):
-                        if data.get("type") == "error" or data.get("error"):
-                            has_err = True
-                            err_msg = data.get("error")
-                        res_obj = data.get("result")
-                        if isinstance(res_obj, dict):
-                            if res_obj.get("success") is False or "error" in res_obj:
-                                has_err = True
-                                err_msg = res_obj.get("error") or res_obj.get("message")
-                            inner_res = res_obj.get("result")
-                            if isinstance(inner_res, dict) and (inner_res.get("success") is False or "error" in inner_res):
-                                has_err = True
-                                err_msg = inner_res.get("error") or inner_res.get("message")
+                    work_entry = self.record_work_result(data, query=getattr(self, "_last_submitted_query", ""))
+                    has_err = not work_entry.get("success", True)
+                    err_msg = work_entry.get("error") or ""
 
                     if has_err:
                         self._set_state("error")
@@ -1093,19 +1200,26 @@ class AkakiyGUI:
                         self._append_log("ERR", err_text)
                     else:
                         self._set_state("idle")
-                        ans = data.get("answer") if isinstance(data, dict) else str(data)
-                        if not ans and isinstance(data, dict):
-                            ans = data.get("result", {}).get("message") or str(data.get("result"))
-                        self._append_chat("Акакий", ans or "Действие выполнено.")
-                        self._append_log("DONE", "Запрос успешно обработан.")
+                        ans = work_entry.get("message") or "Действие выполнено."
+                        chat_ans = ans
+                        c_files = work_entry.get("created_files") or []
+                        if c_files:
+                            c_names = [Path(f).name for f in c_files]
+                            if not any(f in chat_ans for f in c_files):
+                                chat_ans += f"\n\n✦ Созданные артефакты:\n" + "\n".join(f"  • {f}" for f in c_files)
+                            self._append_log("DONE", f"Артефакты ({len(c_names)}): {', '.join(c_names)}")
+                        self._append_chat("Акакий", chat_ans)
+                        self._append_log("DONE", f"Запрос успешно обработан [{work_entry.get('type')}].")
                     self.refresh_current_view()
 
                 elif msg_type == "process_error":
                     self.is_busy = False
                     self.btn_send.config(state="normal")
                     self._set_state("error")
+                    self.record_work_result({"type": "error", "error": str(data), "success": False}, query=getattr(self, "_last_submitted_query", ""))
                     self._append_chat("Акакий", f"Ошибка: {data}")
-                    self._append_log("ERR", data)
+                    self._append_log("ERR", str(data))
+                    self.refresh_current_view()
 
                 elif msg_type == "action_observed":
                     ev_type, payload = data
@@ -1139,21 +1253,10 @@ class AkakiyGUI:
                             self._append_log("VOICE", f"Распознано: {txt}")
                     elif ev_type == "voice_agent_result":
                         res_payload = payload.get("payload", {})
-                        has_err = False
-                        err_msg = ""
-                        if isinstance(res_payload, dict):
-                            if res_payload.get("type") == "error" or res_payload.get("error"):
-                                has_err = True
-                                err_msg = res_payload.get("error")
-                            res_inner = res_payload.get("result")
-                            if isinstance(res_inner, dict):
-                                if res_inner.get("success") is False or "error" in res_inner:
-                                    has_err = True
-                                    err_msg = res_inner.get("error") or res_inner.get("message")
-                                sub_inner = res_inner.get("result")
-                                if isinstance(sub_inner, dict) and (sub_inner.get("success") is False or "error" in sub_inner):
-                                    has_err = True
-                                    err_msg = sub_inner.get("error") or sub_inner.get("message")
+                        v_query = payload.get("query", "")
+                        work_entry = self.record_work_result(res_payload, query=v_query)
+                        has_err = not work_entry.get("success", True)
+                        err_msg = work_entry.get("error") or ""
 
                         if has_err:
                             self._set_state("error")
@@ -1161,16 +1264,17 @@ class AkakiyGUI:
                             self._append_chat("Акакий (Голос)", ans)
                             self._append_log("ERR", ans)
                         else:
-                            ans = ""
-                            if isinstance(res_payload, dict):
-                                ans = res_payload.get("answer") or ""
-                                if not ans:
-                                    ans = res_payload.get("result", {}).get("message") or str(res_payload.get("result", ""))
-                            elif isinstance(res_payload, str):
-                                ans = res_payload
-                            if ans:
-                                self._append_chat("Акакий (Голос)", ans)
-                                self._append_log("DONE", "Голосовой ответ сформирован.")
+                            ans = work_entry.get("message") or ""
+                            chat_ans = ans
+                            c_files = work_entry.get("created_files") or []
+                            if c_files:
+                                if not any(f in chat_ans for f in c_files):
+                                    chat_ans += f"\n\n✦ Созданные артефакты:\n" + "\n".join(f"  • {f}" for f in c_files)
+                                c_names = [Path(f).name for f in c_files]
+                                self._append_log("DONE", f"Артефакты ({len(c_names)}): {', '.join(c_names)}")
+                            if chat_ans:
+                                self._append_chat("Акакий (Голос)", chat_ans)
+                                self._append_log("DONE", f"Голосовой ответ сформирован [{work_entry.get('type')}].")
                         self.refresh_current_view()
                     elif ev_type == "voice_mode_toggle":
                         enabled = payload.get("enabled", False) if isinstance(payload, dict) else bool(payload)

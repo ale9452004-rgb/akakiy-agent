@@ -90,6 +90,7 @@ class ChatView(BaseView):
         self.chat_text.tag_config("time", foreground=self.FG_DIM, font=("Segoe UI", 8))
         self.chat_text.tag_config("user_body", foreground=self.FG_WHITE)
         self.chat_text.tag_config("akakiy_body", foreground=self.FG_MAIN)
+        self.chat_text.tag_config("artifact", foreground=self.ACCENT_CYAN, font=("Consolas", 9))
         self.chat_text.tag_config("div", foreground=self.BORDER_COL)
 
         # Правая колонка: Лог инструментов и процессов
@@ -149,7 +150,12 @@ class ChatView(BaseView):
         else:
             self.chat_text.insert(tk.END, f"● {author_upper}  ", "akakiy_title")
             self.chat_text.insert(tk.END, f"[{t_str}]\n", "time")
-            self.chat_text.insert(tk.END, f"{message}\n", "akakiy_body")
+            if "\n\n✦" in message:
+                parts = message.split("\n\n✦", 1)
+                self.chat_text.insert(tk.END, f"{parts[0]}\n", "akakiy_body")
+                self.chat_text.insert(tk.END, f"\n✦{parts[1]}\n", "artifact")
+            else:
+                self.chat_text.insert(tk.END, f"{message}\n", "akakiy_body")
         self.chat_text.insert(tk.END, "─" * 48 + "\n", "div")
         self.chat_text.see(tk.END)
 
