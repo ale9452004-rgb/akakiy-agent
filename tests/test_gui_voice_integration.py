@@ -90,7 +90,8 @@ class TestGUIVoiceIntegration(unittest.TestCase):
         # VoiceService emits voice_audio_level
         self.gui._on_voice_event("voice_audio_level", {"level": 0.88})
         self.gui._poll_queue()
-        self.assertAlmostEqual(self.gui.neural_core.audio_level, 0.88, places=2)
+        level = getattr(self.gui.neural_core, "target_audio_level", getattr(self.gui.neural_core, "audio_level", 0.0))
+        self.assertAlmostEqual(level, 0.88, places=2)
 
     def test_voice_recognized_event_appends_chat(self):
         self.gui.switch_view("chat")

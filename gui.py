@@ -48,6 +48,7 @@ from ui.cloud import AkakiyCloud
 from ui.typography import typography, configure_tkinter_fonts
 from voice import VoiceService, GlobalHotKeyManager
 from notifications import NotificationService, ReminderMonitor
+from infrastructure.ollama_manager import get_ollama_manager, OllamaManager
 
 
 from ui.views import (
@@ -102,8 +103,9 @@ class AkakiyGUI:
     UI_FAMILY = typography.ui_family
     MONO_FAMILY = typography.mono_family
 
-    def __init__(self, root: tk.Tk, agent: Agent = None, household = None, memory = None, voice = None):
+    def __init__(self, root: tk.Tk, agent: Agent = None, household = None, memory = None, voice = None, ollama_mgr: Optional[OllamaManager] = None):
         self.root = root
+        self.ollama_mgr = ollama_mgr
         configure_tkinter_fonts(self.root, typography)
         self.root.title("АКAKИЙ 2.0 // NEURAL HUB")
 
@@ -256,6 +258,11 @@ class AkakiyGUI:
         try:
             if hasattr(self, "voice") and self.voice and getattr(self.voice, "is_running", False):
                 self.voice.stop()
+        except Exception:
+            pass
+        try:
+            if hasattr(self, "ollama_mgr") and self.ollama_mgr:
+                self.ollama_mgr.cleanup()
         except Exception:
             pass
         try:
@@ -1373,9 +1380,19 @@ class AkakiyGUI:
 
 def main():
     """Точка входа для отдельного запуска GUI."""
+    ollama_mgr = get_ollama_manager()
+    success, status_msg = ollama_mgr.start_or_connect()
+    if not success:
+        logger.warning(f"Ollama startup: {status_msg}")
+    else:
+        logger.info(f"Ollama startup: {status_msg}")
+
     root = tk.Tk()
-    app = AkakiyGUI(root)
-    root.mainloop()
+    app = AkakiyGUI(root, ollama_mgr=ollama_mgr)
+    try:
+        root.mainloop()
+    finally:
+        ollama_mgr.cleanup()
 
 
 if __name__ == "__main__":

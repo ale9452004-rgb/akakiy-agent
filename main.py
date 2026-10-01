@@ -11,6 +11,7 @@ from cli_formatters import (
     print_plan,
     print_tool_result
 )
+from infrastructure.ollama_manager import get_ollama_manager
 
 
 def main():
@@ -45,6 +46,20 @@ def main():
         gui_main()
         return
 
+    ollama_mgr = get_ollama_manager()
+    success, msg = ollama_mgr.start_or_connect()
+    if not success:
+        print(f"\n[Ollama] Предупреждение: {msg}\n")
+    else:
+        print(f"\n[Ollama] {msg}\n")
+
+    try:
+        _run_cli()
+    finally:
+        ollama_mgr.cleanup()
+
+
+def _run_cli():
     agent = Agent()
 
     print("Акакий запущен.")

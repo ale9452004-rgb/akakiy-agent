@@ -247,6 +247,15 @@
   * Каталог `workers/` и результаты генерации `data/generated/` исключены из Git (`.gitignore`).
   * Использует чекпоинт `sdxl_lightning_4step.safetensors` для быстрого синтеза изображений (1024x1024, 4 шага, ~9.1-13.7 с на RTX 4070 Laptop GPU 8 GB VRAM).
 
+### 3.8. Инфраструктурный слой и жизненный цикл LLM (Infrastructure Layer)
+* [infrastructure/ollama_manager.py](file:///c:/Akakiy%20agent/infrastructure/ollama_manager.py): Менеджер жизненного цикла локальной среды LLM (`OllamaManager`, `get_ollama_manager`):
+  * Проверка доступности API локального сервера Ollama (`http://localhost:11434/api/tags`).
+  * Автоматический запуск процесса `ollama serve` в фоновом режиме на Windows (`CREATE_NO_WINDOW`), если сервер не запущен.
+  * Проверка наличия целевой модели `qwen3:8b` без автоскачивания (с выводом чёткой инструкции пользователю при отсутствии).
+  * Строгое отслеживание владельца (`started_by_akakiy`): чужой, ранее запущенный процесс Ollama никогда не останавливается.
+  * Корректная остановка только собственного процесса (`terminate` -> `wait` -> `kill`) при выходе из GUI или CLI (`finally: cleanup()`).
+  * Регистрация аварийной очистки в `atexit` и полная изоляция внутренних исключений.
+
 ---
 
 ## 4. Потоки данных (Data Flows)
