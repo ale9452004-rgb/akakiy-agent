@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Akakiy Visual Core 2.0 — Calibration Stage</title>
+    <link rel="stylesheet" href="core.css">
+</head>
+<body>
+    <div id="viewport-container">
+        <!-- Аппаратный холст WebGL2 -->
+        <canvas id="gl-canvas"></canvas>
+
+        <!-- Интерактивная панель калибровки и визуальной оценки -->
+        <div id="calibration-hud">
+            <div class="hud-header">
+                <div class="hud-title">
+                    <span>✦</span>
+                    <span>AKAKIY VISUAL CORE 2.0</span>
+                </div>
+                <div class="hud-fps" id="hud-fps">60 FPS</div>
+            </div>
+
+            <!-- Кнопки состояний ядра -->
+            <div class="state-buttons">
+                <button class="btn-state active" data-state="idle">IDLE</button>
+                <button class="btn-state" data-state="listening">LISTENING</button>
+                <button class="btn-state" data-state="thinking">THINKING</button>
+                <button class="btn-state" data-state="working">WORKING</button>
+                <button class="btn-state" data-state="speaking">SPEAKING</button>
+                <button class="btn-state" data-state="success">SUCCESS</button>
+                <button class="btn-state" data-state="error">ERROR</button>
+            </div>
+
+            <!-- Ползунок громкости аудио -->
+            <div class="audio-control">
+                <span class="audio-label">AUDIO LEVEL:</span>
+                <input type="range" id="audio-slider" class="audio-slider" min="0" max="1" step="0.01" value="0.0">
+                <span class="audio-value" id="audio-val">0.00</span>
+            </div>
+
+            <div class="hud-hint">
+                Нажмите [ H ] чтобы скрыть панель калибровки для чистого просмотра
+            </div>
+        </div>
+    </div>
+
+    <script src="core.js"></script>
+</body>
+</html>

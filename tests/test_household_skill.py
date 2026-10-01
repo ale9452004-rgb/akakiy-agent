@@ -235,6 +235,24 @@ class TestHouseholdManagerLists(unittest.TestCase):
         self.assertEqual(len(show_res["items"]), 1)
         self.assertEqual(show_res["items"][0]["text"], "Сдать отчёт")
 
+    def test_toggle_list_item(self):
+        """Проверяет переключение статуса выполнения пункта списка (не выбран -> выбран -> не выбран)."""
+        self.hm.add_list_item("дела", "Купить кофе")
+        # 1. Первый вызов -> выбран (completed = True)
+        res1 = self.hm.toggle_list_item("дела", 1)
+        self.assertTrue(res1["success"])
+        self.assertTrue(res1["item"]["completed"])
+
+        # 2. Повторный вызов -> снят выбор (completed = False)
+        res2 = self.hm.toggle_list_item("дела", 1)
+        self.assertTrue(res2["success"])
+        self.assertFalse(res2["item"]["completed"])
+
+        # 3. Третий вызов -> снова выбран (completed = True)
+        res3 = self.hm.toggle_list_item("дела", 1)
+        self.assertTrue(res3["success"])
+        self.assertTrue(res3["item"]["completed"])
+
     def test_multiple_independent_lists(self):
         self.hm.add_list_item("продукты", "Яблоки")
         self.hm.add_list_item("фильмы", "Интерстеллар")

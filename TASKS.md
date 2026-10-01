@@ -427,9 +427,102 @@
   * Сохранена 100% обратная совместимость CLI, GUI, существующих инструментов и субагентов.
   * Разработан интеграционный тестовый набор `tests/test_akakiy_core_integration.py` (11 сквозных сценариев, 100% pass).
   * Всего 647 тестов в `tests/` (645 unit pass + 2 integration skip by default).
+* [x] **Multi-Agent Architecture: Foundation (Этап 21)**:
+  * Заложен фундамент целевой multi-agent архитектуры Акакия (`Akakiy Agent Core → Agent Registry → [Household, Research, Coding, Memory Agents]`).
+  * Создан пакет `agents/`:
+    * `agents/base.py`: базовый абстрактный класс `BaseAgent` (`name`, `description`, `capabilities`, `tools`, `enabled`, `metadata`) с контрактом `execute(task, context=None, **kwargs) -> AgentResult`, методами `has_capability()`, `has_tool()`, `to_dict()`, `__repr__()`.
+    * `agents/registry.py`: потокобезопасный `AgentRegistry` (`register`, `unregister`, `get`, `has`, `enable`, `disable`, `list_agents`, `find_by_capability`, `find_by_tool`, `execute`, `clear`, синглтон-методы `get_agent_registry()` и `reset_agent_registry()`) без скрытой глобальной магии.
+    * `agents/__init__.py`: экспорт `BaseAgent`, `AgentRegistry`, `get_agent_registry`, `reset_agent_registry`.
+  * Существующий production pipeline (`tools/agent.py`, `Router`, `Planner`, `Executor`, `SubAgents`, `GUI`, `Voice`) сохранён на 100% без изменений.
+  * Разработан модульный тестовый набор `tests/test_agents_architecture.py` (17 targeted тестов, 100% pass).
+* [x] **Multi-Agent Architecture: HouseholdAgent Domain Agent (Этап 22)**:
+  * Реализован первый доменный агент `HouseholdAgent` (`agents/household.py`), унаследованный от `BaseAgent`.
+  * Метаданные: `name = "household"`, `capabilities = ["household", "tasks", "reminders", "notes", "lists"]`, 20 бытовых инструментов.
+  * Исполнение задач: метод `execute(task, context=None, **kwargs) -> AgentResult` принимает запросы на естественном языке, явные параметры `action`/`tool` или прямое имя метода.
+  * Нулевое дублирование бизнес-логики: все операции делегируются существующему `HouseholdManager` с возвратом канонического `AgentResult`.
+  * Разработан тестовый набор `tests/test_household_agent.py` (18 тестов, 100% pass).
+* [x] **Multi-Agent Architecture: Deterministic AgentRouter (Этап 23)**:
+  * Реализован верхнеуровневый маршрутизатор доменных агентов `AgentRouter` (`agents/router.py`) и модель результата `RouteResult`.
+  * Принцип Open-Closed: маршрутизатор работает строго через `AgentRegistry`, не имеет жестких зависимостей и импортов конкретных классов агентов (`HouseholdAgent` не импортируется в роутер).
+  * Детерминированная контекстная маршрутизация по capabilities (`tasks`, `reminders`, `notes`, `lists`, `household`) с защитой от ложных срабатываний на кодовые запросы (`список файлов проекта`).
+  * Поддержка расширения без изменения кода роутера (`register_capability_rule`, метод агента `can_handle`, метаданные `patterns`).
+  * Контракт: `route(task) -> RouteResult(agent, capability, confidence, reason, success, is_disabled)`.
+  * Разработан тестовый набор `tests/test_agent_router.py` (14 тестов, 100% pass).
+* [x] **Multi-Agent Architecture: ResearchAgent Domain Agent (Этап 24)**:
+  * Реализован высокоуровневый доменный агент `ResearchAgent` (`agents/research.py`), унаследованный от `BaseAgent`.
+  * Метаданные: `name = "research"`, `capabilities = ["research", "search", "analysis", "investigation", "information"]`, инструменты `["research", "gather_information", "generate_report", "search"]`.
+  * Исполнение задач: метод `execute(task, context=None, **kwargs) -> AgentResult` валидирует входные параметры и передает выполнение существующему SubAgent worker (`tools/agents/research.py`) через `AgentContext`.
+  * Нулевое дублирование бизнес-логики: доменный агент не создает второй поисковый движок и не повторяет логику сбора Markdown-отчетов и артефактов.
+  * В `AgentRouter` добавлено capability-правило `research` без жесткого импорта класса. Разрешены конфликтные запросы (создание задач на исследование остается за `household`, поиск в заметках — за `notes`, исследование тем — за `research`).
+  * Расширены тесты `tests/test_research_agent.py` (добавлен класс `TestDomainResearchAgent`, 22 теста в файле, 100% pass).
+  * Обновлены тесты `tests/test_agent_router.py` (добавлен класс `TestAgentRouterMultiAgents`, 18 тестов в файле, 100% pass).
+* [x] **Multi-Agent Architecture: AgentExecutor (Этап 25)**:
+  * Реализован исполнительный слой `AgentExecutor` (`agents/executor.py`) multi-agent архитектуры.
+  * Публичный API:
+    * `execute(route_or_agent, task="", context=None, **kwargs) -> AgentResult`: поддержка как `RouteResult`, так и прямого вызова `BaseAgent`.
+    * `execute_task(task, context=None, **kwargs) -> AgentResult`: удобный сквозной метод (маршрутизация `AgentRouter.route` $\to$ вызов `execute` $\to$ возврат `AgentResult`).
+  * Безопасность и надежность:
+    * Валидация входных аргументов, проверка статуса активности агента (`enabled`, `is_disabled`).
+    * Перехват всех исключений `agent.execute(...)` с возвратом стандартизированного `AgentResult.fail`.
+    * Адаптация совместимых форматов результатов (dict $\to$ `AgentResult`) и обработка непредвиденных типов.
+    * Полная сохранность возвращенных данных `data`, артефактов `artifacts` и `created_files`.
+    * Неразрушающая инъекция метаданных маршрута в `result.data["route"]`.
+  * Принцип Open-Closed (OCP):
+    * Полное отсутствие жестких связей или импортов конкретных доменных агентов в `agents/executor.py`.
+    * Подключение и сквозное выполнение любого нового зарегистрированного агента без изменения кода `AgentExecutor`.
+  * Экспорт `AgentExecutor` в `agents/__init__.py`.
+  * Создан тестовый набор `tests/test_agent_executor.py` (14 targeted тестов, 100% pass).
+  * В тестовом наборе `tests/` успешно пройдено 131 тест по multi-agent архитектуре.
+* [x] **Multi-Agent Architecture: AgentService Facade Layer (Этап 26)**:
+  * Реализован фасадный сервисный слой `AgentService` (`agents/service.py`) — единая высокоуровневая точка входа multi-agent архитектуры (`AgentRouter` + `AgentExecutor`).
+  * Публичный API:
+    * `AgentService(router=None, executor=None, registry=None)`: гибкий Dependency Injection с автоподключением проектных синглтонов (`get_agent_registry`).
+    * `execute(task, context=None, **kwargs) -> AgentResult`: полный цикл исполнения (валидация $\to$ `route` $\to$ `execute` $\to$ `AgentResult`).
+    * `route(task) -> RouteResult` и `preview_route(task) -> RouteResult`: предварительный просмотр и инспекция маршрута без вызова агентов.
+    * `to_dict() -> Dict[str, Any]`: структурированный снимок состояния сервиса.
+    * Модульные синглтоны: `get_agent_service()`, `reset_agent_service()`.
+  * Принципы надежности и чистоты:
+    * Нулевое дублирование логики маршрутизации и исполнения.
+    * Строгий Open-Closed Principle (OCP): 0 импортов и упоминаний конкретных доменных агентов.
+    * Структурированная обработка некорректных/пустых задач (`None`, `""`, whitespace, нестроковые типы).
+    * Полная сохранность `data`, `artifacts`, `created_files` и обогащение метаданными маршрута.
+    * 100% изоляция: текущий production pipeline (`tools/agent.py`, `tools/router.py`, GUI, Voice) не затронут.
+  * Экспорт `AgentService`, `get_agent_service`, `reset_agent_service` в `agents/__init__.py`.
+  * Создан модульный тестовый набор `tests/test_agent_service.py` (12 targeted тестов, 100% pass).
+  * Всего в тестовом наборе multi-agent подсистемы успешно пройдено 143 теста.
+* [x] **Multi-Agent Architecture: MultiAgentBridge Transitional Layer (Этап 27)**:
+  * Реализован безопасный переходный слой `MultiAgentBridge` (`agents/bridge.py`) между монолитным вызовом `Agent.process()` и новой multi-agent системой (`AgentService`).
+  * Публичный API:
+    * `MultiAgentBridge(service=None, bypass_route_types=None, bypass_tools=None, fallback_on_disabled=False)`: Dependency Injection с дефолтным `get_agent_service()`.
+    * `can_handle(user_input, legacy_route=None) -> bool`: быстрая предварительная фильтрация без исполнения задачи.
+    * `try_process(user_input, legacy_route=None, context=None, **kwargs) -> Optional[Dict[str, Any]]`: основная безопасная точка интеграции.
+    * `adapt_result(result, route_result=None) -> Dict[str, Any]`: адаптер канонического `AgentResult` в совместимый словарь ответа `Agent.process()`.
+  * Защита и архитектурная чистота:
+    * Защищенные категории старого pipeline (`memory`, `plan`, `image`, `presentation`, `document`, `coding`, `file`, `subagent`, инструменты `list_files`, `find_file`, `structure`, `search_files`) безусловно отсекаются за $O(1)$ без обращения к `AgentRouter`.
+    * Строгий Open-Closed Principle (OCP): 0 жестких импортов доменных агентов в `agents/bridge.py` (проверено через AST-анализ).
+    * Отказоустойчивость: любые непредвиденные исключения перехватываются внутри моста, возвращая структурированный словарь ошибки без сбоя вызывающего интерфейса (GUI, CLI, Voice).
+    * Сохранность данных: список артефактов `artifacts` сериализуется через `to_dict()`, созданные файлы `created_files` и исходный объект `AgentResult` в ключе `result` сохраняются в полном объёме.
+  * Экспорт `MultiAgentBridge` в `agents/__init__.py`.
+* [x] **Multi-Agent Architecture: Production Integration with MultiAgentBridge (Этап 28)**:
+  * Встроен переходный слой `MultiAgentBridge` в производственный конвейер оркестратора `Agent.process()` (`tools/agent.py`).
+  * Реализована строгая приоритизация швов (deterministic seam ordering):
+    1. Детерминированные быстрые перехваты: память (`memory`), планы (`plan`), медиа- и файловые sub-agents (`image`, `presentation`, `document`, `coding`, `file`, `subagent`).
+    2. Сложные многошаговые задачи: `TeamworkCoordinator.is_complex_task(user_input)` имеет абсолютный приоритет над bridge.
+    3. Проектные CLI-инструменты: `PROJECT_TOOLS = {"list_files", "find_file", "structure", "search_files"}` исполняются через legacy `execute_tool`.
+    4. Точка подключения `MultiAgentBridge`: перехват доменных запросов (`household`, `research` и сторонних расширений). Запись `_last_result` и фиксация в едином контексте `_record_interaction`.
+    5. Fallback: запуск legacy research-воркера и остальных инструментов при `None` от моста или отключенном агенте.
+    6. Защита от сбоев: любые исключения `try_process` логируются и мягко передают управление в fallback pipeline без аварийного завершения.
+  * Обеспечена 100% обратная совместимость:
+    * Тип ответа `CompatibleType` совместим как со строковыми проверками capability (`'tasks'`, `'research'`), так и с legacy-проверками `type == 'tool'`.
+    * Сохраняются поля `tool`, `created_files`, сериализованные `artifacts` и исходный `AgentResult` в ключе `result`.
+    * Поддерживается обращение по индексам `res['result']['result']['tasks']` через `AgentResult.__getitem__`.
+  * Создан тестовый набор `tests/test_agent_multi_agent_integration.py` (10 сквозных сценариев, 100% pass).
+  * Регрессионная верификация: все 194 теста в репозитории проходят со 100% успехом (включая `test_command_router.py`, `test_multi_agent_bridge.py`, `test_household_agent.py`, `test_research_agent.py` и др.).
 * [ ] **Интеграционные E2E тесты с виртуальным микрофоном**:
+
   * Реализовать тестовый сценарий, прогоняющий синтезированные аудиофайлы (WAV) через живой конвейер `VoiceService` с проверкой реакции GUI.
 * [ ] **Очистка устаревших бэкап-файлов `*.bak` в корне**:
   * Согласовать с пользователем удаление временных скриптов и резервных копий (`*.bak`) из корня репозитория.
+
 
 

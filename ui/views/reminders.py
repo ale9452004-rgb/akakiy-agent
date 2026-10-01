@@ -33,7 +33,7 @@ class RemindersView(BaseView):
         tk.Label(
             header_row,
             text="НАПОМИНАНИЯ (REMINDERS)",
-            font=("Segoe UI", 14, "bold"),
+            font=(self.DISPLAY_FAMILY, 14, "bold"),
             fg=self.FG_WHITE,
             bg=self.BG_MAIN
         ).pack(side="left")
@@ -41,7 +41,7 @@ class RemindersView(BaseView):
         btn_check = tk.Button(
             header_row,
             text="🔔 Проверить наступившие",
-            font=("Segoe UI", 9, "bold"),
+            font=(self.UI_FAMILY, 9, "bold"),
             bg=self.ACCENT_PURPLE,
             fg=self.FG_WHITE,
             bd=0,
@@ -60,14 +60,14 @@ class RemindersView(BaseView):
         tk.Label(
             add_box,
             text="О чём напомнить:",
-            font=("Segoe UI", 9, "bold"),
+            font=(self.UI_FAMILY, 9, "bold"),
             fg=self.FG_WHITE,
             bg=self.BG_CARD
         ).pack(side="left", padx=12)
 
         self.entry_rem_text = tk.Entry(
             add_box,
-            font=("Segoe UI", 10),
+            font=(self.UI_FAMILY, 10),
             bg="#13171f",
             fg=self.FG_WHITE,
             bd=1,
@@ -78,14 +78,14 @@ class RemindersView(BaseView):
         tk.Label(
             add_box,
             text="Время (19:00 / каждый день в 10:00 / каждые 2 ч):",
-            font=("Segoe UI", 9, "bold"),
+            font=(self.UI_FAMILY, 9, "bold"),
             fg=self.FG_WHITE,
             bg=self.BG_CARD
         ).pack(side="left", padx=12)
 
         self.entry_rem_time = tk.Entry(
             add_box,
-            font=("Segoe UI", 10),
+            font=(self.UI_FAMILY, 10),
             bg="#13171f",
             fg=self.FG_WHITE,
             bd=1,
@@ -97,7 +97,7 @@ class RemindersView(BaseView):
         btn_add = tk.Button(
             add_box,
             text="Установить",
-            font=("Segoe UI", 9, "bold"),
+            font=(self.UI_FAMILY, 9, "bold"),
             bg=self.ACCENT_PURPLE,
             fg=self.FG_WHITE,
             bd=0,
@@ -146,7 +146,7 @@ class RemindersView(BaseView):
             tk.Label(
                 self.rems_list_frame,
                 text="Сервис напоминаний недоступен.",
-                font=("Segoe UI", 11),
+                font=(self.UI_FAMILY, 11),
                 fg=self.FG_MUTED,
                 bg=self.BG_CARD
             ).pack(pady=40)
@@ -157,7 +157,7 @@ class RemindersView(BaseView):
             tk.Label(
                 self.rems_list_frame,
                 text="Напоминаний нет.",
-                font=("Segoe UI", 11),
+                font=(self.UI_FAMILY, 11),
                 fg=self.FG_MUTED,
                 bg=self.BG_CARD
             ).pack(pady=40)
@@ -173,7 +173,7 @@ class RemindersView(BaseView):
             tk.Label(
                 row,
                 text=icon,
-                font=("Segoe UI", 11),
+                font=(self.UI_FAMILY, 11),
                 fg=self.ACCENT_PURPLE,
                 bg="#13171f"
             ).pack(side="left", padx=12, pady=8)
@@ -181,7 +181,7 @@ class RemindersView(BaseView):
             tk.Label(
                 row,
                 text=f"#{r['id']} {r['text']}",
-                font=("Segoe UI", 10),
+                font=(self.UI_FAMILY, 10),
                 fg=self.FG_WHITE,
                 bg="#13171f"
             ).pack(side="left", padx=4)
@@ -192,7 +192,7 @@ class RemindersView(BaseView):
                 tk.Label(
                     row,
                     text=f"🔁 {rep_text}",
-                    font=("Segoe UI", 9, "italic"),
+                    font=(self.UI_FAMILY, 9, "italic"),
                     fg="#a78bfa",
                     bg="#13171f"
                 ).pack(side="left", padx=8)
@@ -200,7 +200,7 @@ class RemindersView(BaseView):
             btn_del = tk.Button(
                 row,
                 text="✕",
-                font=("Segoe UI", 9),
+                font=(self.UI_FAMILY, 9),
                 fg=self.ACCENT_RED,
                 bg="#13171f",
                 bd=0,
@@ -212,7 +212,7 @@ class RemindersView(BaseView):
             btn_done = tk.Button(
                 row,
                 text="✓",
-                font=("Segoe UI", 9, "bold"),
+                font=(self.UI_FAMILY, 9, "bold"),
                 fg=self.ACCENT_GREEN,
                 bg="#13171f",
                 bd=0,
@@ -224,7 +224,7 @@ class RemindersView(BaseView):
             tk.Label(
                 row,
                 text=f"Время: {r['remind_at']}",
-                font=("Consolas", 9),
+                font=(self.MONO_FAMILY, 9),
                 fg=self.ACCENT_CYAN,
                 bg="#13171f"
             ).pack(side="right", padx=12)

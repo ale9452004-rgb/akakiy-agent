@@ -5,6 +5,8 @@
 import tkinter as tk
 from typing import Any, Optional
 
+from ui.typography import typography
+
 
 def _bind_hover(
     widget: tk.Widget,
@@ -48,26 +50,43 @@ class BaseView(tk.Frame):
     4. Стандартную палитру стилей и тему оформления.
     """
 
-    # Константы темы Desktop Hub 2.0
-    BG_MAIN = "#090d13"
-    BG_PANEL = "#161b22"
-    BG_CARD = "#1b212a"
-    BG_HOVER = "#21262d"
-    BG_ACTIVE = "#28303d"
-    BORDER_COL = "#30363d"
-    BORDER_LIGHT = "#38414e"
+    # Базовая палитра Visual Direction 2.0 (Deep Graphite & Electric Cyan)
+    BG_MAIN = "#070a0f"
+    BG_CANVAS = "#070a0f"
+    BG_PANEL = "#070a0f"
+    BG_HERO = "#0a0e17"
+    BG_CARD = "#0c111c"
+    BG_CARD_INNER = "#080c14"
+    BG_HOVER = "#0e1524"
+    BG_ACTIVE = "#0f172a"
+    BORDER_COL = "#131b28"
+    BORDER_SUBTLE = "#141c2a"
+    BORDER_LIGHT = "#1e293b"
 
-    FG_WHITE = "#f0f6fc"
-    FG_MAIN = "#c9d1d9"
-    FG_MUTED = "#8b949e"
-    FG_DIM = "#484f58"
+    FG_WHITE = "#f8fafc"
+    FG_MAIN = "#cbd5e1"
+    FG_MUTED = "#64748b"
+    FG_DIM = "#475569"
 
-    ACCENT_BLUE = "#58a6ff"
     ACCENT_CYAN = "#38bdf8"
-    ACCENT_PURPLE = "#a371f7"
-    ACCENT_GREEN = "#3fb950"
-    ACCENT_AMBER = "#e3b341"
-    ACCENT_RED = "#f85149"
+    ACCENT_BLUE = "#0284c7"
+    ACCENT_PURPLE = "#a78bfa"
+    ACCENT_VIOLET = "#a78bfa"
+    ACCENT_GREEN = "#34d399"
+    ACCENT_AMBER = "#fbbf24"
+    ACCENT_RED = "#fb7185"
+
+    # Типографическая система
+    FONT_DISPLAY = typography.FONT_DISPLAY
+    FONT_TITLE = typography.FONT_TITLE
+    FONT_HEADING = typography.FONT_HEADING
+    FONT_BODY = typography.FONT_BODY
+    FONT_CAPTION = typography.FONT_CAPTION
+    FONT_MONO = typography.FONT_MONO
+
+    DISPLAY_FAMILY = typography.display_family
+    UI_FAMILY = typography.ui_family
+    MONO_FAMILY = typography.mono_family
 
     def __init__(self, master: tk.Widget, shell: Any = None, **kwargs):
         if "bg" not in kwargs:

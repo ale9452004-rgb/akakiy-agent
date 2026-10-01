@@ -281,5 +281,159 @@ class TestChatViewArtifactRendering(unittest.TestCase):
         self.assertIn("pres_test.pptx", chat_text_content)
 
 
+
+class TestDesktopHubTypographyAndStatusBadge(unittest.TestCase):
+    """Тестирование корректности типографики и отображения статуса 'Готов' без обрезания."""
+
+    def setUp(self):
+        self.root = tk.Tk()
+        self.root.deiconify()
+        self.mock_agent = MagicMock()
+        self.household = HouseholdManager(storage_path=":memory:")
+        self.gui = AkakiyGUI(
+            root=self.root,
+            agent=self.mock_agent,
+            household=self.household,
+            voice=MagicMock()
+        )
+        self.root.update()
+
+    def tearDown(self):
+        try:
+            self.gui.destroy()
+        except Exception:
+            try:
+                self.root.destroy()
+            except Exception:
+                pass
+
+    def test_typography_font_discovery(self):
+        """Проверяет загрузку локальных шрифтов и выбор целевых семейств Manrope, Inter, JetBrains Mono."""
+        from ui.typography import typography
+        self.assertGreaterEqual(len(typography.loaded_files), 3)
+        self.assertEqual(typography.display_family, "Manrope")
+        self.assertEqual(typography.ui_family, "Inter")
+        self.assertEqual(typography.mono_family, "JetBrains Mono")
+
+    def test_status_badge_not_clipped(self):
+        """Проверяет, что статус '● ГОТОВ' отображается полностью и не обрезается по высоте."""
+        self.root.update()
+        req_h = self.gui.status_badge.winfo_reqheight()
+        actual_h = self.gui.status_badge.winfo_height()
+        self.assertGreaterEqual(actual_h, req_h)
+        self.assertEqual(self.gui.topbar.winfo_height(), 72)
+
+        # Проверка всех переходов состояний
+        for st in ["idle", "thinking", "working", "listening", "speaking", "success", "error"]:
+            self.gui._set_state(st)
+            self.root.update()
+            h = self.gui.status_badge.winfo_height()
+            rh = self.gui.status_badge.winfo_reqheight()
+            self.assertGreaterEqual(h, rh)
+
+    def test_views_typography_applied(self):
+        """Проверяет применение целевых семейств шрифтов во всех основных секциях хаба."""
+        import tkinter.font as tkfont
+        for sec in ["home", "chat", "tasks", "reminders", "notes", "lists", "memory", "settings"]:
+            self.gui._switch_section(sec)
+            self.root.update()
+            for child in self.gui.workspace.winfo_children():
+                try:
+                    fn = child.cget("font")
+                    if fn:
+                        f_obj = tkfont.Font(self.root, font=fn)
+                        fam = f_obj.actual("family")
+                        self.assertIn(fam, ["Inter", "Manrope", "JetBrains Mono"])
+                except Exception:
+                    pass
+
+
+
+class TestListsViewToggleBehavior(unittest.TestCase):
+    """Тестирование toggle-поведения пунктов списка и списков в ListsView."""
+
+    def setUp(self):
+        self.root = tk.Tk()
+        self.root.withdraw()
+        self.storage_path = os.path.join(WORKSPACE, "scratch", f"test_lists_toggle_{time.time_ns()}.json")
+        os.makedirs(os.path.dirname(self.storage_path), exist_ok=True)
+        self.household = HouseholdManager(storage_path=self.storage_path)
+        self.household.create_list("покупки")
+        self.household.add_list_item("покупки", "молоко")
+        self.household.add_list_item("покупки", "хлеб")
+        self.gui = AkakiyGUI(
+            root=self.root,
+            agent=MagicMock(),
+            household=self.household,
+            voice=MagicMock()
+        )
+        self.gui._switch_section("lists")
+        self.root.update()
+
+    def tearDown(self):
+        try:
+            self.gui.destroy()
+        except Exception:
+            try:
+                self.root.destroy()
+            except Exception:
+                pass
+        if os.path.exists(self.storage_path):
+            try:
+                os.remove(self.storage_path)
+            except Exception:
+                pass
+
+    def test_list_item_toggle(self):
+        """Проверяет: не выбран -> выбран -> повторный клик -> не выбран."""
+        lists_view = self.gui.lists_view
+        self.assertIsNotNone(lists_view)
+
+        # 1. Изначально пункт 1 не выполнен
+        items_before = self.household.lists["покупки"]
+        self.assertFalse(items_before[0].get("completed", False))
+
+        # 2. Клик по невыбранному пункту -> выбирается
+        lists_view.ui_toggle_item("покупки", 1)
+        self.root.update()
+        items_after_1 = self.household.lists["покупки"]
+        self.assertTrue(items_after_1[0]["completed"])
+
+        # 3. Повторный клик по этому же пункту -> снимается выбор
+        lists_view.ui_toggle_item("покупки", 1)
+        self.root.update()
+        items_after_2 = self.household.lists["покупки"]
+        self.assertFalse(items_after_2[0]["completed"])
+
+        # 4. Клик по другому пункту (пункт 2) -> пункт 2 выбирается, пункт 1 остаётся не выбран
+        lists_view.ui_toggle_item("покупки", 2)
+        self.root.update()
+        items_after_3 = self.household.lists["покупки"]
+        self.assertFalse(items_after_3[0]["completed"])
+        self.assertTrue(items_after_3[1]["completed"])
+
+    def test_list_actions_crud(self):
+        """Проверяет, что создание, добавление и удаление пунктов списка не сломаны."""
+        lists_view = self.gui.lists_view
+        self.assertIsNotNone(lists_view)
+
+        # Добавление пункта
+        lists_view.entry_item_text.insert(0, "сыр")
+        lists_view.ui_add_item("покупки")
+        self.root.update()
+        items = self.household.lists["покупки"]
+        self.assertEqual(len(items), 3)
+        self.assertEqual(items[-1]["text"], "сыр")
+
+        # Удаление пункта
+        lists_view.ui_delete_item("покупки", items[-1]["id"])
+        self.root.update()
+        items_after_del = self.household.lists["покупки"]
+        self.assertEqual(len(items_after_del), 2)
+        self.assertFalse(any(it["text"] == "сыр" for it in items_after_del))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+

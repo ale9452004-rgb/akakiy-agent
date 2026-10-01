@@ -37,7 +37,7 @@ class MemoryView(BaseView):
         tk.Label(
             header_row,
             text="ДОЛГОВРЕМЕННАЯ ПАМЯТЬ (MEMORY)",
-            font=("Segoe UI", 14, "bold"),
+            font=(self.DISPLAY_FAMILY, 14, "bold"),
             fg=self.FG_WHITE,
             bg=self.BG_MAIN
         ).pack(side="left")
@@ -49,14 +49,14 @@ class MemoryView(BaseView):
         tk.Label(
             search_box,
             text="Поиск:",
-            font=("Segoe UI", 9),
+            font=self.FONT_BODY,
             fg=self.FG_MUTED,
             bg=self.BG_MAIN
         ).pack(side="left", padx=4)
 
         self.entry_mem_search = tk.Entry(
             search_box,
-            font=("Segoe UI", 10),
+            font=(self.UI_FAMILY, 10),
             bg=self.BG_CARD,
             fg=self.FG_WHITE,
             width=20,
@@ -73,14 +73,14 @@ class MemoryView(BaseView):
         tk.Label(
             add_box,
             text="Запомнить факт:",
-            font=("Segoe UI", 9, "bold"),
+            font=(self.UI_FAMILY, 9, "bold"),
             fg=self.FG_WHITE,
             bg=self.BG_CARD
         ).pack(side="left", padx=12)
 
         self.entry_mem = tk.Entry(
             add_box,
-            font=("Segoe UI", 10),
+            font=(self.UI_FAMILY, 10),
             bg="#13171f",
             fg=self.FG_WHITE,
             bd=1,
@@ -92,7 +92,7 @@ class MemoryView(BaseView):
         btn_add = tk.Button(
             add_box,
             text="Запомнить",
-            font=("Segoe UI", 9, "bold"),
+            font=(self.UI_FAMILY, 9, "bold"),
             bg=self.ACCENT_CYAN,
             fg="#0d1117",
             bd=0,
@@ -152,7 +152,7 @@ class MemoryView(BaseView):
         tk.Label(
             row,
             text="🧠",
-            font=("Segoe UI", 10),
+            font=(self.UI_FAMILY, 10),
             fg=self.ACCENT_CYAN,
             bg="#13171f"
         ).pack(side="left", padx=10, pady=8)
@@ -160,7 +160,7 @@ class MemoryView(BaseView):
         tk.Label(
             row,
             text=f"#{m['id']} {m['text']}",
-            font=("Segoe UI", 9),
+            font=self.FONT_BODY,
             fg=self.FG_WHITE,
             bg="#13171f"
         ).pack(side="left", padx=4)
@@ -168,7 +168,7 @@ class MemoryView(BaseView):
         btn_del = tk.Button(
             row,
             text="✕",
-            font=("Segoe UI", 8),
+            font=self.FONT_CAPTION,
             fg=self.ACCENT_RED,
             bg="#13171f",
             bd=0,
@@ -180,7 +180,7 @@ class MemoryView(BaseView):
         tk.Label(
             row,
             text=m.get("created_at", ""),
-            font=("Consolas", 8),
+            font=self.FONT_MONO,
             fg=self.FG_DIM,
             bg="#13171f"
         ).pack(side="right", padx=8)
@@ -208,7 +208,7 @@ class MemoryView(BaseView):
             tk.Label(
                 self.mem_list_frame,
                 text="Сервис памяти недоступен.",
-                font=("Segoe UI", 11),
+                font=(self.UI_FAMILY, 11),
                 fg=self.FG_MUTED,
                 bg=self.BG_CARD
             ).pack(pady=40)

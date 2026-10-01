@@ -42,8 +42,10 @@ from tools.household import get_household_manager
 from tools.memory import get_memory_manager
 from tools.settings import get_app_settings
 from tools.validation import validate_project
+from ui.akakiy_core import AkakiyCore
 from ui.neural_core import NeuralCore
 from ui.cloud import AkakiyCloud
+from ui.typography import typography, configure_tkinter_fonts
 from voice import VoiceService, GlobalHotKeyManager
 from notifications import NotificationService, ReminderMonitor
 
@@ -67,28 +69,42 @@ class AkakiyGUI:
     Полноэкранный Desktop Hub Акакия 2.0.
     """
 
-    BG_MAIN = "#090d13"
-    BG_PANEL = "#161b22"
-    BG_CARD = "#1b212a"
-    BG_HOVER = "#21262d"
-    BG_ACTIVE = "#28303d"
-    BORDER_COL = "#30363d"
-    BORDER_LIGHT = "#38414e"
+    # Базовая палитра Visual Direction 2.0 (Deep Graphite & Electric Cyan)
+    BG_MAIN = "#070a0f"
+    BG_PANEL = "#070a0f"
+    BG_CARD = "#0c111c"
+    BG_HOVER = "#0e1524"
+    BG_ACTIVE = "#0f172a"
+    BORDER_COL = "#131b28"
+    BORDER_SUBTLE = "#141c2a"
+    BORDER_LIGHT = "#1e293b"
 
-    FG_WHITE = "#f0f6fc"
-    FG_MAIN = "#c9d1d9"
-    FG_MUTED = "#8b949e"
-    FG_DIM = "#484f58"
+    FG_WHITE = "#f8fafc"
+    FG_MAIN = "#cbd5e1"
+    FG_MUTED = "#64748b"
+    FG_DIM = "#475569"
 
-    ACCENT_BLUE = "#58a6ff"
+    ACCENT_BLUE = "#0284c7"
     ACCENT_CYAN = "#38bdf8"
-    ACCENT_PURPLE = "#a371f7"
-    ACCENT_GREEN = "#3fb950"
-    ACCENT_AMBER = "#e3b341"
-    ACCENT_RED = "#f85149"
+    ACCENT_PURPLE = "#a78bfa"
+    ACCENT_GREEN = "#34d399"
+    ACCENT_AMBER = "#fbbf24"
+    ACCENT_RED = "#fb7185"
+
+    FONT_DISPLAY = typography.FONT_DISPLAY
+    FONT_TITLE = typography.FONT_TITLE
+    FONT_HEADING = typography.FONT_HEADING
+    FONT_BODY = typography.FONT_BODY
+    FONT_CAPTION = typography.FONT_CAPTION
+    FONT_MONO = typography.FONT_MONO
+
+    DISPLAY_FAMILY = typography.display_family
+    UI_FAMILY = typography.ui_family
+    MONO_FAMILY = typography.mono_family
 
     def __init__(self, root: tk.Tk, agent: Agent = None, household = None, memory = None, voice = None):
         self.root = root
+        configure_tkinter_fonts(self.root, typography)
         self.root.title("АКAKИЙ 2.0 // NEURAL HUB")
 
         # 1. Полноэкранный канвас 1920x1280 (или адаптация к монитору)
@@ -253,119 +269,125 @@ class AkakiyGUI:
 
     def _create_layout(self):
         # -------------------------------------------------------------
-        # 1. Topbar (80px)
+        # 1. Topbar (72px)
         # -------------------------------------------------------------
-        self.topbar = tk.Frame(self.root, bg=self.BG_PANEL, height=80, bd=0)
+        self.topbar = tk.Frame(self.root, bg=self.BG_PANEL, height=72, bd=0)
         self.topbar.pack(side="top", fill="x", padx=0, pady=0)
         self.topbar.pack_propagate(False)
 
         self._build_topbar_content()
 
-        # Разделитель под Topbar
+        # Тонкий разделитель под Topbar
         tk.Frame(self.root, bg=self.BORDER_COL, height=1).pack(side="top", fill="x")
 
         # -------------------------------------------------------------
-        # 2. Command Bar (96px) - внизу экрана
+        # 2. Command Bar (80px) - внизу экрана
         # -------------------------------------------------------------
         tk.Frame(self.root, bg=self.BORDER_COL, height=1).pack(side="bottom", fill="x")
 
-        self.cmd_bar = tk.Frame(self.root, bg=self.BG_PANEL, height=96, bd=0)
+        self.cmd_bar = tk.Frame(self.root, bg=self.BG_PANEL, height=80, bd=0)
         self.cmd_bar.pack(side="bottom", fill="x", padx=0, pady=0)
         self.cmd_bar.pack_propagate(False)
 
         self._build_command_bar_content()
 
         # -------------------------------------------------------------
-        # 3. Центральное тело: Sidebar (280px) + Main Workspace
+        # 3. Центральное тело: Sidebar (220px) + Main Workspace
         # -------------------------------------------------------------
         self.center_body = tk.Frame(self.root, bg=self.BG_MAIN)
         self.center_body.pack(side="top", fill="both", expand=True)
 
-        # Sidebar (280px)
-        self.sidebar = tk.Frame(self.center_body, bg=self.BG_PANEL, width=280)
+        # Sidebar (220px)
+        self.sidebar = tk.Frame(self.center_body, bg=self.BG_PANEL, width=220)
         self.sidebar.pack(side="left", fill="y")
         self.sidebar.pack_propagate(False)
 
         self._build_sidebar_content()
 
-        # Вертикальный разделитель
+        # Тонкий вертикальный разделитель
         tk.Frame(self.center_body, bg=self.BORDER_COL, width=1).pack(side="left", fill="y")
 
         # Main Workspace Container
         self.workspace = tk.Frame(self.center_body, bg=self.BG_MAIN)
-        self.workspace.pack(side="left", fill="both", expand=True, padx=20, pady=20)
+        self.workspace.pack(side="left", fill="both", expand=True, padx=20, pady=16)
         self.main_workspace = self.workspace
         self.command_bar = self.cmd_bar
 
     # =========================================================================
-    # 1. Topbar (80px)
+    # 1. Topbar (72px)
     # =========================================================================
 
     def _build_topbar_content(self):
         # Левая колонка: Логотип и статус
         left_box = tk.Frame(self.topbar, bg=self.BG_PANEL)
-        left_box.pack(side="left", padx=24, pady=14)
+        left_box.pack(side="left", padx=20, pady=(6, 6))
 
         logo_row = tk.Frame(left_box, bg=self.BG_PANEL)
         logo_row.pack(anchor="w")
 
         tk.Label(
             logo_row,
-            text="АКAKИЙ 2.0",
-            font=("Segoe UI", 16, "bold"),
-            fg=self.ACCENT_CYAN,
+            text="✦  А К А К И Й",
+            font=(self.DISPLAY_FAMILY, 15, "bold"),
+            fg=self.FG_WHITE,
             bg=self.BG_PANEL
         ).pack(side="left")
 
         tk.Label(
             logo_row,
-            text=" // NEURAL DESKTOP HUB",
-            font=("Segoe UI", 13, "bold"),
+            text="2.0  •  DESKTOP HUB",
+            font=self.FONT_CAPTION,
             fg=self.FG_MUTED,
             bg=self.BG_PANEL
-        ).pack(side="left")
+        ).pack(side="left", padx=(12, 0))
 
         status_row = tk.Frame(left_box, bg=self.BG_PANEL)
-        status_row.pack(anchor="w", pady=(3, 0))
+        status_row.pack(anchor="w", pady=(2, 0))
 
         self.status_badge = tk.Label(
             status_row,
-            text="✓ ГОТОВ",
-            font=("Segoe UI", 9, "bold"),
-            fg=self.ACCENT_BLUE,
-            bg="#111c2e",
+            text="● ГОТОВ",
+            font=self.FONT_HEADING,
+            fg=self.ACCENT_CYAN,
+            bg="#0e1726",
             padx=10, pady=2,
-            bd=1, relief="solid"
+            bd=0,
+            highlightthickness=1,
+            highlightbackground=self.BORDER_LIGHT
         )
         self.status_badge.pack(side="left")
 
         # Правая колонка: Часы, Дата и Индикаторы
         right_box = tk.Frame(self.topbar, bg=self.BG_PANEL)
-        right_box.pack(side="right", padx=24, pady=14)
+        right_box.pack(side="right", padx=20, pady=(6, 6))
 
         # Индикаторы сервисов
         chips_box = tk.Frame(right_box, bg=self.BG_PANEL)
-        chips_box.pack(side="left", padx=(0, 24))
+        chips_box.pack(side="left", padx=(0, 20))
 
         self.chip_ollama = tk.Label(
             chips_box,
             text="QWEN3:8B ●",
-            font=("Consolas", 8, "bold"),
+            font=self.FONT_MONO,
             fg=self.ACCENT_GREEN,
-            bg="#112d1b",
-            padx=8, pady=3,
-            bd=1, relief="solid"
+            bg="#091b12",
+            padx=8, pady=2,
+            bd=0,
+            highlightthickness=1,
+            highlightbackground="#133b25"
         )
         self.chip_ollama.pack(side="left", padx=4)
 
         self.chip_voice = tk.Label(
             chips_box,
             text="ГОЛОС: ВЫКЛ",
-            font=("Consolas", 8, "bold"),
+            font=self.FONT_MONO,
             fg=self.FG_MUTED,
-            bg="#1c2128",
-            padx=8, pady=3,
-            bd=1, relief="solid"
+            bg="#0d131f",
+            padx=8, pady=2,
+            bd=0,
+            highlightthickness=1,
+            highlightbackground=self.BORDER_LIGHT
         )
         self.chip_voice.pack(side="left", padx=4)
 
@@ -376,8 +398,8 @@ class AkakiyGUI:
         self.lbl_time = tk.Label(
             clock_box,
             text="00:00:00",
-            font=("Segoe UI", 16, "bold"),
-            fg=self.FG_WHITE,
+            font=self.FONT_TITLE,
+            fg=self.FG_MAIN,
             bg=self.BG_PANEL
         )
         self.lbl_time.pack(anchor="e")
@@ -385,7 +407,7 @@ class AkakiyGUI:
         self.lbl_date = tk.Label(
             clock_box,
             text="Понедельник, 1 января 2026",
-            font=("Segoe UI", 9),
+            font=self.FONT_CAPTION,
             fg=self.FG_MUTED,
             bg=self.BG_PANEL
         )
@@ -414,22 +436,22 @@ class AkakiyGUI:
 
     def _build_sidebar_content(self):
         nav_header = tk.Frame(self.sidebar, bg=self.BG_PANEL)
-        nav_header.pack(fill="x", padx=16, pady=(18, 10))
+        nav_header.pack(fill="x", padx=16, pady=(16, 8))
 
         tk.Label(
             nav_header,
-            text="РАБОЧЕЕ ПРОСТРАНСТВО",
-            font=("Segoe UI", 8, "bold"),
-            fg=self.FG_MUTED,
+            text="НАВИГАЦИЯ",
+            font=self.FONT_CAPTION,
+            fg=self.FG_DIM,
             bg=self.BG_PANEL
         ).pack(anchor="w")
 
         self.nav_buttons = {}
         items = [
             ("home", "⌂  Главная"),
-            ("chat", "💬  Чат и Ассистент"),
+            ("chat", "💬  Чат"),
             ("tasks", "✓  Задачи"),
-            ("reminders", "🔔  Напоминания"),
+            ("reminders", "🔔  События"),
             ("notes", "📝  Заметки"),
             ("lists", "📋  Списки"),
             ("memory", "🧠  Память"),
@@ -440,84 +462,99 @@ class AkakiyGUI:
             btn = tk.Button(
                 self.sidebar,
                 text=label,
-                font=("Segoe UI", 11),
-                fg=self.FG_MAIN,
+                font=self.FONT_HEADING,
+                fg=self.FG_MUTED,
                 bg=self.BG_PANEL,
                 activeforeground=self.FG_WHITE,
-                activebackground=self.BG_ACTIVE,
+                activebackground=self.BG_HOVER,
                 anchor="w",
-                padx=20, pady=10,
+                padx=16, pady=7,
                 bd=0,
+                relief="flat",
                 cursor="hand2",
                 command=lambda c=code: self._switch_section(c)
             )
-            btn.pack(fill="x", padx=8, pady=2)
-            _bind_hover(btn, self.BG_PANEL, self.BG_HOVER, self.FG_MAIN, self.FG_WHITE)
+            btn.pack(fill="x", padx=6, pady=1)
+            _bind_hover(btn, self.BG_PANEL, self.BG_HOVER, self.FG_MUTED, self.FG_WHITE)
             self.nav_buttons[code] = btn
 
-        # Нижний информационный виджет Sidebar
-        sidebar_footer = tk.Frame(self.sidebar, bg="#11161d", bd=1, relief="solid")
-        sidebar_footer.pack(side="bottom", fill="x", padx=12, pady=16)
+        # Нижний информационный блок Sidebar
+        sidebar_footer = tk.Frame(
+            self.sidebar,
+            bg=self.BG_CARD,
+            bd=0,
+            highlightbackground=self.BORDER_SUBTLE,
+            highlightthickness=1
+        )
+        sidebar_footer.pack(side="bottom", fill="x", padx=10, pady=14)
 
         tk.Label(
             sidebar_footer,
-            text="АКAKИЙ CORE ENGINE",
-            font=("Consolas", 8, "bold"),
+            text="АКAKИЙ CORE",
+            font=self.FONT_MONO,
             fg=self.ACCENT_CYAN,
-            bg="#11161d"
+            bg=self.BG_CARD
         ).pack(anchor="w", padx=10, pady=(8, 2))
 
         tk.Label(
             sidebar_footer,
-            text="Skills: project • memory • household\nNative Tool Calling: Active",
-            font=("Segoe UI", 8),
+            text="Autonomous Agent Hub\nNative Tool Calling: Active",
+            font=self.FONT_CAPTION,
             fg=self.FG_MUTED,
-            bg="#11161d",
+            bg=self.BG_CARD,
             justify="left"
         ).pack(anchor="w", padx=10, pady=(0, 8))
 
     # =========================================================================
-    # 3. Command Bar (96px)
+    # 3. Command Bar (80px)
     # =========================================================================
 
     def _build_command_bar_content(self):
         box = tk.Frame(self.cmd_bar, bg=self.BG_PANEL)
-        box.pack(fill="both", expand=True, padx=24, pady=14)
+        box.pack(fill="both", expand=True, padx=20, pady=10)
 
-        # Контейнер для поля ввода
-        input_wrap = tk.Frame(box, bg="#1f242c", bd=1, relief="solid")
-        input_wrap.pack(side="left", fill="both", expand=True, padx=(0, 14))
+        # Контейнер для поля ввода (Floating Pill Frame)
+        input_wrap = tk.Frame(
+            box,
+            bg="#0d131f",
+            bd=0,
+            highlightbackground=self.BORDER_LIGHT,
+            highlightthickness=1
+        )
+        input_wrap.pack(side="left", fill="both", expand=True, padx=(0, 10))
 
         tk.Label(
             input_wrap,
             text="✦",
-            font=("Segoe UI", 13),
+            font=self.FONT_HEADING,
             fg=self.ACCENT_CYAN,
-            bg="#1f242c"
-        ).pack(side="left", padx=(14, 6))
+            bg="#0d131f"
+        ).pack(side="left", padx=(12, 6))
 
         self.cmd_input = tk.Entry(
             input_wrap,
-            font=("Segoe UI", 12),
-            bg="#1f242c",
+            font=self.FONT_BODY,
+            bg="#0d131f",
             fg=self.FG_WHITE,
             insertbackground=self.ACCENT_CYAN,
             bd=0
         )
-        self.cmd_input.pack(side="left", fill="both", expand=True, pady=8)
+        self.cmd_input.pack(side="left", fill="both", expand=True, pady=6)
         self.cmd_input.bind("<Return>", lambda e: self._on_send_command())
 
         # Placeholder
-        self.cmd_placeholder = "Что сделать? (например: 'добавь задачу купить молоко', 'найди заметку рецепт', 'покажи файлы')..."
+        self.cmd_placeholder = "Спросите что-нибудь или введите задачу (:help)..."
         self.cmd_input.insert(0, self.cmd_placeholder)
         self.cmd_input.config(fg=self.FG_MUTED)
 
         def on_focus_in(e):
+            input_wrap.config(highlightbackground=self.ACCENT_BLUE)
             if self.cmd_input.get() == self.cmd_placeholder:
                 self.cmd_input.delete(0, tk.END)
                 self.cmd_input.config(fg=self.FG_WHITE)
 
         def on_focus_out(e):
+            input_wrap.config(highlightbackground=self.BORDER_LIGHT)
             if not self.cmd_input.get().strip():
                 self.cmd_input.insert(0, self.cmd_placeholder)
                 self.cmd_input.config(fg=self.FG_MUTED)
@@ -529,35 +566,37 @@ class AkakiyGUI:
         self.btn_mic = tk.Button(
             box,
             text="🎙 Голос",
-            font=("Segoe UI", 10, "bold"),
+            font=self.FONT_CAPTION,
             fg=self.FG_WHITE,
-            bg="#21262d",
+            bg="#131c2e",
             activeforeground=self.FG_WHITE,
             activebackground=self.ACCENT_BLUE,
-            bd=1, relief="solid",
-            padx=16, pady=8,
+            bd=0,
+            highlightthickness=1,
+            highlightbackground=self.BORDER_LIGHT,
+            padx=14, pady=6,
             cursor="hand2",
             command=self._on_toggle_voice
         )
-        self.btn_mic.pack(side="left", padx=(0, 10))
-        _bind_hover(self.btn_mic, "#21262d", "#30363d", self.FG_WHITE, self.FG_WHITE)
+        self.btn_mic.pack(side="left", padx=(0, 8))
+        _bind_hover(self.btn_mic, "#131c2e", "#1e293b", self.FG_WHITE, self.FG_WHITE)
 
         # Кнопка отправки команды
         self.btn_send = tk.Button(
             box,
             text="Выполнить ➔",
-            font=("Segoe UI", 10, "bold"),
-            fg="#0d1117",
+            font=self.FONT_HEADING,
+            fg="#070a0f",
             bg=self.ACCENT_CYAN,
-            activeforeground="#0d1117",
+            activeforeground="#070a0f",
             activebackground="#7dd3fc",
             bd=0,
-            padx=20, pady=8,
+            padx=16, pady=6,
             cursor="hand2",
             command=self._on_send_command
         )
         self.btn_send.pack(side="left")
-        _bind_hover(self.btn_send, self.ACCENT_CYAN, "#7dd3fc", "#0d1117", "#0d1117")
+        _bind_hover(self.btn_send, self.ACCENT_CYAN, "#7dd3fc", "#070a0f", "#070a0f")
 
     # =========================================================================
     # Навигация и переключение экранов
@@ -569,9 +608,9 @@ class AkakiyGUI:
         # Обновление подсветки кнопок в Sidebar
         for c, btn in self.nav_buttons.items():
             if c == code:
-                btn.config(bg=self.BG_ACTIVE, fg=self.ACCENT_CYAN, font=("Segoe UI", 11, "bold"))
+                btn.config(bg=self.BG_ACTIVE, fg=self.ACCENT_CYAN, font=self.FONT_HEADING)
             else:
-                btn.config(bg=self.BG_PANEL, fg=self.FG_MAIN, font=("Segoe UI", 11))
+                btn.config(bg=self.BG_PANEL, fg=self.FG_MUTED, font=self.FONT_BODY)
 
         # Очистка рабочего пространства
         for child in self.workspace.winfo_children():
@@ -621,9 +660,9 @@ class AkakiyGUI:
         self.chat_text = self.chat_view.chat_text
         self.log_text = self.chat_view.log_text
 
-    def _insert_chat_ui(self, author: str, message: str, t_str: str):
+    def _insert_chat_ui(self, author: str, message: str, t_str: str, artifacts: Optional[List[Any]] = None):
         if hasattr(self, "chat_view") and self.chat_view:
-            return self.chat_view.insert_chat_ui(author, message, t_str)
+            return self.chat_view.insert_chat_ui(author, message, t_str, artifacts=artifacts)
         elif hasattr(self, "chat_text") and self.chat_text and self.chat_text.winfo_exists():
             self.chat_text.insert(tk.END, "\n")
             author_upper = author.upper()
@@ -635,13 +674,25 @@ class AkakiyGUI:
                 self.chat_text.insert(tk.END, f"● {author_upper}  ", "akakiy_title")
                 self.chat_text.insert(tk.END, f"[{t_str}]\n", "time")
                 self.chat_text.insert(tk.END, f"{message}\n", "akakiy_body")
+
+            if artifacts:
+                try:
+                    from ui.artifact_card import create_artifact_card
+                    for art in artifacts:
+                        card = create_artifact_card(self.chat_text, art, compact=False)
+                        self.chat_text.insert(tk.END, "\n")
+                        self.chat_text.window_create(tk.END, window=card)
+                        self.chat_text.insert(tk.END, "\n")
+                except Exception:
+                    pass
+
             self.chat_text.insert(tk.END, "─" * 48 + "\n", "div")
             self.chat_text.see(tk.END)
 
-    def _append_chat(self, author: str, message: str):
+    def _append_chat(self, author: str, message: str, artifacts: Optional[List[Any]] = None):
         t_str = time.strftime("%H:%M:%S")
-        self.chat_messages.append((author, message, t_str))
-        self._insert_chat_ui(author, message, t_str)
+        self.chat_messages.append((author, message, t_str, artifacts or []))
+        self._insert_chat_ui(author, message, t_str, artifacts=artifacts)
 
     def _insert_log_ui(self, prefix: str, text: str, t_str: str):
         if hasattr(self, "chat_view") and self.chat_view:
@@ -1127,6 +1178,7 @@ class AkakiyGUI:
             "working": ("⚙ ВЫПОЛНЯЕТ ДЕЙСТВИЕ", self.ACCENT_GREEN, "#112d1b"),
             "listening": ("🎙 СЛУШАЕТ...", self.ACCENT_CYAN, "#112b3c"),
             "speaking": ("🔊 ОТВЕЧАЕТ (ОТВЕТ)...", self.ACCENT_GREEN, "#112d1b"),
+            "success": ("✦ УСПЕШНО", self.ACCENT_CYAN, "#0f2b38"),
             "error": ("✖ ОШИБКА", self.ACCENT_RED, "#361414"),
         }
         self.current_state = state_name
@@ -1135,6 +1187,14 @@ class AkakiyGUI:
             self.status_badge.config(text=txt, fg=fg_col, bg=bg_col)
             if hasattr(self, "neural_core") and self.neural_core:
                 self.neural_core.set_state(state_name)
+            if hasattr(self, "home_view") and self.home_view and hasattr(self.home_view, "update_state_display"):
+                self.home_view.update_state_display(state_name)
+
+        if state_name == "success":
+            try:
+                self.root.after(1800, lambda: self._set_state("idle") if self.current_state == "success" else None)
+            except Exception:
+                pass
 
     def refresh_current_view(self):
         """Реактивно обновляет данные текущего активного экрана без перезагрузки GUI."""
@@ -1199,7 +1259,7 @@ class AkakiyGUI:
                         self._append_chat("Акакий", err_text)
                         self._append_log("ERR", err_text)
                     else:
-                        self._set_state("idle")
+                        self._set_state("success")
                         ans = work_entry.get("message") or "Действие выполнено."
                         chat_ans = ans
                         c_files = work_entry.get("created_files") or []
@@ -1208,7 +1268,8 @@ class AkakiyGUI:
                             if not any(f in chat_ans for f in c_files):
                                 chat_ans += f"\n\n✦ Созданные артефакты:\n" + "\n".join(f"  • {f}" for f in c_files)
                             self._append_log("DONE", f"Артефакты ({len(c_names)}): {', '.join(c_names)}")
-                        self._append_chat("Акакий", chat_ans)
+                        artifacts = work_entry.get("artifacts") or []
+                        self._append_chat("Акакий", chat_ans, artifacts=artifacts)
                         self._append_log("DONE", f"Запрос успешно обработан [{work_entry.get('type')}].")
                     self.refresh_current_view()
 
@@ -1272,8 +1333,9 @@ class AkakiyGUI:
                                     chat_ans += f"\n\n✦ Созданные артефакты:\n" + "\n".join(f"  • {f}" for f in c_files)
                                 c_names = [Path(f).name for f in c_files]
                                 self._append_log("DONE", f"Артефакты ({len(c_names)}): {', '.join(c_names)}")
+                            artifacts = work_entry.get("artifacts") or []
                             if chat_ans:
-                                self._append_chat("Акакий (Голос)", chat_ans)
+                                self._append_chat("Акакий (Голос)", chat_ans, artifacts=artifacts)
                                 self._append_log("DONE", f"Голосовой ответ сформирован [{work_entry.get('type')}].")
                         self.refresh_current_view()
                     elif ev_type == "voice_mode_toggle":

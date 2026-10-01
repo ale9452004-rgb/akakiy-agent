@@ -24,6 +24,8 @@ from tools.summary import format_task_summary
 from tools.router import CommandRouter, get_router
 from tools.agents import AgentContext, AgentResult, get_agent_registry
 
+_DEFAULT_BRIDGE = object()
+
 class Agent:
     """
     Главный интеллектуальный агент Акакия.
@@ -37,7 +39,7 @@ class Agent:
     - координацию единого контекста диалога и памяти.
     """
 
-    def __init__(self, memory_manager=None, context_manager=None, ai_client=None, skill_registry=None, router=None, agent_registry=None, permission_manager=None):
+    def __init__(self, memory_manager=None, context_manager=None, ai_client=None, skill_registry=None, router=None, agent_registry=None, permission_manager=None, bridge=_DEFAULT_BRIDGE):
         mem = memory_manager or get_memory_manager()
         self.context_manager = context_manager or ContextManager(memory_manager=mem)
         self.ai = ai_client or OllamaClient()
@@ -50,6 +52,18 @@ class Agent:
         self.planner = Planner(context_manager=self.context_manager, ai_client=self.ai)
         self.executor = PlanExecutor(self)
         self.teamwork = TeamworkCoordinator(self)
+        if bridge is _DEFAULT_BRIDGE:
+            try:
+                from agents.bootstrap import ensure_default_domain_agents
+                ensure_default_domain_agents()
+                from agents.bridge import MultiAgentBridge
+                self.bridge = MultiAgentBridge()
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).warning("Не удалось инициализировать MultiAgentBridge: %s", e)
+                self.bridge = None
+        else:
+            self.bridge = bridge
         self._last_result = None
         self._sync_memory_to_system_prompt()
 
@@ -695,32 +709,7 @@ class Agent:
             self._record_interaction(user_input, answer, tool_name="document")
             return resp
 
-        # 1.6. Проведение исследований (Research Sub-Agent Fast-Path)
-        if route_type == "research":
-            prompt = route.get("prompt", "") or route.get("topic", "")
-            subagent_res = self.run_subagent("research", task=prompt, metadata=route)
-            if subagent_res.success:
-                answer = subagent_res.message
-            else:
-                err_detail = subagent_res.error or subagent_res.message or "Неизвестная ошибка"
-                answer = f"Ошибка проведения исследования: {err_detail}"
-
-            resp = {
-                "type": "research",
-                "tool": "research",
-                "result": subagent_res,
-                "answer": answer,
-                "success": subagent_res.success,
-                "created_files": list(subagent_res.created_files),
-                "artifacts": [a.to_dict() for a in subagent_res.artifacts],
-            }
-            if not subagent_res.success:
-                resp["error"] = subagent_res.error or subagent_res.message
-
-            self._record_interaction(user_input, answer, tool_name="research")
-            return resp
-
-        # 1.7. Задачи по коду (Coding Sub-Agent Fast-Path)
+        # 1.6. Задачи по коду (Coding Sub-Agent Fast-Path)
         if route_type == "coding":
             prompt = route.get("prompt", "") or route.get("task", "")
             subagent_res = self.run_subagent("coding", task=prompt, metadata=route)
@@ -745,7 +734,7 @@ class Agent:
             self._record_interaction(user_input, answer, tool_name="coding")
             return resp
 
-        # 1.8. Файловые операции (File Sub-Agent Fast-Path)
+        # 1.7. Файловые операции (File Sub-Agent Fast-Path)
         if route_type == "file":
             prompt = route.get("prompt", "") or route.get("task", "")
             subagent_res = self.run_subagent("file", task=prompt, metadata=route)
@@ -770,7 +759,7 @@ class Agent:
             self._record_interaction(user_input, answer, tool_name="file")
             return resp
 
-        # 1.9. Явный запуск субагента (Sub-Agent Fast-Path)
+        # 1.8. Явный запуск субагента (Sub-Agent Fast-Path)
         if route_type == "subagent":
             sub_name = route.get("agent", "")
             sub_task = route.get("task", "")
@@ -826,7 +815,76 @@ class Agent:
             self._record_interaction(user_input, resp)
             return resp
 
-        # 3. Детерминированный запуск инструментов (Tool Fast-Path)
+        # 3. Детерминированный запуск проектных инструментов (Project Tools Fast-Path)
+        PROJECT_TOOLS = {"list_files", "find_file", "structure", "search_files"}
+        if route_type == "tool" and route.get("tool") in PROJECT_TOOLS:
+            tool_name = route.get("tool")
+            arguments = route.get("arguments", {})
+            result = self.execute_tool(
+                tool_name,
+                arguments
+            )
+            is_success = bool(result.get("success", True)) if isinstance(result, dict) else True
+            resp = {
+                "type": "tool",
+                "tool": tool_name,
+                "result": result,
+                "success": is_success,
+            }
+            if isinstance(result, dict):
+                if result.get("message"):
+                    resp["answer"] = result["message"]
+                if not is_success and result.get("error"):
+                    resp["error"] = result["error"]
+            self._record_interaction(user_input, resp, tool_name=tool_name)
+            return resp
+
+        # 4. MultiAgentBridge (Domain Agents: Household, Research и будущие расширения)
+        if hasattr(self, "bridge") and self.bridge is not None:
+            try:
+                bridge_result = self.bridge.try_process(
+                    user_input=user_input,
+                    legacy_route=route,
+                    context={"parent_agent": self}
+                )
+                if bridge_result is not None:
+                    self._record_interaction(
+                        user_input,
+                        bridge_result,
+                        tool_name=str(bridge_result.get("type", "agent"))
+                    )
+                    self._last_result = bridge_result.get("result") or bridge_result
+                    return bridge_result
+            except Exception as bridge_exc:
+                import logging
+                logging.getLogger(__name__).exception("Исключение при вызове MultiAgentBridge в Agent.process: %s", bridge_exc)
+
+        # 5. Проведение исследований (Research Sub-Agent Fast-Path / Fallback)
+        if route_type == "research":
+            prompt = route.get("prompt", "") or route.get("topic", "")
+            subagent_res = self.run_subagent("research", task=prompt, metadata=route)
+            if subagent_res.success:
+                answer = subagent_res.message
+            else:
+                err_detail = subagent_res.error or subagent_res.message or "Неизвестная ошибка"
+                answer = f"Ошибка проведения исследования: {err_detail}"
+
+            resp = {
+                "type": "research",
+                "tool": "research",
+                "result": subagent_res,
+                "answer": answer,
+                "success": subagent_res.success,
+                "created_files": list(subagent_res.created_files),
+                "artifacts": [a.to_dict() for a in subagent_res.artifacts],
+            }
+            if not subagent_res.success:
+                resp["error"] = subagent_res.error or subagent_res.message
+
+            self._record_interaction(user_input, answer, tool_name="research")
+            return resp
+
+        # 6. Детерминированный запуск остальных инструментов (Tool Fast-Path)
         if route_type == "tool":
             tool_name = route.get("tool")
             if tool_name and str(tool_name).strip().lower() not in {"null", "none"}:

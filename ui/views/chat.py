@@ -4,7 +4,7 @@
 
 import time
 import tkinter as tk
-from typing import Any, List, Tuple
+from typing import Any, List, Optional, Tuple
 
 from ui.views.base import BaseView, _bind_hover
 
@@ -54,7 +54,7 @@ class ChatView(BaseView):
         tk.Label(
             chat_header,
             text="ДИАЛОГ С АКАКИЕМ",
-            font=("Segoe UI", 11, "bold"),
+            font=(self.DISPLAY_FAMILY, 11, "bold"),
             fg=self.FG_WHITE,
             bg=self.BG_CARD
         ).pack(side="left")
@@ -62,7 +62,7 @@ class ChatView(BaseView):
         btn_clear = tk.Button(
             chat_header,
             text="Очистить",
-            font=("Segoe UI", 8),
+            font=self.FONT_CAPTION,
             fg=self.FG_MUTED,
             bg="#21262d",
             bd=0,
@@ -76,7 +76,7 @@ class ChatView(BaseView):
             left_chat,
             bg="#0d1117",
             fg=self.FG_MAIN,
-            font=("Segoe UI", 10),
+            font=(self.UI_FAMILY, 10),
             wrap="word",
             bd=0,
             padx=14,
@@ -85,12 +85,12 @@ class ChatView(BaseView):
         self.chat_text.pack(fill="both", expand=True, padx=12, pady=(0, 12))
 
         # Теги для подсветки сообщений
-        self.chat_text.tag_config("user_title", foreground=self.ACCENT_CYAN, font=("Segoe UI", 9, "bold"))
-        self.chat_text.tag_config("akakiy_title", foreground=self.ACCENT_GREEN, font=("Segoe UI", 9, "bold"))
-        self.chat_text.tag_config("time", foreground=self.FG_DIM, font=("Segoe UI", 8))
+        self.chat_text.tag_config("user_title", foreground=self.ACCENT_CYAN, font=(self.UI_FAMILY, 9, "bold"))
+        self.chat_text.tag_config("akakiy_title", foreground=self.ACCENT_GREEN, font=(self.UI_FAMILY, 9, "bold"))
+        self.chat_text.tag_config("time", foreground=self.FG_DIM, font=self.FONT_CAPTION)
         self.chat_text.tag_config("user_body", foreground=self.FG_WHITE)
         self.chat_text.tag_config("akakiy_body", foreground=self.FG_MAIN)
-        self.chat_text.tag_config("artifact", foreground=self.ACCENT_CYAN, font=("Consolas", 9))
+        self.chat_text.tag_config("artifact", foreground=self.ACCENT_CYAN, font=(self.MONO_FAMILY, 9))
         self.chat_text.tag_config("div", foreground=self.BORDER_COL)
 
         # Правая колонка: Лог инструментов и процессов
@@ -101,7 +101,7 @@ class ChatView(BaseView):
         tk.Label(
             right_log,
             text="СИСТЕМНЫЙ ЛОГ И ИНСТРУМЕНТЫ",
-            font=("Segoe UI", 10, "bold"),
+            font=self.FONT_HEADING,
             fg=self.FG_MUTED,
             bg=self.BG_CARD
         ).pack(anchor="w", padx=16, pady=12)
@@ -110,7 +110,7 @@ class ChatView(BaseView):
             right_log,
             bg="#0d1117",
             fg=self.FG_MUTED,
-            font=("Consolas", 8),
+            font=self.FONT_MONO,
             wrap="word",
             bd=0,
             padx=10,
@@ -131,14 +131,18 @@ class ChatView(BaseView):
         if not self.chat_messages:
             self.append_chat("Акакий", "Привет! Чем я могу помочь? Задавай вопросы, управляй делами или работай с проектом.")
         else:
-            for author, message, t_str in list(self.chat_messages):
-                self.insert_chat_ui(author, message, t_str)
+            for item in list(self.chat_messages):
+                author = item[0]
+                message = item[1]
+                t_str = item[2]
+                artifacts = item[3] if len(item) > 3 else None
+                self.insert_chat_ui(author, message, t_str, artifacts=artifacts)
 
         for prefix, text, t_str in list(self.log_messages):
             self.insert_log_ui(prefix, text, t_str)
 
-    def insert_chat_ui(self, author: str, message: str, t_str: str) -> None:
-        """Вставка отформатированного сообщения в ленту чата."""
+    def insert_chat_ui(self, author: str, message: str, t_str: str, artifacts: Optional[List[Any]] = None) -> None:
+        """Вставка отформатированного сообщения в ленту чата с поддержкой артефактов."""
         if not self.chat_text or not self.chat_text.winfo_exists():
             return
         self.chat_text.insert(tk.END, "\n")
@@ -156,14 +160,27 @@ class ChatView(BaseView):
                 self.chat_text.insert(tk.END, f"\n✦{parts[1]}\n", "artifact")
             else:
                 self.chat_text.insert(tk.END, f"{message}\n", "akakiy_body")
+
+        # Встраивание интерактивных карточек артефактов (включая IMAGE с preview)
+        if artifacts:
+            from ui.artifact_card import create_artifact_card
+            for art in artifacts:
+                try:
+                    card = create_artifact_card(self.chat_text, art, compact=False)
+                    self.chat_text.insert(tk.END, "\n")
+                    self.chat_text.window_create(tk.END, window=card)
+                    self.chat_text.insert(tk.END, "\n")
+                except Exception:
+                    pass
+
         self.chat_text.insert(tk.END, "─" * 48 + "\n", "div")
         self.chat_text.see(tk.END)
 
-    def append_chat(self, author: str, message: str) -> None:
+    def append_chat(self, author: str, message: str, artifacts: Optional[List[Any]] = None) -> None:
         """Добавление сообщения в историю и отображение в интерфейсе."""
         t_str = time.strftime("%H:%M:%S")
-        self.chat_messages.append((author, message, t_str))
-        self.insert_chat_ui(author, message, t_str)
+        self.chat_messages.append((author, message, t_str, artifacts or []))
+        self.insert_chat_ui(author, message, t_str, artifacts=artifacts)
 
     def insert_log_ui(self, prefix: str, text: str, t_str: str) -> None:
         """Вставка строки лога в системную панель."""

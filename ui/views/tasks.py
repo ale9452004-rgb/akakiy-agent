@@ -37,7 +37,7 @@ class TasksView(BaseView):
         tk.Label(
             header_row,
             text="УПРАВЛЕНИЕ ЗАДАЧАМИ (TASKS)",
-            font=("Segoe UI", 14, "bold"),
+            font=(self.DISPLAY_FAMILY, 14, "bold"),
             fg=self.FG_WHITE,
             bg=self.BG_MAIN
         ).pack(side="left")
@@ -49,14 +49,14 @@ class TasksView(BaseView):
         tk.Label(
             search_box,
             text="Поиск:",
-            font=("Segoe UI", 9),
+            font=self.FONT_BODY,
             fg=self.FG_MUTED,
             bg=self.BG_MAIN
         ).pack(side="left", padx=4)
 
         self.entry_task_search = tk.Entry(
             search_box,
-            font=("Segoe UI", 10),
+            font=(self.UI_FAMILY, 10),
             bg=self.BG_CARD,
             fg=self.FG_WHITE,
             width=20,
@@ -73,14 +73,14 @@ class TasksView(BaseView):
         tk.Label(
             add_box,
             text="Новая задача:",
-            font=("Segoe UI", 10, "bold"),
+            font=self.FONT_HEADING,
             fg=self.FG_WHITE,
             bg=self.BG_CARD
         ).pack(side="left", padx=16)
 
         self.entry_task = tk.Entry(
             add_box,
-            font=("Segoe UI", 11),
+            font=(self.UI_FAMILY, 11),
             bg="#13171f",
             fg=self.FG_WHITE,
             bd=1,
@@ -92,7 +92,7 @@ class TasksView(BaseView):
         btn_add = tk.Button(
             add_box,
             text="Добавить",
-            font=("Segoe UI", 9, "bold"),
+            font=(self.UI_FAMILY, 9, "bold"),
             bg=self.ACCENT_CYAN,
             fg="#0d1117",
             bd=0,
@@ -157,7 +157,7 @@ class TasksView(BaseView):
         chk = tk.Button(
             row,
             text=btn_txt,
-            font=("Segoe UI", 12),
+            font=(self.UI_FAMILY, 12),
             fg=btn_color,
             bg="#13171f",
             bd=0,
@@ -170,7 +170,7 @@ class TasksView(BaseView):
         tk.Label(
             row,
             text=f"#{t['id']} {t['title']}",
-            font=("Segoe UI", 10),
+            font=(self.UI_FAMILY, 10),
             fg=t_fg,
             bg="#13171f"
         ).pack(side="left", padx=4)
@@ -179,7 +179,7 @@ class TasksView(BaseView):
         tk.Label(
             row,
             text=t.get("created_at", ""),
-            font=("Consolas", 8),
+            font=self.FONT_MONO,
             fg=self.FG_DIM,
             bg="#13171f"
         ).pack(side="right", padx=12)
@@ -188,7 +188,7 @@ class TasksView(BaseView):
         btn_del = tk.Button(
             row,
             text="✕",
-            font=("Segoe UI", 9),
+            font=(self.UI_FAMILY, 9),
             fg=self.ACCENT_RED,
             bg="#13171f",
             bd=0,
@@ -218,7 +218,7 @@ class TasksView(BaseView):
             tk.Label(
                 self.tasks_list_frame,
                 text="Сервис задач недоступен.",
-                font=("Segoe UI", 11),
+                font=(self.UI_FAMILY, 11),
                 fg=self.FG_MUTED,
                 bg=self.BG_CARD
             ).pack(pady=40)

@@ -1,0 +1,195 @@
+/* ==========================================================================
+   Akakiy Visual Core 2.0 — WebGL Living Digital Art Engine
+   Styling & Calibration HUD
+   ========================================================================== */
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+    user-select: none;
+    -webkit-user-select: none;
+}
+
+html, body {
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    background-color: #0a0e17;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI Variable Text", "Segoe UI", Inter, sans-serif;
+    color: #cbd5e1;
+}
+
+#viewport-container {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: radial-gradient(circle at 50% 50%, #0e1625 0%, #0a0e17 80%);
+}
+
+#gl-canvas {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    display: block;
+}
+
+/* --------------------------------------------------------------------------
+   Floating Calibration HUD (Testing & Visual Evaluation)
+   -------------------------------------------------------------------------- */
+#calibration-hud {
+    position: absolute;
+    bottom: 24px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(12, 17, 28, 0.82);
+    border: 1px solid rgba(56, 189, 248, 0.16);
+    border-radius: 20px;
+    padding: 12px 20px;
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    box-shadow: 0 16px 36px rgba(0, 0, 0, 0.65), 0 0 24px rgba(56, 189, 248, 0.08);
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    z-index: 100;
+    transition: opacity 0.25s ease, transform 0.25s ease;
+    max-width: 90vw;
+}
+
+#calibration-hud.hidden {
+    opacity: 0;
+    pointer-events: none;
+    transform: translateX(-50%) translateY(20px);
+}
+
+.hud-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    color: #64748b;
+    font-weight: 600;
+    text-transform: uppercase;
+}
+
+.hud-title {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    color: #38bdf8;
+}
+
+.hud-fps {
+    font-family: "Consolas", monospace;
+    color: #34d399;
+}
+
+/* Кнопки состояний ядра */
+.state-buttons {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    justify-content: center;
+}
+
+.btn-state {
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    color: #94a3b8;
+    padding: 6px 12px;
+    border-radius: 12px;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    cursor: pointer;
+    transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.btn-state:hover {
+    background: rgba(255, 255, 255, 0.1);
+    color: #f8fafc;
+    border-color: rgba(255, 255, 255, 0.2);
+    transform: translateY(-1px);
+}
+
+.btn-state.active {
+    color: #f8fafc;
+    border-color: currentColor;
+    box-shadow: 0 0 16px currentColor;
+    background: rgba(255, 255, 255, 0.08);
+}
+
+/* Индивидуальная подсветка активного состояния */
+.btn-state[data-state="idle"].active { color: #38bdf8; }
+.btn-state[data-state="listening"].active { color: #22d3ee; }
+.btn-state[data-state="thinking"].active { color: #c084fc; }
+.btn-state[data-state="working"].active { color: #34d399; }
+.btn-state[data-state="speaking"].active { color: #2dd4bf; }
+.btn-state[data-state="success"].active { color: #fbbf24; }
+.btn-state[data-state="error"].active { color: #fb7185; }
+
+/* Ползунок громкости аудио */
+.audio-control {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding-top: 4px;
+    border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.audio-label {
+    font-size: 11px;
+    color: #64748b;
+    font-weight: 500;
+    min-width: 90px;
+}
+
+.audio-slider {
+    flex: 1;
+    -webkit-appearance: none;
+    appearance: none;
+    height: 4px;
+    border-radius: 2px;
+    background: rgba(255, 255, 255, 0.12);
+    outline: none;
+    cursor: pointer;
+}
+
+.audio-slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: #38bdf8;
+    box-shadow: 0 0 8px #38bdf8;
+    cursor: pointer;
+    transition: transform 0.1s;
+}
+
+.audio-slider::-webkit-slider-thumb:hover {
+    transform: scale(1.2);
+}
+
+.audio-value {
+    font-family: "Consolas", monospace;
+    font-size: 11px;
+    color: #38bdf8;
+    min-width: 32px;
+    text-align: right;
+}
+
+/* Подсказка hotkey */
+.hud-hint {
+    text-align: center;
+    font-size: 9px;
+    color: #475569;
+    letter-spacing: 0.05em;
+}

@@ -730,8 +730,8 @@ class HouseholdManager:
                 "item": item
             }
 
-    def complete_list_item(self, list_name: str, item_id: Union[int, str]) -> Dict[str, Any]:
-        """Отмечает пункт списка выполненным."""
+    def complete_list_item(self, list_name: str, item_id: Union[int, str], completed: Optional[bool] = None) -> Dict[str, Any]:
+        """Отмечает пункт списка выполненным (или устанавливает переданный статус)."""
         clean_name = str(list_name).strip().lower() if list_name else ""
         if clean_name not in self.lists:
             return {"success": False, "error": f"Список \"{clean_name}\" не найден."}
@@ -752,11 +752,44 @@ class HouseholdManager:
             if target is None:
                 return {"success": False, "error": f"Пункт '{item_id}' в списке \"{clean_name}\" не найден."}
 
-            target["completed"] = True
+            target["completed"] = True if completed is None else bool(completed)
             self._save()
+            status_text = "выполнен" if target["completed"] else "снят с выполнения"
             return {
                 "success": True,
-                "message": f"Пункт #{target['id']} \"{target['text']}\" в списке \"{clean_name}\" выполнен.",
+                "message": f"Пункт #{target['id']} \"{target['text']}\" в списке \"{clean_name}\" {status_text}.",
+                "item": target
+            }
+
+    def toggle_list_item(self, list_name: str, item_id: Union[int, str]) -> Dict[str, Any]:
+        """Переключает статус выполнения пункта списка (не выполнен <-> выполнен)."""
+        clean_name = str(list_name).strip().lower() if list_name else ""
+        if clean_name not in self.lists:
+            return {"success": False, "error": f"Список \"{clean_name}\" не найден."}
+
+        with self._lock:
+            items = self.lists[clean_name]
+            target = None
+            try:
+                i_int = int(str(item_id).lstrip("#"))
+                target = next((it for it in items if it.get("id") == i_int), None)
+            except ValueError:
+                pass
+
+            if target is None:
+                norm_query = str(item_id).strip().lower()
+                target = next((it for it in items if norm_query in it.get("text", "").lower()), None)
+
+            if target is None:
+                return {"success": False, "error": f"Пункт '{item_id}' в списке \"{clean_name}\" не найден."}
+
+            new_val = not target.get("completed", False)
+            target["completed"] = new_val
+            self._save()
+            status_text = "выполнен" if new_val else "не выполнен"
+            return {
+                "success": True,
+                "message": f"Пункт #{target['id']} \"{target['text']}\" в списке \"{clean_name}\" отмечен как {status_text}.",
                 "item": target
             }
 
@@ -887,6 +920,9 @@ def add_list_item(list_name: str, text: str) -> Dict[str, Any]:
 
 def complete_list_item(list_name: str, item_id: Union[int, str]) -> Dict[str, Any]:
     return get_household_manager().complete_list_item(list_name=list_name, item_id=item_id)
+
+def toggle_list_item(list_name: str, item_id: Union[int, str]) -> Dict[str, Any]:
+    return get_household_manager().toggle_list_item(list_name=list_name, item_id=item_id)
 
 def delete_list_item(list_name: str, item_id: Union[int, str]) -> Dict[str, Any]:
     return get_household_manager().delete_list_item(list_name=list_name, item_id=item_id)

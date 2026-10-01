@@ -11,6 +11,8 @@ import math
 import tkinter as tk
 from typing import Any, Callable, Generic, List, Optional, TypeVar
 
+from ui.typography import typography
+
 def _bind_hover(
     widget: tk.Widget,
     normal_bg: str,
@@ -213,7 +215,7 @@ class PaginationBar(tk.Frame):
         self.btn_prev = tk.Button(
             center_box,
             text="←",
-            font=("Segoe UI", 10, "bold"),
+            font=(typography.ui_family, 10, "bold"),
             bg=self.BG_BTN,
             fg=self.FG_WHITE,
             bd=1,
@@ -230,7 +232,7 @@ class PaginationBar(tk.Frame):
         self.lbl_info = tk.Label(
             center_box,
             text="Страница 1 из 1",
-            font=("Segoe UI", 9),
+            font=(typography.ui_family, 9),
             fg=self.FG_MUTED,
             bg=self.cget("bg")
         )
@@ -240,7 +242,7 @@ class PaginationBar(tk.Frame):
         self.btn_next = tk.Button(
             center_box,
             text="→",
-            font=("Segoe UI", 10, "bold"),
+            font=(typography.ui_family, 10, "bold"),
             bg=self.BG_BTN,
             fg=self.FG_WHITE,
             bd=1,
@@ -368,7 +370,7 @@ class PagedListController(Generic[T]):
             tk.Label(
                 self.content_frame,
                 text=self.empty_text,
-                font=("Segoe UI", 11),
+                font=(typography.ui_family, 11),
                 fg=self.empty_fg,
                 bg=self.empty_bg
             ).pack(pady=40)
@@ -380,7 +382,7 @@ class PagedListController(Generic[T]):
             tk.Label(
                 self.content_frame,
                 text=self.no_results_text,
-                font=("Segoe UI", 11),
+                font=(typography.ui_family, 11),
                 fg=self.empty_fg,
                 bg=self.empty_bg
             ).pack(pady=40)

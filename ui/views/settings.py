@@ -37,7 +37,7 @@ class SettingsView(BaseView):
         tk.Label(
             header_row,
             text="НАСТРОЙКИ И ДИАГНОСТИКА СИСТЕМЫ",
-            font=("Segoe UI", 14, "bold"),
+            font=(self.DISPLAY_FAMILY, 14, "bold"),
             fg=self.FG_WHITE,
             bg=self.BG_MAIN
         ).pack(side="left")
@@ -49,7 +49,7 @@ class SettingsView(BaseView):
         tk.Label(
             panel,
             text="ИНТЕЛЛЕКТУАЛЬНЫЙ БЭКЕНД",
-            font=("Segoe UI", 11, "bold"),
+            font=(self.DISPLAY_FAMILY, 11, "bold"),
             fg=self.ACCENT_CYAN,
             bg=self.BG_CARD
         ).pack(anchor="w", padx=20, pady=(20, 8))
@@ -60,7 +60,7 @@ class SettingsView(BaseView):
                  "• Модель: qwen3:8b\n"
                  "• Skills Registry: project, memory, household\n"
                  "• Context Manager: Sliding Window + Data Injection Shield",
-            font=("Segoe UI", 9),
+            font=self.FONT_BODY,
             fg=self.FG_MAIN,
             bg=self.BG_CARD,
             justify="left"
@@ -70,7 +70,7 @@ class SettingsView(BaseView):
         tk.Label(
             panel,
             text="ПРОВЕРКА ЦЕЛОСТНОСТИ ПРОЕКТА",
-            font=("Segoe UI", 11, "bold"),
+            font=(self.DISPLAY_FAMILY, 11, "bold"),
             fg=self.ACCENT_GREEN,
             bg=self.BG_CARD
         ).pack(anchor="w", padx=20, pady=(10, 8))
@@ -78,7 +78,7 @@ class SettingsView(BaseView):
         btn_val = tk.Button(
             panel,
             text="Запустить validate_project()",
-            font=("Segoe UI", 9, "bold"),
+            font=(self.UI_FAMILY, 9, "bold"),
             bg=self.ACCENT_GREEN,
             fg="#0d1117",
             bd=0,
@@ -93,7 +93,7 @@ class SettingsView(BaseView):
         self.lbl_val_res = tk.Label(
             panel,
             text="",
-            font=("Consolas", 9),
+            font=(self.MONO_FAMILY, 9),
             fg=self.FG_MUTED,
             bg=self.BG_CARD
         )
@@ -103,7 +103,7 @@ class SettingsView(BaseView):
         tk.Label(
             panel,
             text="ЛОКАЛЬНЫЕ ДАННЫЕ",
-            font=("Segoe UI", 11, "bold"),
+            font=(self.DISPLAY_FAMILY, 11, "bold"),
             fg=self.ACCENT_PURPLE,
             bg=self.BG_CARD
         ).pack(anchor="w", padx=20, pady=(10, 8))
@@ -113,7 +113,7 @@ class SettingsView(BaseView):
             text="• Долговременная память: data/memory.json (изолировано)\n"
                  "• Бытовой слой: data/household.json (Tasks, Reminders, Notes, Lists)\n"
                  "• Резервное копирование: безопасный экспорт/импорт в JSON с валидацией",
-            font=("Segoe UI", 9),
+            font=self.FONT_BODY,
             fg=self.FG_MAIN,
             bg=self.BG_CARD,
             justify="left"
@@ -125,7 +125,7 @@ class SettingsView(BaseView):
         btn_export = tk.Button(
             btn_box,
             text="⬆ Экспорт данных...",
-            font=("Segoe UI", 9, "bold"),
+            font=(self.UI_FAMILY, 9, "bold"),
             bg="#21262d",
             fg=self.FG_WHITE,
             bd=1,
@@ -141,7 +141,7 @@ class SettingsView(BaseView):
         btn_import = tk.Button(
             btn_box,
             text="⬇ Импорт данных...",
-            font=("Segoe UI", 9, "bold"),
+            font=(self.UI_FAMILY, 9, "bold"),
             bg="#21262d",
             fg=self.FG_WHITE,
             bd=1,
@@ -157,7 +157,7 @@ class SettingsView(BaseView):
         self.lbl_backup_res = tk.Label(
             panel,
             text="",
-            font=("Segoe UI", 9),
+            font=self.FONT_BODY,
             fg=self.FG_MUTED,
             bg=self.BG_CARD
         )
@@ -167,7 +167,7 @@ class SettingsView(BaseView):
         tk.Label(
             panel,
             text="УВЕДОМЛЕНИЯ И ЗВУК",
-            font=("Segoe UI", 11, "bold"),
+            font=(self.DISPLAY_FAMILY, 11, "bold"),
             fg=self.ACCENT_AMBER,
             bg=self.BG_CARD
         ).pack(anchor="w", padx=20, pady=(10, 8))
@@ -182,7 +182,7 @@ class SettingsView(BaseView):
         tk.Label(
             sound_info,
             text="Звук уведомлений",
-            font=("Segoe UI", 10, "bold"),
+            font=self.FONT_HEADING,
             fg=self.FG_WHITE,
             bg=self.BG_CARD
         ).pack(anchor="w")
@@ -190,7 +190,7 @@ class SettingsView(BaseView):
         tk.Label(
             sound_info,
             text="Воспроизведение системного звука Windows при появлении уведомлений",
-            font=("Segoe UI", 9),
+            font=self.FONT_BODY,
             fg=self.FG_MUTED,
             bg=self.BG_CARD
         ).pack(anchor="w")
@@ -198,7 +198,7 @@ class SettingsView(BaseView):
         self.btn_toggle_sound = tk.Button(
             row_sound,
             text="",
-            font=("Segoe UI", 9, "bold"),
+            font=(self.UI_FAMILY, 9, "bold"),
             bd=1,
             relief="solid",
             padx=16,
@@ -218,7 +218,7 @@ class SettingsView(BaseView):
         tk.Label(
             tts_info,
             text="Озвучивать напоминания (TTS)",
-            font=("Segoe UI", 10, "bold"),
+            font=self.FONT_HEADING,
             fg=self.FG_WHITE,
             bg=self.BG_CARD
         ).pack(anchor="w")
@@ -226,7 +226,7 @@ class SettingsView(BaseView):
         tk.Label(
             tts_info,
             text="Произносить текст наступившего напоминания голосом через синтезатор речи",
-            font=("Segoe UI", 9),
+            font=self.FONT_BODY,
             fg=self.FG_MUTED,
             bg=self.BG_CARD
         ).pack(anchor="w")
@@ -234,7 +234,7 @@ class SettingsView(BaseView):
         self.btn_toggle_tts = tk.Button(
             row_tts,
             text="",
-            font=("Segoe UI", 9, "bold"),
+            font=(self.UI_FAMILY, 9, "bold"),
             bd=1,
             relief="solid",
             padx=16,
@@ -248,7 +248,7 @@ class SettingsView(BaseView):
         btn_test = tk.Button(
             panel,
             text="🔊 Проверить звук уведомления",
-            font=("Segoe UI", 9, "bold"),
+            font=(self.UI_FAMILY, 9, "bold"),
             bg="#21262d",
             fg=self.FG_WHITE,
             bd=1,

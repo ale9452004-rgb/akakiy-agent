@@ -24,7 +24,7 @@ class ListsView(BaseView):
         self.list_names_box: Optional[tk.Frame] = None
         self.right_items_pane: Optional[tk.Frame] = None
         self.entry_item_text: Optional[tk.Entry] = None
-        self.current_selected_list: str = ""
+        self.current_selected_list: Optional[str] = getattr(self.shell, "current_selected_list", None) if self.shell else None
         self.pagination_bar: Optional[PaginationBar] = None
         self.paged_controller: Optional[PagedListController] = None
         self.render()
@@ -40,7 +40,7 @@ class ListsView(BaseView):
         tk.Label(
             header_row,
             text="СПИСКИ (LISTS)",
-            font=("Segoe UI", 14, "bold"),
+            font=(self.DISPLAY_FAMILY, 14, "bold"),
             fg=self.FG_WHITE,
             bg=self.BG_MAIN
         ).pack(side="left")
@@ -52,14 +52,14 @@ class ListsView(BaseView):
         tk.Label(
             search_box,
             text="Поиск:",
-            font=("Segoe UI", 9),
+            font=self.FONT_BODY,
             fg=self.FG_MUTED,
             bg=self.BG_MAIN
         ).pack(side="left", padx=4)
 
         self.entry_list_search = tk.Entry(
             search_box,
-            font=("Segoe UI", 10),
+            font=(self.UI_FAMILY, 10),
             bg=self.BG_CARD,
             fg=self.FG_WHITE,
             width=20,
@@ -80,7 +80,7 @@ class ListsView(BaseView):
         tk.Label(
             left_pane,
             text="ВАШИ СПИСКИ",
-            font=("Segoe UI", 10, "bold"),
+            font=self.FONT_HEADING,
             fg=self.FG_WHITE,
             bg=self.BG_CARD
         ).pack(anchor="w", padx=14, pady=12)
@@ -90,7 +90,7 @@ class ListsView(BaseView):
 
         self.entry_new_list = tk.Entry(
             new_l_box,
-            font=("Segoe UI", 9),
+            font=(self.UI_FAMILY, 9),
             bg="#13171f",
             fg=self.FG_WHITE,
             bd=1,
@@ -102,7 +102,7 @@ class ListsView(BaseView):
         btn_create_l = tk.Button(
             new_l_box,
             text="+",
-            font=("Segoe UI", 9, "bold"),
+            font=(self.UI_FAMILY, 9, "bold"),
             bg=self.ACCENT_GREEN,
             fg="#0d1117",
             bd=0,
@@ -177,7 +177,7 @@ class ListsView(BaseView):
         b = tk.Button(
             parent,
             text=f"• {id_prefix}{l_name} ({cnt})",
-            font=("Segoe UI", 9, "bold" if is_active else "normal"),
+            font=(self.UI_FAMILY, 9, "bold" if is_active else "normal"),
             fg=btn_fg,
             bg=btn_bg,
             bd=0,
@@ -214,7 +214,7 @@ class ListsView(BaseView):
             tk.Label(
                 self.list_names_box,
                 text="Сервис списков недоступен.",
-                font=("Segoe UI", 9),
+                font=(self.UI_FAMILY, 9),
                 fg=self.FG_MUTED,
                 bg=self.BG_CARD
             ).pack(pady=10)
@@ -259,7 +259,7 @@ class ListsView(BaseView):
         self.current_selected_list = name
         if self.shell:
             self.shell.current_selected_list = name
-        self.render_selected_list_items(self.current_selected_list)
+        self.render_selected_list_items(name)
         if self.paged_controller:
             self.paged_controller.render()
 
@@ -275,7 +275,7 @@ class ListsView(BaseView):
             tk.Label(
                 self.right_items_pane,
                 text="Выберите или создайте список слева.",
-                font=("Segoe UI", 11),
+                font=(self.UI_FAMILY, 11),
                 fg=self.FG_MUTED,
                 bg=self.BG_CARD
             ).pack(pady=40)
@@ -287,7 +287,7 @@ class ListsView(BaseView):
         tk.Label(
             header,
             text=f"СПИСОК: {list_name.upper()}",
-            font=("Segoe UI", 12, "bold"),
+            font=(self.UI_FAMILY, 12, "bold"),
             fg=self.ACCENT_GREEN,
             bg=self.BG_CARD
         ).pack(side="left")
@@ -295,7 +295,7 @@ class ListsView(BaseView):
         btn_del_list = tk.Button(
             header,
             text="Удалить список целиком",
-            font=("Segoe UI", 8),
+            font=self.FONT_CAPTION,
             fg=self.ACCENT_RED,
             bg="#21262d",
             bd=0,
@@ -313,7 +313,7 @@ class ListsView(BaseView):
 
         self.entry_item_text = tk.Entry(
             add_item_box,
-            font=("Segoe UI", 10),
+            font=(self.UI_FAMILY, 10),
             bg="#13171f",
             fg=self.FG_WHITE,
             bd=1,
@@ -325,7 +325,7 @@ class ListsView(BaseView):
         btn_add_item = tk.Button(
             add_item_box,
             text="Добавить пункт",
-            font=("Segoe UI", 9, "bold"),
+            font=(self.UI_FAMILY, 9, "bold"),
             bg=self.ACCENT_GREEN,
             fg="#0d1117",
             bd=0,
@@ -346,7 +346,7 @@ class ListsView(BaseView):
             tk.Label(
                 items_scroll,
                 text="Список пуст.",
-                font=("Segoe UI", 10),
+                font=(self.UI_FAMILY, 10),
                 fg=self.FG_MUTED,
                 bg=self.BG_CARD
             ).pack(anchor="w", pady=10)
@@ -360,7 +360,7 @@ class ListsView(BaseView):
                 chk = tk.Button(
                     row,
                     text=btn_txt,
-                    font=("Segoe UI", 11),
+                    font=(self.UI_FAMILY, 11),
                     fg=self.ACCENT_GREEN if is_done else self.FG_MUTED,
                     bg="#13171f",
                     bd=0,
@@ -369,18 +369,23 @@ class ListsView(BaseView):
                 )
                 chk.pack(side="left", padx=8, pady=4)
 
-                tk.Label(
+                lbl_text = tk.Label(
                     row,
                     text=it["text"],
-                    font=("Segoe UI", 9),
+                    font=(self.UI_FAMILY, 9),
                     fg=self.FG_MUTED if is_done else self.FG_WHITE,
-                    bg="#13171f"
-                ).pack(side="left", padx=4)
+                    bg="#13171f",
+                    cursor="hand2"
+                )
+                lbl_text.pack(side="left", padx=4)
+                lbl_text.bind("<Button-1>", lambda e, iid=it["id"]: self.ui_toggle_item(list_name, iid))
+                row.bind("<Button-1>", lambda e, iid=it["id"]: self.ui_toggle_item(list_name, iid))
+                row.config(cursor="hand2")
 
                 btn_del = tk.Button(
                     row,
                     text="✕",
-                    font=("Segoe UI", 8),
+                    font=self.FONT_CAPTION,
                     fg=self.ACCENT_RED,
                     bg="#13171f",
                     bd=0,
@@ -399,9 +404,12 @@ class ListsView(BaseView):
             self.refresh()
 
     def ui_toggle_item(self, list_name: str, item_id: int) -> None:
-        """Переключение отметки пункта списка."""
+        """Переключение отметки пункта списка (toggle: не выполнен <-> выполнен)."""
         if self.household:
-            self.household.complete_list_item(list_name, item_id)
+            if hasattr(self.household, "toggle_list_item"):
+                self.household.toggle_list_item(list_name, item_id)
+            else:
+                self.household.complete_list_item(list_name, item_id)
             self.render_selected_list_items(list_name)
 
     def ui_delete_item(self, list_name: str, item_id: int) -> None:

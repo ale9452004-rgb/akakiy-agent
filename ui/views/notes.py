@@ -38,7 +38,7 @@ class NotesView(BaseView):
         tk.Label(
             header_row,
             text="ЗАМЕТКИ (NOTES)",
-            font=("Segoe UI", 14, "bold"),
+            font=(self.DISPLAY_FAMILY, 14, "bold"),
             fg=self.FG_WHITE,
             bg=self.BG_MAIN
         ).pack(side="left")
@@ -50,14 +50,14 @@ class NotesView(BaseView):
         tk.Label(
             search_box,
             text="Поиск:",
-            font=("Segoe UI", 9),
+            font=self.FONT_BODY,
             fg=self.FG_MUTED,
             bg=self.BG_MAIN
         ).pack(side="left", padx=4)
 
         self.entry_note_search = tk.Entry(
             search_box,
-            font=("Segoe UI", 10),
+            font=(self.UI_FAMILY, 10),
             bg=self.BG_CARD,
             fg=self.FG_WHITE,
             width=20,
@@ -74,14 +74,14 @@ class NotesView(BaseView):
         tk.Label(
             create_box,
             text="Заголовок:",
-            font=("Segoe UI", 9, "bold"),
+            font=(self.UI_FAMILY, 9, "bold"),
             fg=self.FG_WHITE,
             bg=self.BG_CARD
         ).pack(anchor="w", padx=16, pady=(10, 2))
 
         self.entry_note_title = tk.Entry(
             create_box,
-            font=("Segoe UI", 10),
+            font=(self.UI_FAMILY, 10),
             bg="#13171f",
             fg=self.FG_WHITE,
             bd=1,
@@ -92,14 +92,14 @@ class NotesView(BaseView):
         tk.Label(
             create_box,
             text="Текст заметки:",
-            font=("Segoe UI", 9, "bold"),
+            font=(self.UI_FAMILY, 9, "bold"),
             fg=self.FG_WHITE,
             bg=self.BG_CARD
         ).pack(anchor="w", padx=16, pady=(4, 2))
 
         self.entry_note_content = tk.Entry(
             create_box,
-            font=("Segoe UI", 10),
+            font=(self.UI_FAMILY, 10),
             bg="#13171f",
             fg=self.FG_WHITE,
             bd=1,
@@ -110,7 +110,7 @@ class NotesView(BaseView):
         btn_save = tk.Button(
             create_box,
             text="Сохранить заметку",
-            font=("Segoe UI", 9, "bold"),
+            font=(self.UI_FAMILY, 9, "bold"),
             bg=self.ACCENT_CYAN,
             fg="#0d1117",
             bd=0,
@@ -179,7 +179,7 @@ class NotesView(BaseView):
         tk.Label(
             top_line,
             text=f"#{n['id']} {n['title']}",
-            font=("Segoe UI", 10, "bold"),
+            font=self.FONT_HEADING,
             fg=self.FG_WHITE,
             bg=self.BG_CARD
         ).pack(side="left")
@@ -187,7 +187,7 @@ class NotesView(BaseView):
         tk.Label(
             top_line,
             text=n.get("created_at", ""),
-            font=("Consolas", 8),
+            font=self.FONT_MONO,
             fg=self.FG_DIM,
             bg=self.BG_CARD
         ).pack(side="right", padx=8)
@@ -195,7 +195,7 @@ class NotesView(BaseView):
         btn_del = tk.Button(
             top_line,
             text="✕",
-            font=("Segoe UI", 9),
+            font=(self.UI_FAMILY, 9),
             fg=self.ACCENT_RED,
             bg=self.BG_CARD,
             bd=0,
@@ -207,7 +207,7 @@ class NotesView(BaseView):
         tk.Label(
             card,
             text=n.get("content", ""),
-            font=("Segoe UI", 9),
+            font=self.FONT_BODY,
             fg=self.FG_MAIN,
             bg=self.BG_CARD,
             justify="left",
@@ -237,7 +237,7 @@ class NotesView(BaseView):
             tk.Label(
                 self.notes_list_frame,
                 text="Сервис заметок недоступен.",
-                font=("Segoe UI", 11),
+                font=(self.UI_FAMILY, 11),
                 fg=self.FG_MUTED,
                 bg=self.BG_MAIN
             ).pack(pady=30)

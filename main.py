@@ -15,6 +15,31 @@ from cli_formatters import (
 
 def main():
     import sys
+    if len(sys.argv) > 1 and sys.argv[1].lower() in ("--native-gpu-core", "--native-core", "native-core"):
+        from ui.native_visual_core import launch_native_preview
+        print("Запуск аппаратного Native GPU Visual Core (OpenGL 4.6 / GLSL / WGL)...", flush=True)
+        launch_native_preview()
+        return
+
+    if len(sys.argv) > 1 and sys.argv[1].lower() in ("--preview-core", "--core", "preview-core"):
+        from ui.web_visual_core import AkakiyVisualBridge
+        bridge = AkakiyVisualBridge()
+        print("Запуск аппаратного Akakiy Visual Core 2.0 (WebGL2 / Edge)...")
+        p = bridge.launch_preview()
+        print("Окно калибровки открыто. Закройте окно или нажмите Ctrl+C для выхода.")
+        try:
+            if p:
+                p.wait()
+            else:
+                import time
+                while True:
+                    time.sleep(1)
+        except KeyboardInterrupt:
+            pass
+        finally:
+            bridge.stop()
+        return
+
     if len(sys.argv) > 1 and sys.argv[1].lower() in ("--gui", "-g", "gui"):
         from gui import main as gui_main
         gui_main()
