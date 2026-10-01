@@ -32,6 +32,7 @@ class BaseAgent(ABC):
     """
 
     name: str = ""
+    display_name: str = ""
     description: str = ""
     capabilities: List[str] = []
     tools: List[str] = []
@@ -44,10 +45,15 @@ class BaseAgent(ABC):
         capabilities: Optional[List[str]] = None,
         tools: Optional[List[str]] = None,
         enabled: bool = True,
+        display_name: Optional[str] = None,
         **kwargs: Any
     ):
         if name is not None:
             self.name = str(name).strip()
+        if display_name is not None:
+            self.display_name = str(display_name).strip()
+        elif not getattr(self, "display_name", ""):
+            self.display_name = self.name.capitalize() if self.name else ""
         if description is not None:
             self.description = str(description).strip()
 
@@ -106,6 +112,7 @@ class BaseAgent(ABC):
         """Сериализует спецификацию агента в словарь метаданных."""
         return {
             "name": self.name,
+            "display_name": self.display_name,
             "description": self.description,
             "capabilities": list(self.capabilities),
             "tools": list(self.tools),

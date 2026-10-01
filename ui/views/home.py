@@ -487,11 +487,31 @@ class HomeView(BaseView):
 
                 is_ok = item.get("success", True)
                 b_color = self.ACCENT_GREEN if is_ok else self.ACCENT_RED
-                badge_type = str(item.get("type", "ДЕЙСТВИЕ")).upper()
+                raw_type = str(item.get("type", "ДЕЙСТВИЕ")).upper()
+                d_badge = item.get("domain_badge")
+                if d_badge:
+                    badge_label = str(d_badge).upper()
+                else:
+                    domain_title_map = {
+                        "HOUSEHOLD": "🏠 ДОМАШНИЕ ДЕЛА",
+                        "TASKS": "🏠 ДОМАШНИЕ ДЕЛА",
+                        "REMINDERS": "🔔 НАПОМИНАНИЯ",
+                        "NOTES": "📝 ЗАМЕТКИ",
+                        "LISTS": "📋 СПИСКИ",
+                        "RESEARCH": "🔍 ИССЛЕДОВАНИЯ",
+                        "IMAGE": "🎨 ИЗОБРАЖЕНИЕ",
+                        "PRESENTATION": "📊 ПРЕЗЕНТАЦИЯ",
+                        "DOCUMENT": "📄 ДОКУМЕНТ",
+                        "CODING": "💻 КОД",
+                        "FILE": "📁 ФАЙЛ",
+                        "PLAN": "📋 ПЛАН",
+                        "CHAT": "💬 ДИАЛОГ",
+                    }
+                    badge_label = domain_title_map.get(raw_type, raw_type)
 
                 tk.Label(
                     top_l,
-                    text=f"[{badge_type}]",
+                    text=f"[{badge_label}]",
                     font=self.FONT_MONO,
                     fg=b_color,
                     bg="#101824",
@@ -662,19 +682,38 @@ class HomeView(BaseView):
     # Реактивные методы синхронизации и обновления
     # -------------------------------------------------------------------------
 
-    def update_state_display(self, state_name: str) -> None:
-        """Реактивно обновляет текстовые бейджи состояния ядра."""
+    def update_state_display(
+        self,
+        state_name: str,
+        active_agent: Optional[str] = None,
+        active_step: Optional[str] = None
+    ) -> None:
+        """Реактивно обновляет текстовые бейджи состояния ядра и Domain Agent."""
         if not self.neural_core:
             return
 
         palette = self.neural_core.COLOR_PALETTES.get(state_name, self.neural_core.COLOR_PALETTES["idle"])
         if self.lbl_status_badge and self.lbl_status_badge.winfo_exists():
-            badge_txt = palette.get("status", state_name.upper())
+            if active_agent and state_name == "working":
+                agent_lower = active_agent.lower()
+                clean_name = active_agent.strip()
+                if clean_name.startswith("🏠") or clean_name.startswith("🔍"):
+                    badge_txt = clean_name.upper()
+                else:
+                    icon = "🏠 " if ("домашн" in agent_lower or "household" in agent_lower) else ("🔍 " if ("исследован" in agent_lower or "research" in agent_lower) else "")
+                    badge_txt = f"{icon}{clean_name.upper()}"
+            else:
+                badge_txt = palette.get("status", state_name.upper())
             badge_fg = palette.get("text", self.ACCENT_CYAN)
             self.lbl_status_badge.config(text=f"● {badge_txt}", fg=badge_fg)
 
         if self.lbl_status_desc and self.lbl_status_desc.winfo_exists():
-            desc_txt = palette.get("description", "")
+            if active_step and state_name == "working":
+                desc_txt = active_step
+            elif active_agent and state_name == "working":
+                desc_txt = f"{active_agent} • Исполнение задачи…"
+            else:
+                desc_txt = palette.get("description", "")
             self.lbl_status_desc.config(text=desc_txt)
 
     def quick_complete_task(self, task_id: int) -> None:

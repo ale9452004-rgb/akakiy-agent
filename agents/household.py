@@ -31,6 +31,7 @@ class HouseholdAgent(BaseAgent):
     """
 
     name: str = "household"
+    display_name: str = "Домашние дела"
     description: str = "Управление бытовыми задачами, списками, заметками и напоминаниями."
     capabilities: List[str] = [
         "household",
@@ -71,6 +72,7 @@ class HouseholdAgent(BaseAgent):
         enabled: bool = True,
         household_manager: Optional[HouseholdManager] = None,
         router: Optional[CommandRouter] = None,
+        display_name: Optional[str] = None,
         **kwargs: Any
     ):
         super().__init__(
@@ -79,6 +81,7 @@ class HouseholdAgent(BaseAgent):
             capabilities=capabilities,
             tools=tools,
             enabled=enabled,
+            display_name=display_name if display_name is not None else self.display_name,
             **kwargs
         )
         self.household_manager = household_manager
@@ -121,8 +124,8 @@ class HouseholdAgent(BaseAgent):
         explicit_tool = (
             kwargs.get("action")
             or kwargs.get("tool")
-            or (context.get("action") if isinstance(context, dict) else None)
-            or (context.get("tool") if isinstance(context, dict) else None)
+            or (context.get("action") if context and hasattr(context, "get") else None)
+            or (context.get("tool") if context and hasattr(context, "get") else None)
         )
 
         tool_name: Optional[str] = None
@@ -178,6 +181,36 @@ class HouseholdAgent(BaseAgent):
                 message=f"Команда '{task_str}' не поддерживается HouseholdAgent.",
                 data={"task": task_str, "agent": self.name}
             )
+
+        # Отправка progress-события перед реальным исполнением
+        step_descriptions = {
+            "create_task": "Создаю задачу…",
+            "list_tasks": "Получаю список задач…",
+            "complete_task": "Завершаю задачу…",
+            "delete_task": "Удаляю задачу…",
+            "create_reminder": "Устанавливаю напоминание…",
+            "list_reminders": "Проверяю напоминания…",
+            "complete_reminder": "Завершаю напоминание…",
+            "delete_reminder": "Удаляю напоминание…",
+            "check_due_reminders": "Проверяю наступившие напоминания…",
+            "create_note": "Сохраняю заметку…",
+            "list_notes": "Загружаю заметки…",
+            "search_notes": "Ищу в заметках…",
+            "delete_note": "Удаляю заметку…",
+            "create_list": "Создаю список…",
+            "show_list": "Открываю список…",
+            "add_list_item": "Добавляю пункт в список…",
+            "complete_list_item": "Отмечаю пункт списка…",
+            "toggle_list_item": "Обновляю пункт списка…",
+            "delete_list_item": "Удаляю пункт списка…",
+            "delete_list": "Удаляю список…",
+        }
+        step_text = step_descriptions.get(tool_name, f"Выполняю операцию '{tool_name}'…")
+        if context and hasattr(context, "report_progress") and callable(context.report_progress):
+            try:
+                context.report_progress(step_text)
+            except Exception:
+                pass
 
         # 5. Исполнение операции через существующий HouseholdManager
         manager = self._get_manager()

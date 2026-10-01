@@ -17,9 +17,11 @@ from agents.executor import AgentExecutor
 from agents.service import AgentService, get_agent_service, reset_agent_service
 from agents.bridge import MultiAgentBridge
 from agents.bootstrap import ensure_default_domain_agents
+from agents.context import AgentContext
 
 __all__ = [
     "BaseAgent",
+    "AgentContext",
     "AgentRegistry",
     "get_agent_registry",
     "reset_agent_registry",

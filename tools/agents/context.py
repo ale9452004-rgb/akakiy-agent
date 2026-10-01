@@ -37,6 +37,7 @@ class AgentContext:
         file_metadata: Optional[Dict[str, Dict[str, Any]]] = None,
         parent_context: Optional["AgentContext"] = None,
         recovery_history: Optional[List[Dict[str, Any]]] = None,
+        progress_callback: Optional[Any] = None,
     ):
         self.task_id = str(task_id) if task_id else str(uuid.uuid4())
         self.root_task_id = str(root_task_id) if root_task_id else self.task_id
@@ -63,6 +64,21 @@ class AgentContext:
         self.parent_agent = parent_agent
         self.parent_context = parent_context
         self._recovery_history: List[Dict[str, Any]] = list(recovery_history) if recovery_history else []
+        self.progress_callback = progress_callback
+
+    def report_progress(self, step: str, **kwargs: Any) -> None:
+        """
+        Отправляет уведомление о текущем шаге выполнения через progress_callback, если он задан.
+        Полностью безопасен при отсутствии callback или исключениях внутри него.
+        """
+        if self.progress_callback and callable(self.progress_callback):
+            try:
+                try:
+                    self.progress_callback(str(step), **kwargs)
+                except TypeError:
+                    self.progress_callback(str(step))
+            except Exception:
+                pass
 
     def _index_result(self, result: Any, agent_name: Optional[str] = None) -> None:
         """Внутренний метод индексации результата по имени агента."""
@@ -208,6 +224,18 @@ class AgentContext:
     def __contains__(self, key: str) -> bool:
         return key in self.metadata
 
+    def keys(self):
+        """Возвращает ключи метаданных контекста (dict protocol)."""
+        return self.metadata.keys()
+
+    def values(self):
+        """Возвращает значения метаданных контекста (dict protocol)."""
+        return self.metadata.values()
+
+    def items(self):
+        """Возвращает пары (ключ, значение) метаданных контекста (dict protocol)."""
+        return self.metadata.items()
+
     # =========================================================================
     # Управление состоянием задачи
     # =========================================================================
@@ -235,6 +263,7 @@ class AgentContext:
         inherit_results: bool = True,
         metadata: Optional[Dict[str, Any]] = None,
         child_agent: Optional[Any] = None,
+        progress_callback: Optional[Any] = None,
     ) -> "AgentContext":
         """
         Создаёт изолированный дочерний контекст для выполнения подзадачи в multi-agent конвейере.
@@ -273,6 +302,8 @@ class AgentContext:
         if inherit_results:
             child_results = list(self.previous_results)
 
+        cb = progress_callback if progress_callback is not None else self.progress_callback
+
         return AgentContext(
             task=task,
             files=child_files,
@@ -287,15 +318,18 @@ class AgentContext:
             file_metadata=child_file_metadata,
             parent_context=self,
             recovery_history=list(self.recovery_history),
+            progress_callback=cb,
         )
 
     def copy(self) -> "AgentContext":
         """Создаёт независимую копию текущего контекста."""
-        return self.from_dict(
+        copied = self.from_dict(
             self.to_dict(),
             parent_agent=self.parent_agent,
             parent_context=self.parent_context
         )
+        copied.progress_callback = self.progress_callback
+        return copied
 
     # =========================================================================
     # Сериализация и десериализация

@@ -48,14 +48,21 @@ class AgentExecutor:
     безопасный вызов agent.execute(...) и возврат канонического AgentResult.
     """
 
-    def __init__(self, router: Optional[AgentRouter] = None) -> None:
+    def __init__(
+        self,
+        router: Optional[AgentRouter] = None,
+        observer: Optional[Any] = None,
+    ) -> None:
         """
         Инициализирует AgentExecutor.
 
         :param router: Экземпляр AgentRouter для автоматической маршрутизации
                        в методе execute_task. Если не передан, создается экземпляр по умолчанию.
+        :param observer: Опциональный наблюдатель за событиями (observer(event_type, data)).
+                         Если не задан, используется tools.dispatcher.get_action_observer.
         """
         self.router = router
+        self._observer = observer
 
     def _get_router(self) -> AgentRouter:
         """Возвращает внедренный или стандартный экземпляр AgentRouter."""
@@ -63,11 +70,21 @@ class AgentExecutor:
             return self.router
         return AgentRouter()
 
+    def _get_observer(self) -> Optional[Any]:
+        """Возвращает внедренный или глобальный наблюдатель за действиями."""
+        if hasattr(self, "_observer") and self._observer is not None:
+            return self._observer
+        try:
+            from tools.dispatcher import get_action_observer
+            return get_action_observer()
+        except Exception:
+            return None
+
     def execute(
         self,
         route_or_agent: Union[RouteResult, BaseAgent],
         task: str = "",
-        context: Optional[Dict[str, Any]] = None,
+        context: Optional[Any] = None,
         **kwargs: Any
     ) -> AgentResult:
         """
@@ -152,46 +169,155 @@ class AgentExecutor:
                 data={"agent": agent.name, **({"route": route_data} if route_data else {})}
             )
 
-        # 4. Вызов agent.execute(...) с перехватом любых исключений
-        try:
-            result = agent.execute(task=task, context=context, **kwargs)
-        except Exception as exc:
-            logger.exception("Исключение при выполнении агента '%s': %s", agent.name, exc)
-            return AgentResult.fail(
-                error=f"Ошибка выполнения агента '{agent.name}': {str(exc)}",
-                message=f"Во время работы агента '{agent.name}' произошла ошибка: {str(exc)}",
-                data={
-                    "agent": agent.name,
-                    "exception_type": type(exc).__name__,
-                    "exception_message": str(exc),
-                    **({"route": route_data} if route_data else {})
-                }
-            )
+        # 4. Подготовка событий жизненного цикла агента
+        obs = self._get_observer()
+        agent_name = getattr(agent, "name", "unknown")
+        display_name = getattr(agent, "display_name", "") or agent_name
 
-        # 5. Проверка типа возвращенного результата
-        if not isinstance(result, AgentResult):
-            if isinstance(result, dict) and "success" in result:
+        # Отправка события before_agent
+        if obs:
+            try:
+                obs("before_agent", {
+                    "agent": agent_name,
+                    "display_name": display_name,
+                    "task": task,
+                })
+            except Exception as obs_exc:
+                logger.debug("Ошибка в action_observer before_agent: %s", obs_exc)
+
+        # Сохранение исходного callback для восстановления в finally
+        from agents.context import AgentContext
+
+        original_callback = None
+        has_orig_callback_attr = False
+
+        if isinstance(context, AgentContext):
+            exec_context = context
+            original_callback = exec_context.progress_callback
+            has_orig_callback_attr = True
+        elif isinstance(context, dict):
+            exec_context = AgentContext(task=task, metadata=context)
+        elif context is None:
+            exec_context = AgentContext(task=task)
+        else:
+            exec_context = context
+            if hasattr(exec_context, "progress_callback"):
+                original_callback = getattr(exec_context, "progress_callback")
+                has_orig_callback_attr = True
+
+        # Подготовка progress callback для Domain Agent
+        def _on_progress(step: str, **extra: Any) -> None:
+            current_obs = self._get_observer()
+            if current_obs:
                 try:
-                    result = AgentResult.from_dict(result)
+                    current_obs("agent_progress", {
+                        "agent": agent_name,
+                        "display_name": display_name,
+                        "step": str(step),
+                        "task": task,
+                        **extra,
+                    })
+                except Exception as p_exc:
+                    logger.debug("Ошибка в action_observer agent_progress: %s", p_exc)
+
+            if original_callback and callable(original_callback):
+                try:
+                    original_callback(step, **extra)
+                except Exception as orig_exc:
+                    logger.debug("Ошибка в исходном progress_callback: %s", orig_exc)
+
+        # Временно устанавливаем callback на время выполнения агента
+        if hasattr(exec_context, "progress_callback"):
+            try:
+                exec_context.progress_callback = _on_progress
+            except Exception:
+                pass
+
+        # 5. Вызов agent.execute(...) с перехватом любых исключений и гарантией очистки в finally
+        try:
+            try:
+                result = agent.execute(task=task, context=exec_context, **kwargs)
+            except Exception as exc:
+                logger.exception("Исключение при выполнении агента '%s': %s", agent_name, exc)
+                if obs:
+                    try:
+                        obs("after_agent", {
+                            "agent": agent_name,
+                            "display_name": display_name,
+                            "task": task,
+                            "success": False,
+                            "error": str(exc),
+                        })
+                    except Exception as obs_exc:
+                        logger.debug("Ошибка в action_observer after_agent (exception): %s", obs_exc)
+
+                return AgentResult.fail(
+                    error=f"Ошибка выполнения агента '{agent_name}': {str(exc)}",
+                    message=f"Во время работы агента '{agent_name}' произошла ошибка: {str(exc)}",
+                    data={
+                        "agent": agent_name,
+                        "exception_type": type(exc).__name__,
+                        "exception_message": str(exc),
+                        **({"route": route_data} if route_data else {})
+                    }
+                )
+
+            # 6. Проверка типа возвращенного результата
+            if not isinstance(result, AgentResult):
+                if isinstance(result, dict) and "success" in result:
+                    try:
+                        result = AgentResult.from_dict(result)
+                    except Exception:
+                        pass
+
+            if not isinstance(result, AgentResult):
+                fail_res = AgentResult.fail(
+                    error=f"Агент '{agent_name}' вернул некорректный тип результата: '{type(result).__name__}'. Ожидается AgentResult.",
+                    message=f"Агент '{agent_name}' вернул некорректный результат.",
+                    data={
+                        "agent": agent_name,
+                        "raw_result": str(result),
+                        **({"route": route_data} if route_data else {})
+                    }
+                )
+                if obs:
+                    try:
+                        obs("after_agent", {
+                            "agent": agent_name,
+                            "display_name": display_name,
+                            "task": task,
+                            "success": False,
+                            "error": fail_res.error,
+                        })
+                    except Exception as obs_exc:
+                        logger.debug("Ошибка в action_observer after_agent: %s", obs_exc)
+                return fail_res
+
+            # 7. Обогащение данными маршрута (если есть и ключ еще не занят)
+            if route_data and "route" not in result.data:
+                result.data["route"] = route_data
+
+            # 8. Отправка события after_agent
+            if obs:
+                try:
+                    obs("after_agent", {
+                        "agent": agent_name,
+                        "display_name": display_name,
+                        "task": task,
+                        "success": bool(result.success),
+                        **({"error": result.error} if not result.success and result.error else {}),
+                    })
+                except Exception as obs_exc:
+                    logger.debug("Ошибка в action_observer after_agent: %s", obs_exc)
+
+            return result
+        finally:
+            # Восстанавливаем исходный callback при любом исходе (успех, ошибка, исключение)
+            if has_orig_callback_attr and hasattr(exec_context, "progress_callback"):
+                try:
+                    exec_context.progress_callback = original_callback
                 except Exception:
                     pass
-
-        if not isinstance(result, AgentResult):
-            return AgentResult.fail(
-                error=f"Агент '{agent.name}' вернул некорректный тип результата: '{type(result).__name__}'. Ожидается AgentResult.",
-                message=f"Агент '{agent.name}' вернул некорректный результат.",
-                data={
-                    "agent": agent.name,
-                    "raw_result": str(result),
-                    **({"route": route_data} if route_data else {})
-                }
-            )
-
-        # 6. Обогащение данными маршрута (если есть и ключ еще не занят)
-        if route_data and "route" not in result.data:
-            result.data["route"] = route_data
-
-        return result
 
     def execute_task(
         self,

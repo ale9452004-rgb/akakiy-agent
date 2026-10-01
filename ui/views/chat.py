@@ -87,6 +87,7 @@ class ChatView(BaseView):
         # Теги для подсветки сообщений
         self.chat_text.tag_config("user_title", foreground=self.ACCENT_CYAN, font=(self.UI_FAMILY, 9, "bold"))
         self.chat_text.tag_config("akakiy_title", foreground=self.ACCENT_GREEN, font=(self.UI_FAMILY, 9, "bold"))
+        self.chat_text.tag_config("domain_badge", foreground=self.ACCENT_PURPLE, font=(self.UI_FAMILY, 9, "bold"))
         self.chat_text.tag_config("time", foreground=self.FG_DIM, font=self.FONT_CAPTION)
         self.chat_text.tag_config("user_body", foreground=self.FG_WHITE)
         self.chat_text.tag_config("akakiy_body", foreground=self.FG_MAIN)
@@ -119,6 +120,8 @@ class ChatView(BaseView):
         self.log_text.pack(fill="both", expand=True, padx=12, pady=(0, 12))
         self.log_text.tag_config("info", foreground=self.ACCENT_CYAN)
         self.log_text.tag_config("tool", foreground=self.ACCENT_PURPLE)
+        self.log_text.tag_config("agent", foreground=self.ACCENT_PURPLE, font=(self.MONO_FAMILY, 9, "bold"))
+        self.log_text.tag_config("step", foreground=self.ACCENT_BLUE)
         self.log_text.tag_config("done", foreground=self.ACCENT_GREEN)
         self.log_text.tag_config("err", foreground=self.ACCENT_RED)
 
@@ -136,13 +139,14 @@ class ChatView(BaseView):
                 message = item[1]
                 t_str = item[2]
                 artifacts = item[3] if len(item) > 3 else None
-                self.insert_chat_ui(author, message, t_str, artifacts=artifacts)
+                domain_badge = item[4] if len(item) > 4 else None
+                self.insert_chat_ui(author, message, t_str, artifacts=artifacts, domain_badge=domain_badge)
 
         for prefix, text, t_str in list(self.log_messages):
             self.insert_log_ui(prefix, text, t_str)
 
-    def insert_chat_ui(self, author: str, message: str, t_str: str, artifacts: Optional[List[Any]] = None) -> None:
-        """Вставка отформатированного сообщения в ленту чата с поддержкой артефактов."""
+    def insert_chat_ui(self, author: str, message: str, t_str: str, artifacts: Optional[List[Any]] = None, domain_badge: Optional[str] = None) -> None:
+        """Вставка отформатированного сообщения в ленту чата с поддержкой артефактов и бейджа домена."""
         if not self.chat_text or not self.chat_text.winfo_exists():
             return
         self.chat_text.insert(tk.END, "\n")
@@ -153,6 +157,8 @@ class ChatView(BaseView):
             self.chat_text.insert(tk.END, f"{message}\n", "user_body")
         else:
             self.chat_text.insert(tk.END, f"● {author_upper}  ", "akakiy_title")
+            if domain_badge:
+                self.chat_text.insert(tk.END, f"[{domain_badge}]  ", "domain_badge")
             self.chat_text.insert(tk.END, f"[{t_str}]\n", "time")
             if "\n\n✦" in message:
                 parts = message.split("\n\n✦", 1)
@@ -176,11 +182,11 @@ class ChatView(BaseView):
         self.chat_text.insert(tk.END, "─" * 48 + "\n", "div")
         self.chat_text.see(tk.END)
 
-    def append_chat(self, author: str, message: str, artifacts: Optional[List[Any]] = None) -> None:
+    def append_chat(self, author: str, message: str, artifacts: Optional[List[Any]] = None, domain_badge: Optional[str] = None) -> None:
         """Добавление сообщения в историю и отображение в интерфейсе."""
         t_str = time.strftime("%H:%M:%S")
-        self.chat_messages.append((author, message, t_str, artifacts or []))
-        self.insert_chat_ui(author, message, t_str, artifacts=artifacts)
+        self.chat_messages.append((author, message, t_str, artifacts or [], domain_badge))
+        self.insert_chat_ui(author, message, t_str, artifacts=artifacts, domain_badge=domain_badge)
 
     def insert_log_ui(self, prefix: str, text: str, t_str: str) -> None:
         """Вставка строки лога в системную панель."""
@@ -189,6 +195,10 @@ class ChatView(BaseView):
         tag = "info"
         if prefix == "TOOL":
             tag = "tool"
+        elif prefix == "AGENT":
+            tag = "agent"
+        elif prefix == "STEP":
+            tag = "step"
         elif prefix in ("DONE", "OK"):
             tag = "done"
         elif prefix in ("ERR", "FAIL"):

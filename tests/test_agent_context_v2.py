@@ -347,5 +347,44 @@ class TestAgentContextV2SubAgentCompatibility(unittest.TestCase):
         self.assertTrue(agent.validate_context(ctx))
 
 
+class TestAgentContextV2ProgressCallback(unittest.TestCase):
+    """8. Проверка callback-механизма прогресса (report_progress)."""
+
+    def test_report_progress_with_callback(self):
+        steps = []
+        ctx = AgentContext(task="Тест", progress_callback=lambda s: steps.append(s))
+        ctx.report_progress("Шаг 1")
+        ctx.report_progress("Шаг 2")
+        self.assertEqual(steps, ["Шаг 1", "Шаг 2"])
+
+    def test_report_progress_without_callback_is_safe(self):
+        ctx = AgentContext(task="Тест")
+        # Не должно вызывать исключений
+        ctx.report_progress("Шаг без callback")
+        self.assertIsNone(ctx.progress_callback)
+
+    def test_report_progress_callback_exception_handled_safely(self):
+        def failing_cb(step):
+            raise RuntimeError("Callback error")
+
+        ctx = AgentContext(task="Тест", progress_callback=failing_cb)
+        # Не должно пробрасывать исключение наружу
+        ctx.report_progress("Шаг с ошибкой в cb")
+
+    def test_create_child_context_inherits_callback(self):
+        steps = []
+        parent = AgentContext(task="Родитель", progress_callback=lambda s: steps.append(s))
+        child = parent.create_child_context(task="Потомок")
+        child.report_progress("Шаг потомка")
+        self.assertEqual(steps, ["Шаг потомка"])
+
+    def test_copy_inherits_callback(self):
+        steps = []
+        ctx = AgentContext(task="Тест", progress_callback=lambda s: steps.append(s))
+        copied = ctx.copy()
+        copied.report_progress("Шаг копии")
+        self.assertEqual(steps, ["Шаг копии"])
+
+
 if __name__ == "__main__":
     unittest.main()

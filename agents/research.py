@@ -32,6 +32,7 @@ class ResearchAgent(BaseAgent):
     """
 
     name: str = "research"
+    display_name: str = "Исследования"
     description: str = "Сбор информации, исследование предметных областей и формирование аналитических отчётов."
     capabilities: List[str] = [
         "research",
@@ -56,6 +57,7 @@ class ResearchAgent(BaseAgent):
         enabled: bool = True,
         worker: Optional[SubAgentResearchWorker] = None,
         output_dir: Optional[Union[str, Path]] = None,
+        display_name: Optional[str] = None,
         **kwargs: Any
     ):
         super().__init__(
@@ -64,6 +66,7 @@ class ResearchAgent(BaseAgent):
             capabilities=capabilities,
             tools=tools,
             enabled=enabled,
+            display_name=display_name if display_name is not None else self.display_name,
             **kwargs
         )
         self.worker = worker
@@ -154,7 +157,7 @@ class ResearchAgent(BaseAgent):
             )
 
         # 2. Проверка неподдерживаемого действия (action)
-        action = kwargs.get("action") or kwargs.get("tool") or (context.get("action") if isinstance(context, dict) else None)
+        action = kwargs.get("action") or kwargs.get("tool") or (context.get("action") if context and hasattr(context, "get") else None)
         if action:
             clean_action = str(action).strip().lower()
             if clean_action not in ("research", "gather_information", "generate_report", "search", "investigate"):
@@ -165,8 +168,8 @@ class ResearchAgent(BaseAgent):
                 )
 
         # 3. Валидация входных данных: тема или вопросы
-        has_topic = bool(kwargs.get("topic") or (context and context.get("topic")))
-        has_questions = bool(kwargs.get("questions") or (context and context.get("questions")))
+        has_topic = bool(kwargs.get("topic") or (context and hasattr(context, "get") and context.get("topic")))
+        has_questions = bool(kwargs.get("questions") or (context and hasattr(context, "get") and context.get("questions")))
 
         if not task_str and not has_topic and not has_questions:
             return AgentResult.fail(
@@ -183,23 +186,49 @@ class ResearchAgent(BaseAgent):
                 data={"agent": self.name, "task": task_str}
             )
 
+        # Этап 1 прогресса: Исследование запроса
+        if context and hasattr(context, "report_progress") and callable(context.report_progress):
+            try:
+                context.report_progress("Исследую запрос…")
+            except Exception:
+                pass
+
         # 5. Подготовка контекста для worker
         merged_meta: Dict[str, Any] = {}
         if isinstance(context, dict):
             merged_meta.update(context)
+        elif hasattr(context, "metadata") and isinstance(context.metadata, dict):
+            merged_meta.update(context.metadata)
+        elif hasattr(context, "to_dict") and callable(context.to_dict):
+            try:
+                merged_meta.update(context.to_dict().get("metadata", {}))
+            except Exception:
+                pass
         merged_meta.update(kwargs)
 
         files: List[str] = []
         if "files" in kwargs and isinstance(kwargs["files"], list):
             files = [str(f) for f in kwargs["files"]]
-        elif isinstance(context, dict) and "files" in context and isinstance(context["files"], list):
-            files = [str(f) for f in context["files"]]
+        elif context and hasattr(context, "get") and isinstance(context.get("files"), list):
+            files = [str(f) for f in context.get("files")]
+        elif hasattr(context, "files") and isinstance(context.files, list):
+            files = [str(f) for f in context.files]
+
+        progress_cb = getattr(context, "progress_callback", None)
 
         agent_ctx = AgentContext(
             task=task_str,
             metadata=merged_meta,
-            files=files
+            files=files,
+            progress_callback=progress_cb
         )
+
+        # Этап 2 прогресса: Анализ результатов и поиск информации
+        if context and hasattr(context, "report_progress") and callable(context.report_progress):
+            try:
+                context.report_progress("Анализирую результаты…")
+            except Exception:
+                pass
 
         # 6. Делегирование исполнения существующему worker
         worker = self._get_worker()
@@ -213,6 +242,13 @@ class ResearchAgent(BaseAgent):
                 message=f"Сбой при выполнении исследования: {ex}",
                 data={"agent": self.name, "task": task_str}
             )
+
+        # Этап 3 прогресса: Формирование отчёта
+        if context and hasattr(context, "report_progress") and callable(context.report_progress):
+            try:
+                context.report_progress("Формирую отчёт…")
+            except Exception:
+                pass
 
         # 7. Возврат результата
         if isinstance(worker_result, AgentResult):

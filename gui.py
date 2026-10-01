@@ -164,6 +164,8 @@ class AkakiyGUI:
         self.log_messages: List[Tuple[str, str, str]] = []   # [(prefix, text, time_str)]
         self.recent_work_results: list = []  # Структурированные результаты Agent/Sub-Agent/Planner/Tools
         self._last_submitted_query: str = ""
+        self._active_agent_name: Optional[str] = None
+        self._active_agent_step: Optional[str] = None
         self._is_closing = False
 
         # Голосовой сервис
@@ -667,9 +669,9 @@ class AkakiyGUI:
         self.chat_text = self.chat_view.chat_text
         self.log_text = self.chat_view.log_text
 
-    def _insert_chat_ui(self, author: str, message: str, t_str: str, artifacts: Optional[List[Any]] = None):
+    def _insert_chat_ui(self, author: str, message: str, t_str: str, artifacts: Optional[List[Any]] = None, domain_badge: Optional[str] = None):
         if hasattr(self, "chat_view") and self.chat_view:
-            return self.chat_view.insert_chat_ui(author, message, t_str, artifacts=artifacts)
+            return self.chat_view.insert_chat_ui(author, message, t_str, artifacts=artifacts, domain_badge=domain_badge)
         elif hasattr(self, "chat_text") and self.chat_text and self.chat_text.winfo_exists():
             self.chat_text.insert(tk.END, "\n")
             author_upper = author.upper()
@@ -679,6 +681,8 @@ class AkakiyGUI:
                 self.chat_text.insert(tk.END, f"{message}\n", "user_body")
             else:
                 self.chat_text.insert(tk.END, f"● {author_upper}  ", "akakiy_title")
+                if domain_badge:
+                    self.chat_text.insert(tk.END, f"[{domain_badge}]  ", "domain_badge")
                 self.chat_text.insert(tk.END, f"[{t_str}]\n", "time")
                 self.chat_text.insert(tk.END, f"{message}\n", "akakiy_body")
 
@@ -696,10 +700,10 @@ class AkakiyGUI:
             self.chat_text.insert(tk.END, "─" * 48 + "\n", "div")
             self.chat_text.see(tk.END)
 
-    def _append_chat(self, author: str, message: str, artifacts: Optional[List[Any]] = None):
+    def _append_chat(self, author: str, message: str, artifacts: Optional[List[Any]] = None, domain_badge: Optional[str] = None):
         t_str = time.strftime("%H:%M:%S")
-        self.chat_messages.append((author, message, t_str, artifacts or []))
-        self._insert_chat_ui(author, message, t_str, artifacts=artifacts)
+        self.chat_messages.append((author, message, t_str, artifacts or [], domain_badge))
+        self._insert_chat_ui(author, message, t_str, artifacts=artifacts, domain_badge=domain_badge)
 
     def _insert_log_ui(self, prefix: str, text: str, t_str: str):
         if hasattr(self, "chat_view") and self.chat_view:
@@ -708,6 +712,10 @@ class AkakiyGUI:
             tag = "info"
             if prefix == "TOOL":
                 tag = "tool"
+            elif prefix == "AGENT":
+                tag = "agent"
+            elif prefix == "STEP":
+                tag = "step"
             elif prefix in ("DONE", "OK"):
                 tag = "done"
             elif prefix in ("ERR", "FAIL"):
@@ -1003,10 +1011,15 @@ class AkakiyGUI:
 
             # Человекочитаемые заголовки типов
             titles_map = {
+                "household": "Домашние дела",
+                "tasks": "Управление задачами",
+                "reminders": "Напоминания",
+                "notes": "Заметки",
+                "lists": "Списки дел и покупок",
+                "research": "Аналитическое исследование",
                 "image": "Генерация изображения",
                 "presentation": "Создание презентации",
                 "document": "Создание документа",
-                "research": "Аналитическое исследование",
                 "coding": "Задача по коду",
                 "file": "Файловая операция",
                 "plan": "Планирование задач",
@@ -1022,9 +1035,37 @@ class AkakiyGUI:
         if not message:
             message = "Действие успешно завершено." if success else (error or "Ошибка обработки запроса.")
 
+        # Определение domain_badge для UI (HomeView cards & ChatView)
+        domain_badge = None
+        if r_type not in ("plan", "plan_execution"):
+            d_name = None
+            if isinstance(payload, dict):
+                d_name = payload.get("display_name")
+            if not d_name and res_obj:
+                if isinstance(res_obj, dict):
+                    d_name = res_obj.get("display_name") or res_obj.get("data", {}).get("display_name")
+                elif hasattr(res_obj, "data") and isinstance(res_obj.data, dict):
+                    d_name = res_obj.data.get("display_name")
+            if not d_name:
+                d_name = getattr(self, "_active_agent_name", None)
+
+            if d_name:
+                d_lower = d_name.lower()
+                if "домашн" in d_lower or "household" in d_lower:
+                    domain_badge = "🏠 Домашние дела"
+                elif "исследован" in d_lower or "research" in d_lower:
+                    domain_badge = "🔍 Исследования"
+                else:
+                    domain_badge = d_name
+            elif r_type in ("household", "tasks", "reminders", "notes", "lists"):
+                domain_badge = "🏠 Домашние дела"
+            elif r_type == "research":
+                domain_badge = "🔍 Исследования"
+
         entry = {
             "type": r_type,
             "title": title,
+            "domain_badge": domain_badge,
             "message": message,
             "query": query,
             "success": success,
@@ -1178,7 +1219,12 @@ class AkakiyGUI:
             else:
                 self._append_log("VOICE", "Не удалось запустить голосовой сеанс.")
 
-    def _set_state(self, state_name: str):
+    def _set_state(
+        self,
+        state_name: str,
+        active_agent: Optional[str] = None,
+        active_step: Optional[str] = None
+    ):
         states_map = {
             "idle": ("✓ ГОТОВ", self.ACCENT_BLUE, "#111c2e"),
             "thinking": ("◌ ДУМАЕТ...", self.ACCENT_PURPLE, "#21153b"),
@@ -1189,13 +1235,34 @@ class AkakiyGUI:
             "error": ("✖ ОШИБКА", self.ACCENT_RED, "#361414"),
         }
         self.current_state = state_name
+
+        if active_agent is not None:
+            self._active_agent_name = active_agent
+        elif state_name in ("idle", "success", "error"):
+            self._active_agent_name = None
+
+        if active_step is not None:
+            self._active_agent_step = active_step
+        elif state_name in ("idle", "success", "error"):
+            self._active_agent_step = None
+
         if state_name in states_map:
             txt, fg_col, bg_col = states_map[state_name]
+            if state_name == "working" and self._active_agent_name:
+                clean_name = self._active_agent_name.strip()
+                if clean_name.startswith("🏠") or clean_name.startswith("🔍"):
+                    txt = clean_name.upper()
+                else:
+                    txt = f"⚙ {clean_name.upper()}"
             self.status_badge.config(text=txt, fg=fg_col, bg=bg_col)
             if hasattr(self, "neural_core") and self.neural_core:
                 self.neural_core.set_state(state_name)
             if hasattr(self, "home_view") and self.home_view and hasattr(self.home_view, "update_state_display"):
-                self.home_view.update_state_display(state_name)
+                self.home_view.update_state_display(
+                    state_name,
+                    active_agent=self._active_agent_name,
+                    active_step=self._active_agent_step
+                )
 
         if state_name == "success":
             try:
@@ -1259,11 +1326,12 @@ class AkakiyGUI:
                     work_entry = self.record_work_result(data, query=getattr(self, "_last_submitted_query", ""))
                     has_err = not work_entry.get("success", True)
                     err_msg = work_entry.get("error") or ""
+                    d_badge = work_entry.get("domain_badge")
 
                     if has_err:
                         self._set_state("error")
                         err_text = f"Ошибка: {err_msg or 'Действие не выполнено.'}"
-                        self._append_chat("Акакий", err_text)
+                        self._append_chat("Акакий", err_text, domain_badge=d_badge)
                         self._append_log("ERR", err_text)
                     else:
                         self._set_state("success")
@@ -1276,7 +1344,7 @@ class AkakiyGUI:
                                 chat_ans += f"\n\n✦ Созданные артефакты:\n" + "\n".join(f"  • {f}" for f in c_files)
                             self._append_log("DONE", f"Артефакты ({len(c_names)}): {', '.join(c_names)}")
                         artifacts = work_entry.get("artifacts") or []
-                        self._append_chat("Акакий", chat_ans, artifacts=artifacts)
+                        self._append_chat("Акакий", chat_ans, artifacts=artifacts, domain_badge=d_badge)
                         self._append_log("DONE", f"Запрос успешно обработан [{work_entry.get('type')}].")
                     self.refresh_current_view()
 
@@ -1304,6 +1372,45 @@ class AkakiyGUI:
                         else:
                             self._append_log("DONE", f"Инструмент {t_name} выполнен.")
                         self.refresh_current_view()
+                    elif ev_type == "before_agent":
+                        agent_raw = payload.get("display_name") or payload.get("agent") or "Агент"
+                        if "household" in agent_raw.lower() or "домашн" in agent_raw.lower():
+                            agent_display = "🏠 Домашние дела"
+                        elif "research" in agent_raw.lower() or "исследован" in agent_raw.lower():
+                            agent_display = "🔍 Исследования"
+                        else:
+                            agent_display = agent_raw
+                        self._active_agent_name = agent_display
+                        self._active_agent_step = "Маршрутизация…"
+                        self._set_state("working", active_agent=agent_display, active_step="Маршрутизация…")
+                        self._append_log("AGENT", f"Запуск агента: {agent_display}")
+                    elif ev_type == "agent_progress":
+                        step_txt = payload.get("step", "")
+                        agent_raw = payload.get("display_name") or payload.get("agent") or self._active_agent_name or "Агент"
+                        if "household" in agent_raw.lower() or "домашн" in agent_raw.lower():
+                            agent_display = "🏠 Домашние дела"
+                        elif "research" in agent_raw.lower() or "исследован" in agent_raw.lower():
+                            agent_display = "🔍 Исследования"
+                        else:
+                            agent_display = agent_raw
+                        self._active_agent_name = agent_display
+                        self._active_agent_step = step_txt
+                        self._set_state("working", active_agent=agent_display, active_step=step_txt)
+                        self._append_log("STEP", f"{agent_display}: {step_txt}")
+                    elif ev_type == "after_agent":
+                        agent_raw = payload.get("display_name") or payload.get("agent") or self._active_agent_name or "Агент"
+                        if "household" in agent_raw.lower() or "домашн" in agent_raw.lower():
+                            agent_display = "🏠 Домашние дела"
+                        elif "research" in agent_raw.lower() or "исследован" in agent_raw.lower():
+                            agent_display = "🔍 Исследования"
+                        else:
+                            agent_display = agent_raw
+                        is_ok = payload.get("success", True)
+                        if is_ok:
+                            self._append_log("DONE", f"{agent_display} завершил работу.")
+                        else:
+                            self._append_log("ERR", f"{agent_display} завершился с ошибкой.")
+                        self.refresh_current_view()
 
                 elif msg_type == "voice_event":
                     ev_type, payload = data
@@ -1325,11 +1432,12 @@ class AkakiyGUI:
                         work_entry = self.record_work_result(res_payload, query=v_query)
                         has_err = not work_entry.get("success", True)
                         err_msg = work_entry.get("error") or ""
+                        d_badge = work_entry.get("domain_badge")
 
                         if has_err:
                             self._set_state("error")
                             ans = f"Ошибка: {err_msg or 'Действие не выполнено.'}"
-                            self._append_chat("Акакий (Голос)", ans)
+                            self._append_chat("Акакий (Голос)", ans, domain_badge=d_badge)
                             self._append_log("ERR", ans)
                         else:
                             ans = work_entry.get("message") or ""
@@ -1342,7 +1450,7 @@ class AkakiyGUI:
                                 self._append_log("DONE", f"Артефакты ({len(c_names)}): {', '.join(c_names)}")
                             artifacts = work_entry.get("artifacts") or []
                             if chat_ans:
-                                self._append_chat("Акакий (Голос)", chat_ans, artifacts=artifacts)
+                                self._append_chat("Акакий (Голос)", chat_ans, artifacts=artifacts, domain_badge=d_badge)
                                 self._append_log("DONE", f"Голосовой ответ сформирован [{work_entry.get('type')}].")
                         self.refresh_current_view()
                     elif ev_type == "voice_mode_toggle":
