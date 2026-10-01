@@ -37,4 +37,11 @@ def ensure_default_domain_agents(registry: Optional[AgentRegistry] = None) -> Ag
         except Exception as exc:
             logger.warning("Не удалось зарегистрировать ResearchAgent при bootstrap: %s", exc)
 
+    if not reg.has("coding"):
+        try:
+            from agents.coding import CodingAgent
+            reg.register(CodingAgent())
+        except Exception as exc:
+            logger.warning("Не удалось зарегистрировать CodingAgent при bootstrap: %s", exc)
+
     return reg

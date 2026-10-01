@@ -55,7 +55,6 @@ DEFAULT_BYPASS_ROUTE_TYPES: Set[str] = {
     "image",
     "presentation",
     "document",
-    "coding",
     "file",
 }
 

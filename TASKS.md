@@ -538,6 +538,17 @@
   * В `record_work_result` добавлен маппинг доменных агентов с приоритетом `display_name` и защитой от подмены Teamwork на единичный агент.
   * Разработаны модульные тесты `tests/test_domain_agent_lifecycle_events.py` (9 тестов) и `tests/test_desktop_hub_domain_agents.py` (6 тестов), 100% pass во всех 61 тестовых наборах проекта.
   * Проведена визуальная верификация со скриншотами для сценариев Household и Research агентов.
+* [x] **Domain CodingAgent и интеграция с MultiAgentBridge (Этап 31)**:
+  * Создан доменный агент `CodingAgent(BaseAgent)` (`agents/coding.py`, `name="coding"`, `display_name="Разработка"`).
+  * Делегирует исполнение существующему воркеру `tools/agents/coding.py` без создания параллельной инструментальной системы и без дублирования правил `match_coding` (использует `CommandRouter` как первоисточник интента).
+  * Реализована трансляция реальных этапов прогресса через `AgentContext.report_progress()` («Анализирую код…», «Применяю изменения…», «Проверяю результат…») строго по мере их фактического вызова воркером (без имитации невыполняемых шагов).
+  * Зарегистрирован в `agents/bootstrap.py` (`ensure_default_domain_agents()`).
+  * Удалён `"coding"` из `DEFAULT_BYPASS_ROUTE_TYPES` в `agents/bridge.py`, открывая сквозной путь через `MultiAgentBridge` → `AgentService` → `AgentRouter` → `CodingAgent`.
+  * Обеспечен строгий приоритет швов в `tools/agent.py`: `Teamwork` (сложные составные задачи) → `Project Tools` (`list_files`, `find_file`, `structure`, `search_files`) → `MultiAgentBridge` (`Domain CodingAgent`) → Legacy fallback.
+  * Дополнена детекция составных действий в `tools/teamwork.py` шаблоном `и запустить тесты`, исключая обход Teamwork задачами с coding-маркерами.
+  * В `gui.py` подключено отображение бейджа `💻 Разработка` для `coding` в `HomeView`, `ChatView` и недавней активности.
+  * Разработан тестовый набор `tests/test_domain_coding_agent.py` (16 тестов, 100% pass), обновлён `tests/test_agent_multi_agent_integration.py` (11 тестов, 100% pass).
+  * Полный регрессионный прогон: 62 тестовых файла из 62 пройдены со 100% OK.
 * [ ] **Интеграционные E2E тесты с виртуальным микрофоном**:
 
   * Реализовать тестовый сценарий, прогоняющий синтезированные аудиофайлы (WAV) через живой конвейер `VoiceService` с проверкой реакции GUI.

@@ -1055,12 +1055,16 @@ class AkakiyGUI:
                     domain_badge = "🏠 Домашние дела"
                 elif "исследован" in d_lower or "research" in d_lower:
                     domain_badge = "🔍 Исследования"
+                elif "разработк" in d_lower or "coding" in d_lower:
+                    domain_badge = "💻 Разработка"
                 else:
                     domain_badge = d_name
             elif r_type in ("household", "tasks", "reminders", "notes", "lists"):
                 domain_badge = "🏠 Домашние дела"
             elif r_type == "research":
                 domain_badge = "🔍 Исследования"
+            elif r_type in ("coding", "code"):
+                domain_badge = "💻 Разработка"
 
         entry = {
             "type": r_type,
@@ -1378,6 +1382,8 @@ class AkakiyGUI:
                             agent_display = "🏠 Домашние дела"
                         elif "research" in agent_raw.lower() or "исследован" in agent_raw.lower():
                             agent_display = "🔍 Исследования"
+                        elif "coding" in agent_raw.lower() or "разработк" in agent_raw.lower():
+                            agent_display = "💻 Разработка"
                         else:
                             agent_display = agent_raw
                         self._active_agent_name = agent_display
@@ -1391,6 +1397,8 @@ class AkakiyGUI:
                             agent_display = "🏠 Домашние дела"
                         elif "research" in agent_raw.lower() or "исследован" in agent_raw.lower():
                             agent_display = "🔍 Исследования"
+                        elif "coding" in agent_raw.lower() or "разработк" in agent_raw.lower():
+                            agent_display = "💻 Разработка"
                         else:
                             agent_display = agent_raw
                         self._active_agent_name = agent_display
@@ -1403,6 +1411,8 @@ class AkakiyGUI:
                             agent_display = "🏠 Домашние дела"
                         elif "research" in agent_raw.lower() or "исследован" in agent_raw.lower():
                             agent_display = "🔍 Исследования"
+                        elif "coding" in agent_raw.lower() or "разработк" in agent_raw.lower():
+                            agent_display = "💻 Разработка"
                         else:
                             agent_display = agent_raw
                         is_ok = payload.get("success", True)

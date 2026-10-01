@@ -709,32 +709,7 @@ class Agent:
             self._record_interaction(user_input, answer, tool_name="document")
             return resp
 
-        # 1.6. Задачи по коду (Coding Sub-Agent Fast-Path)
-        if route_type == "coding":
-            prompt = route.get("prompt", "") or route.get("task", "")
-            subagent_res = self.run_subagent("coding", task=prompt, metadata=route)
-            if subagent_res.success:
-                answer = subagent_res.message
-            else:
-                err_detail = subagent_res.error or subagent_res.message or "Неизвестная ошибка"
-                answer = f"Ошибка выполнения задачи по коду: {err_detail}"
-
-            resp = {
-                "type": "coding",
-                "tool": "coding",
-                "result": subagent_res,
-                "answer": answer,
-                "success": subagent_res.success,
-                "created_files": list(subagent_res.created_files),
-                "artifacts": [a.to_dict() for a in subagent_res.artifacts],
-            }
-            if not subagent_res.success:
-                resp["error"] = subagent_res.error or subagent_res.message
-
-            self._record_interaction(user_input, answer, tool_name="coding")
-            return resp
-
-        # 1.7. Файловые операции (File Sub-Agent Fast-Path)
+        # 1.6. Файловые операции (File Sub-Agent Fast-Path)
         if route_type == "file":
             prompt = route.get("prompt", "") or route.get("task", "")
             subagent_res = self.run_subagent("file", task=prompt, metadata=route)
@@ -859,7 +834,32 @@ class Agent:
                 import logging
                 logging.getLogger(__name__).exception("Исключение при вызове MultiAgentBridge в Agent.process: %s", bridge_exc)
 
-        # 5. Проведение исследований (Research Sub-Agent Fast-Path / Fallback)
+        # 5. Fallback для Domain Sub-Agents при отсутствии/сбое Bridge
+        if route_type == "coding":
+            prompt = route.get("prompt", "") or route.get("task", "")
+            subagent_res = self.run_subagent("coding", task=prompt, metadata=route)
+            if subagent_res.success:
+                answer = subagent_res.message
+            else:
+                err_detail = subagent_res.error or subagent_res.message or "Неизвестная ошибка"
+                answer = f"Ошибка выполнения задачи по коду: {err_detail}"
+
+            resp = {
+                "type": "coding",
+                "tool": "coding",
+                "result": subagent_res,
+                "answer": answer,
+                "success": subagent_res.success,
+                "created_files": list(subagent_res.created_files),
+                "artifacts": [a.to_dict() for a in subagent_res.artifacts],
+            }
+            if not subagent_res.success:
+                resp["error"] = subagent_res.error or subagent_res.message
+
+            self._record_interaction(user_input, answer, tool_name="coding")
+            return resp
+
+        # 5.1. Проведение исследований (Research Sub-Agent Fast-Path / Fallback)
         if route_type == "research":
             prompt = route.get("prompt", "") or route.get("topic", "")
             subagent_res = self.run_subagent("research", task=prompt, metadata=route)

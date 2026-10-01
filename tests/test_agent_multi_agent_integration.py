@@ -113,6 +113,23 @@ class TestAgentMultiAgentIntegration(unittest.TestCase):
             mock_worker_run.assert_called_once()
             self.mock_ai.send_chat.assert_not_called()
 
+    def test_02b_coding_request_routed_via_bridge(self):
+        """2b. Coding-запрос -> MultiAgentBridge -> CodingAgent -> worker -> AgentResult."""
+        mock_result = AgentResult.ok(
+            message="Анализ кода завершён для 1 файлов.",
+            artifacts=[Artifact.from_code(path="test.py", name="test.py", language="python", content="# test")]
+        )
+
+        with patch("tools.agents.coding.CodingAgent.run", return_value=mock_result) as mock_worker_run:
+            res = self.agent.process("кодинг: проверь синтаксис в файле test.py")
+
+            self.assertTrue(res["success"])
+            self.assertEqual(res["type"], "coding")
+            self.assertIn("Анализ кода завершён", res["answer"])
+            self.assertEqual(len(res["artifacts"]), 1)
+            mock_worker_run.assert_called_once()
+            self.mock_ai.send_chat.assert_not_called()
+
     def test_03_memory_commands_bypass_bridge(self):
         """3. Команды памяти -> старый chat/memory pipeline в обход MultiAgentBridge."""
         with patch.object(self.agent.bridge, "try_process") as mock_bridge_process:
@@ -179,17 +196,12 @@ class TestAgentMultiAgentIntegration(unittest.TestCase):
             self.assertEqual(res_doc["type"], "document")
             self.assertTrue(res_doc["success"])
 
-            # 4. Код (Coding Sub-Agent)
-            res_code = self.agent.process("код: напиши функцию вычисления факториала")
-            self.assertEqual(res_code["type"], "coding")
-            self.assertTrue(res_code["success"])
-
-            # 5. Файл (File Sub-Agent)
+            # 4. Файл (File Sub-Agent)
             res_file = self.agent.process("файл: прочитай config.py")
             self.assertEqual(res_file["type"], "file")
             self.assertTrue(res_file["success"])
 
-            # 6. Явный вызов субагента
+            # 5. Явный вызов субагента
             res_sub = self.agent.process("субагент echo: тестовая задача")
             self.assertEqual(res_sub["type"], "subagent")
             self.assertTrue(res_sub["success"])
