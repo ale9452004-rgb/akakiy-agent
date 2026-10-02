@@ -79,11 +79,19 @@ class HouseholdManager:
                         self.notes = data.get("notes", [])
                         self.lists = data.get("lists", {})
                         self.counters = data.get("counters", {})
-                        if "task" not in self.counters:
+                        if not self.tasks:
+                            self.counters["task"] = 0
+                        elif "task" not in self.counters:
                             self.counters["task"] = max([t.get("id", 0) for t in self.tasks], default=0)
-                        if "reminder" not in self.counters:
+
+                        if not self.reminders:
+                            self.counters["reminder"] = 0
+                        elif "reminder" not in self.counters:
                             self.counters["reminder"] = max([r.get("id", 0) for r in self.reminders], default=0)
-                        if "note" not in self.counters:
+
+                        if not self.notes:
+                            self.counters["note"] = 0
+                        elif "note" not in self.counters:
                             self.counters["note"] = max([n.get("id", 0) for n in self.notes], default=0)
             except Exception as e:
                 logger.error(f"Ошибка загрузки {self.storage_path}: {e}")
@@ -326,6 +334,8 @@ class HouseholdManager:
             indices.sort(reverse=True)
             deleted = [self.tasks.pop(idx) for idx in indices]
             deleted.reverse()
+            if not self.tasks:
+                self.counters["task"] = 0
             self._save()
 
             if len(deleted) == 1:
@@ -497,6 +507,8 @@ class HouseholdManager:
                 }
             else:
                 deleted = self.reminders.pop(idx)
+                if not self.reminders:
+                    self.counters["reminder"] = 0
                 self._save()
                 return {
                     "success": True,
@@ -515,6 +527,8 @@ class HouseholdManager:
             indices.sort(reverse=True)
             deleted = [self.reminders.pop(idx) for idx in indices]
             deleted.reverse()
+            if not self.reminders:
+                self.counters["reminder"] = 0
             self._save()
 
             if len(deleted) == 1:
@@ -528,6 +542,31 @@ class HouseholdManager:
                 "message": msg,
                 "deleted": deleted if len(deleted) > 1 else deleted[0],
                 "count": len(deleted)
+            }
+
+    def clear_reminders(self) -> Dict[str, Any]:
+        """
+        Очищает только список напоминаний self.reminders и сбрасывает self.counters['reminder'].
+        Не затрагивает задачи, заметки, списки и их счётчики.
+        """
+        with self._lock:
+            count = len(self.reminders)
+            if count == 0:
+                return {
+                    "success": True,
+                    "message": "Список напоминаний уже пуст.",
+                    "count": 0,
+                    "deleted": []
+                }
+            deleted_reminders = list(self.reminders)
+            self.reminders.clear()
+            self.counters["reminder"] = 0
+            self._save()
+            return {
+                "success": True,
+                "message": f"Удалены все напоминания ({count} шт.).",
+                "count": count,
+                "deleted": deleted_reminders
             }
 
     def check_due_reminders(self, current_time: Optional[str] = None) -> Dict[str, Any]:
@@ -681,6 +720,8 @@ class HouseholdManager:
             indices.sort(reverse=True)
             deleted = [self.notes.pop(idx) for idx in indices]
             deleted.reverse()
+            if not self.notes:
+                self.counters["note"] = 0
             self._save()
 
             if len(deleted) == 1:
@@ -986,6 +1027,9 @@ def complete_reminder(reminder_id: Union[int, str]) -> Dict[str, Any]:
 
 def delete_reminder(reminder_id: Union[int, str]) -> Dict[str, Any]:
     return get_household_manager().delete_reminder(reminder_id=reminder_id)
+
+def clear_reminders() -> Dict[str, Any]:
+    return get_household_manager().clear_reminders()
 
 def check_due_reminders(current_time: Optional[str] = None) -> Dict[str, Any]:
     return get_household_manager().check_due_reminders(current_time=current_time)

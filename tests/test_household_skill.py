@@ -36,6 +36,7 @@ from tools.household import (
     parse_reminder_time,
     toggle_task,
     clear_tasks,
+    clear_reminders,
     clear_notes
 )
 from tools.registry import TOOLS, get_tools_schema
@@ -235,6 +236,45 @@ class TestHouseholdManagerReminders(unittest.TestCase):
         self.assertTrue(del_res["success"])
         self.assertEqual(len(self.hm.reminders), 0)
 
+    def test_clear_reminders_isolated(self):
+        """Проверка полной очистки только напоминаний с сохранением задач, заметок и списков."""
+        self.hm.create_reminder("Напоминание 1", "18:00")
+        self.hm.create_reminder("Напоминание 2", "19:00")
+        self.hm.create_task("Задача по работе")
+        self.hm.create_note("Заметка", "Текст")
+        self.hm.create_list("дела")
+        self.hm.add_list_item("дела", "пункт 1")
+
+        self.assertEqual(len(self.hm.reminders), 2)
+        self.assertEqual(len(self.hm.tasks), 1)
+        self.assertEqual(len(self.hm.notes), 1)
+        self.assertEqual(len(self.hm.lists), 1)
+
+        # Очистка всех напоминаний
+        res = self.hm.clear_reminders()
+        self.assertTrue(res["success"])
+        self.assertEqual(res["count"], 2)
+        self.assertEqual(len(self.hm.reminders), 0)
+        self.assertEqual(self.hm.counters["reminder"], 0)
+
+        # Проверяем, что остальные сущности НЕ затронуты
+        self.assertEqual(len(self.hm.tasks), 1)
+        self.assertEqual(len(self.hm.notes), 1)
+        self.assertIn("дела", self.hm.lists)
+        self.assertEqual(len(self.hm.lists["дела"]), 1)
+
+        # Проверяем персистентность изоляции на диске
+        hm_disk = HouseholdManager(storage_path=self.file_path)
+        self.assertEqual(len(hm_disk.reminders), 0)
+        self.assertEqual(len(hm_disk.tasks), 1)
+        self.assertEqual(len(hm_disk.notes), 1)
+        self.assertEqual(len(hm_disk.lists["дела"]), 1)
+
+        # Повторный вызов на пустом списке
+        res_empty = self.hm.clear_reminders()
+        self.assertTrue(res_empty["success"])
+        self.assertEqual(res_empty["count"], 0)
+
 
 class TestHouseholdManagerNotes(unittest.TestCase):
     """3. CRUD для Notes и поиск."""
@@ -427,6 +467,103 @@ class TestPersistenceAndIsolation(unittest.TestCase):
         hm.delete_task(2)
         t3 = hm.create_task("Задача 3")["task"]["id"]
         self.assertEqual(t3, 3)
+
+    def test_delete_middle_item_preserves_remaining_ids(self):
+        """1. При удалении элемента из середины: ID оставшихся не меняются, следующий получает новый уникальный ID."""
+        hm = HouseholdManager(storage_path=self.file_path)
+
+        # Задачи
+        t1 = hm.create_task("Задача 1")["task"]["id"]
+        t2 = hm.create_task("Задача 2")["task"]["id"]
+        t3 = hm.create_task("Задача 3")["task"]["id"]
+        hm.delete_task(t2)
+        self.assertEqual([t["id"] for t in hm.tasks], [1, 3])
+        t4 = hm.create_task("Задача 4")["task"]["id"]
+        self.assertEqual(t4, 4)
+
+        # Напоминания
+        r1 = hm.create_reminder("Напоминание 1", "12:00")["reminder"]["id"]
+        r2 = hm.create_reminder("Напоминание 2", "13:00")["reminder"]["id"]
+        r3 = hm.create_reminder("Напоминание 3", "14:00")["reminder"]["id"]
+        hm.delete_reminder(r2)
+        self.assertEqual([r["id"] for r in hm.reminders], [1, 3])
+        r4 = hm.create_reminder("Напоминание 4", "15:00")["reminder"]["id"]
+        self.assertEqual(r4, 4)
+
+        # Заметки
+        n1 = hm.create_note("Заметка 1", "текст 1")["note"]["id"]
+        n2 = hm.create_note("Заметка 2", "текст 2")["note"]["id"]
+        n3 = hm.create_note("Заметка 3", "текст 3")["note"]["id"]
+        hm.delete_note(n2)
+        self.assertEqual([n["id"] for n in hm.notes], [1, 3])
+        n4 = hm.create_note("Заметка 4", "текст 4")["note"]["id"]
+        self.assertEqual(n4, 4)
+
+    def test_delete_last_remaining_item_resets_counter(self):
+        """2. При удалении последнего элемента коллекция опустошается, счётчик сбрасывается в 0, следующая запись получает ID 1."""
+        hm = HouseholdManager(storage_path=self.file_path)
+
+        # Задачи: создаём 2, удаляем по одной
+        hm.create_task("Задача 1")
+        hm.create_task("Задача 2")
+        hm.delete_task(1)  # осталась 1 задача (#2)
+        self.assertEqual(len(hm.tasks), 1)
+        hm.delete_task(2)  # удалили последний оставшийся элемент
+        self.assertEqual(len(hm.tasks), 0)
+        self.assertEqual(hm.counters["task"], 0)
+        t_new = hm.create_task("Новая задача после очистки")["task"]["id"]
+        self.assertEqual(t_new, 1)
+
+        # Напоминания: создаём 2, удаляем по одному
+        hm.create_reminder("Напоминание 1", "12:00")
+        hm.create_reminder("Напоминание 2", "13:00")
+        hm.delete_reminder(1)
+        hm.delete_reminder(2)
+        self.assertEqual(len(hm.reminders), 0)
+        self.assertEqual(hm.counters["reminder"], 0)
+        r_new = hm.create_reminder("Новое напоминание", "14:00")["reminder"]["id"]
+        self.assertEqual(r_new, 1)
+
+        # Заметки: создаём 2, удаляем по одной
+        hm.create_note("Заметка 1", "текст 1")
+        hm.create_note("Заметка 2", "текст 2")
+        hm.delete_note(1)
+        hm.delete_note(2)
+        self.assertEqual(len(hm.notes), 0)
+        self.assertEqual(hm.counters["note"], 0)
+        n_new = hm.create_note("Новая заметка", "текст")["note"]["id"]
+        self.assertEqual(n_new, 1)
+
+    def test_recreate_after_collection_clear(self):
+        """3. При полной очистке коллекции поведение идентично удалению последнего элемента: ID сбрасывается в 1."""
+        hm = HouseholdManager(storage_path=self.file_path)
+
+        # Задачи
+        hm.create_task("Задача 1")
+        hm.create_task("Задача 2")
+        hm.clear_tasks()
+        self.assertEqual(len(hm.tasks), 0)
+        self.assertEqual(hm.counters["task"], 0)
+        t_new = hm.create_task("Задача после clear")["task"]["id"]
+        self.assertEqual(t_new, 1)
+
+        # Напоминания
+        hm.create_reminder("Напоминание 1", "12:00")
+        hm.create_reminder("Напоминание 2", "13:00")
+        hm.clear_reminders()
+        self.assertEqual(len(hm.reminders), 0)
+        self.assertEqual(hm.counters["reminder"], 0)
+        r_new = hm.create_reminder("Напоминание после clear", "15:00")["reminder"]["id"]
+        self.assertEqual(r_new, 1)
+
+        # Заметки
+        hm.create_note("Заметка 1", "текст 1")
+        hm.create_note("Заметка 2", "текст 2")
+        hm.clear_notes()
+        self.assertEqual(len(hm.notes), 0)
+        self.assertEqual(hm.counters["note"], 0)
+        n_new = hm.create_note("Заметка после clear", "текст")["note"]["id"]
+        self.assertEqual(n_new, 1)
 
 
 class TestSkillRegistryAndHouseholdTools(unittest.TestCase):
