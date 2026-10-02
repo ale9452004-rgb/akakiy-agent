@@ -68,14 +68,47 @@ class TestIsolatedHouseholdViews(unittest.TestCase):
         task_id = tasks[0]["id"]
         self.assertEqual(tasks[0]["title"], "Купить яблоки")
 
-        # Toggle task
+        # Toggle task: False -> True
         view.ui_toggle_task(task_id)
         task = self.household.list_tasks(status="all")["tasks"][0]
         self.assertTrue(task["completed"])
+        self.assertIsNotNone(task.get("completed_at"))
+
+        # Toggle task: True -> False
+        view.ui_toggle_task(task_id)
+        task = self.household.list_tasks(status="all")["tasks"][0]
+        self.assertFalse(task["completed"])
+        self.assertNotIn("completed_at", task)
 
         # Delete task
         with patch("tkinter.messagebox.askyesno", return_value=True):
             view.ui_delete_task(task_id)
+        self.assertEqual(len(self.household.list_tasks(status="all")["tasks"]), 0)
+
+    def test_tasks_view_clear_all(self):
+        view = TasksView(self.root, shell=self.mock_shell)
+        view.pack()
+        self.root.update_idletasks()
+
+        # 1. Попытка очистить при пустом списке -> info dialog
+        with patch("tkinter.messagebox.showinfo") as mock_info:
+            view.ui_clear_all_tasks()
+            mock_info.assert_called_once()
+
+        # 2. Создаем несколько задач
+        self.household.create_task("Задача 1")
+        self.household.create_task("Задача 2")
+        view.refresh()
+        self.assertEqual(len(self.household.list_tasks(status="all")["tasks"]), 2)
+
+        # 3. Отмена подтверждения (askyesno -> False) -> задачи остаются
+        with patch("tkinter.messagebox.askyesno", return_value=False):
+            view.ui_clear_all_tasks()
+        self.assertEqual(len(self.household.list_tasks(status="all")["tasks"]), 2)
+
+        # 4. Подтверждение (askyesno -> True) -> задачи очищаются
+        with patch("tkinter.messagebox.askyesno", return_value=True):
+            view.ui_clear_all_tasks()
         self.assertEqual(len(self.household.list_tasks(status="all")["tasks"]), 0)
 
     def test_reminders_view_isolated_crud(self):
@@ -139,6 +172,32 @@ class TestIsolatedHouseholdViews(unittest.TestCase):
         # Delete note
         with patch("tkinter.messagebox.askyesno", return_value=True):
             view.ui_delete_note(note_id)
+        self.assertEqual(len(self.household.list_notes()["notes"]), 0)
+
+    def test_notes_view_clear_all(self):
+        view = NotesView(self.root, shell=self.mock_shell)
+        view.pack()
+        self.root.update_idletasks()
+
+        # 1. Попытка очистить при пустом списке -> info dialog
+        with patch("tkinter.messagebox.showinfo") as mock_info:
+            view.ui_clear_all_notes()
+            mock_info.assert_called_once()
+
+        # 2. Создаем несколько заметок
+        self.household.create_note("Заметка 1", "Текст 1")
+        self.household.create_note("Заметка 2", "Текст 2")
+        view.refresh()
+        self.assertEqual(len(self.household.list_notes()["notes"]), 2)
+
+        # 3. Отмена подтверждения (askyesno -> False) -> заметки остаются
+        with patch("tkinter.messagebox.askyesno", return_value=False):
+            view.ui_clear_all_notes()
+        self.assertEqual(len(self.household.list_notes()["notes"]), 2)
+
+        # 4. Подтверждение (askyesno -> True) -> заметки очищаются
+        with patch("tkinter.messagebox.askyesno", return_value=True):
+            view.ui_clear_all_notes()
         self.assertEqual(len(self.household.list_notes()["notes"]), 0)
 
     def test_lists_view_isolated_crud(self):

@@ -42,6 +42,24 @@ class TasksView(BaseView):
             bg=self.BG_MAIN
         ).pack(side="left")
 
+        # Кнопка очистки всех задач
+        btn_clear_all = tk.Button(
+            header_row,
+            text="Очистить все",
+            font=self.FONT_CAPTION,
+            fg=self.ACCENT_RED,
+            bg="#21262d",
+            activebackground="#30363d",
+            activeforeground="#ff7b72",
+            bd=0,
+            padx=10,
+            pady=4,
+            cursor="hand2",
+            command=self.ui_clear_all_tasks
+        )
+        btn_clear_all.pack(side="right", padx=(8, 0))
+        _bind_hover(btn_clear_all, "#21262d", "#30363d")
+
         # Поиск / фильтрация задач
         search_box = tk.Frame(header_row, bg=self.BG_MAIN)
         search_box.pack(side="right")
@@ -233,9 +251,9 @@ class TasksView(BaseView):
             self.paged_controller.set_items(list(reversed(tasks)))
 
     def ui_toggle_task(self, task_id: Any) -> None:
-        """Отметка задачи как выполненной."""
+        """Переключение статуса выполнения задачи (не выполнена <-> выполнена)."""
         if self.household:
-            self.household.complete_task(task_id)
+            self.household.toggle_task(task_id)
             self.refresh()
 
     def ui_delete_task(self, task_id: Any) -> None:
@@ -244,3 +262,26 @@ class TasksView(BaseView):
             if self.household:
                 self.household.delete_task(task_id)
                 self.refresh()
+
+    def ui_clear_all_tasks(self) -> None:
+        """Очистка всех задач с подтверждением пользователя."""
+        if not self.household:
+            return
+        tasks = self.household.list_tasks(status="all").get("tasks", [])
+        if not tasks:
+            messagebox.showinfo("Задачи", "Список задач уже пуст.")
+            return
+
+        if messagebox.askyesno(
+            "Подтверждение очистки",
+            f"Вы уверены, что хотите удалить все задачи ({len(tasks)} шт.)?\nЭто действие нельзя отменить."
+        ):
+            self.household.clear_tasks()
+            if self.entry_task_search:
+                self.entry_task_search.delete(0, tk.END)
+            self.refresh()
+            if self.shell and hasattr(self.shell, "home_view") and self.shell.home_view and self.shell.home_view.winfo_exists():
+                try:
+                    self.shell.home_view.refresh()
+                except Exception:
+                    pass

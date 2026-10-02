@@ -178,16 +178,26 @@ class TestAkakiyGUIViews(unittest.TestCase):
         task_id = tasks[0]["id"]
         self.assertEqual(tasks[0]["title"], "Купить протеин")
 
-        # Toggle task
+        # Toggle task: False -> True
         self.gui._ui_toggle_task(task_id)
         updated = [t for t in self.gui.household.list_tasks(status="all")["tasks"] if t["id"] == task_id][0]
         self.assertTrue(updated.get("completed", False))
+        self.assertIsNotNone(updated.get("completed_at"))
 
-        # Delete task with confirmed prompt
+        # Toggle task: True -> False
+        self.gui._ui_toggle_task(task_id)
+        updated2 = [t for t in self.gui.household.list_tasks(status="all")["tasks"] if t["id"] == task_id][0]
+        self.assertFalse(updated2.get("completed", False))
+        self.assertNotIn("completed_at", updated2)
+
+        # Clear all tasks via GUI delegate
+        self.gui.entry_task.insert(0, "Вторая задача")
+        self.gui._ui_create_task()
+        self.assertEqual(len(self.gui.household.list_tasks(status="all")["tasks"]), 2)
+
         with patch("tkinter.messagebox.askyesno", return_value=True):
-            self.gui._ui_delete_task(task_id)
-        remaining = [t for t in self.gui.household.list_tasks(status="all")["tasks"] if t["id"] == task_id]
-        self.assertEqual(len(remaining), 0)
+            self.gui._ui_clear_all_tasks()
+        self.assertEqual(len(self.gui.household.list_tasks(status="all")["tasks"]), 0)
 
     def test_household_reminders_crud_via_gui(self):
         self.gui.switch_view("reminders")
@@ -234,6 +244,16 @@ class TestAkakiyGUIViews(unittest.TestCase):
             self.gui._ui_delete_note(note_id)
         remaining = [n for n in self.gui.household.list_notes()["notes"] if n["id"] == note_id]
         self.assertEqual(len(remaining), 0)
+
+        # Clear all notes via GUI delegate
+        self.gui.entry_note_title.insert(0, "Заметка 2")
+        self.gui.entry_note_content.insert(0, "Текст 2")
+        self.gui._ui_create_note()
+        self.assertEqual(len(self.gui.household.list_notes()["notes"]), 1)
+
+        with patch("tkinter.messagebox.askyesno", return_value=True):
+            self.gui._ui_clear_all_notes()
+        self.assertEqual(len(self.gui.household.list_notes()["notes"]), 0)
 
     def test_household_lists_crud_via_gui(self):
         self.gui.switch_view("lists")

@@ -763,6 +763,12 @@ class AkakiyGUI:
         if hasattr(self, "tasks_view") and self.tasks_view:
             return self.tasks_view.ui_delete_task(task_id)
 
+    def _ui_clear_all_tasks(self):
+        if hasattr(self, "tasks_view") and self.tasks_view:
+            return self.tasks_view.ui_clear_all_tasks()
+        elif self.household:
+            return self.household.clear_tasks()
+
     def _refresh_tasks_list(self):
         if hasattr(self, "tasks_view") and self.tasks_view:
             return self.tasks_view.refresh()
@@ -813,6 +819,12 @@ class AkakiyGUI:
     def _ui_delete_note(self, note_id):
         if hasattr(self, "notes_view") and self.notes_view:
             return self.notes_view.ui_delete_note(note_id)
+
+    def _ui_clear_all_notes(self):
+        if hasattr(self, "notes_view") and self.notes_view:
+            return self.notes_view.ui_clear_all_notes()
+        elif self.household:
+            return self.household.clear_notes()
 
     def _refresh_notes_list(self):
         if hasattr(self, "notes_view") and self.notes_view:

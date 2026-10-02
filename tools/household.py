@@ -198,6 +198,43 @@ class HouseholdManager:
                 "task": target
             }
 
+    def toggle_task(self, task_id: Union[int, str]) -> Dict[str, Any]:
+        """
+        Переключает статус выполнения задачи (не выполнена <-> выполнена).
+        completed=False -> True: устанавливает completed_at.
+        completed=True -> False: сбрасывает completed=False, удаляет completed_at.
+        """
+        with self._lock:
+            target = None
+            try:
+                t_int = int(str(task_id).lstrip("#"))
+                target = next((t for t in self.tasks if t.get("id") == t_int), None)
+            except ValueError:
+                pass
+
+            if target is None:
+                norm_query = str(task_id).strip().lower()
+                target = next((t for t in self.tasks if norm_query in t.get("title", "").lower()), None)
+
+            if target is None:
+                return {"success": False, "error": f"Задача '{task_id}' не найдена."}
+
+            new_val = not target.get("completed", False)
+            target["completed"] = new_val
+            if new_val:
+                target["completed_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                status_text = "выполнена"
+            else:
+                target.pop("completed_at", None)
+                status_text = "не выполнена"
+
+            self._save()
+            return {
+                "success": True,
+                "message": f"Задача #{target['id']} \"{target['title']}\" отмечена как {status_text}.",
+                "task": target
+            }
+
     def _resolve_delete_targets(
         self,
         query: Any,
@@ -302,6 +339,31 @@ class HouseholdManager:
                 "message": msg,
                 "deleted": deleted if len(deleted) > 1 else deleted[0],
                 "count": len(deleted)
+            }
+
+    def clear_tasks(self) -> Dict[str, Any]:
+        """
+        Очищает только список задач self.tasks и сбрасывает self.counters['task'].
+        Не затрагивает напоминания, заметки, списки и их счётчики.
+        """
+        with self._lock:
+            count = len(self.tasks)
+            if count == 0:
+                return {
+                    "success": True,
+                    "message": "Список задач уже пуст.",
+                    "count": 0,
+                    "deleted": []
+                }
+            deleted_tasks = list(self.tasks)
+            self.tasks.clear()
+            self.counters["task"] = 0
+            self._save()
+            return {
+                "success": True,
+                "message": f"Удалены все задачи ({count} шт.).",
+                "count": count,
+                "deleted": deleted_tasks
             }
 
     # =========================================================================
@@ -634,6 +696,31 @@ class HouseholdManager:
                 "count": len(deleted)
             }
 
+    def clear_notes(self) -> Dict[str, Any]:
+        """
+        Очищает только список заметок self.notes и сбрасывает self.counters['note'].
+        Не затрагивает задачи, напоминания, списки и их счётчики.
+        """
+        with self._lock:
+            count = len(self.notes)
+            if count == 0:
+                return {
+                    "success": True,
+                    "message": "Список заметок уже пуст.",
+                    "count": 0,
+                    "deleted": []
+                }
+            deleted_notes = list(self.notes)
+            self.notes.clear()
+            self.counters["note"] = 0
+            self._save()
+            return {
+                "success": True,
+                "message": f"Удалены все заметки ({count} шт.).",
+                "count": count,
+                "deleted": deleted_notes
+            }
+
     # =========================================================================
     # 4. Списки (Lists)
     # =========================================================================
@@ -879,8 +966,14 @@ def list_tasks(status: str = "all") -> Dict[str, Any]:
 def complete_task(task_id: Union[int, str]) -> Dict[str, Any]:
     return get_household_manager().complete_task(task_id=task_id)
 
+def toggle_task(task_id: Union[int, str]) -> Dict[str, Any]:
+    return get_household_manager().toggle_task(task_id=task_id)
+
 def delete_task(task_id: Union[int, str]) -> Dict[str, Any]:
     return get_household_manager().delete_task(task_id=task_id)
+
+def clear_tasks() -> Dict[str, Any]:
+    return get_household_manager().clear_tasks()
 
 def create_reminder(text: str, remind_at: str, repeat: Optional[str] = None) -> Dict[str, Any]:
     return get_household_manager().create_reminder(text=text, remind_at=remind_at, repeat=repeat)
@@ -908,6 +1001,9 @@ def search_notes(query: str) -> Dict[str, Any]:
 
 def delete_note(note_id: Union[int, str]) -> Dict[str, Any]:
     return get_household_manager().delete_note(note_id=note_id)
+
+def clear_notes() -> Dict[str, Any]:
+    return get_household_manager().clear_notes()
 
 def create_list(name: str) -> Dict[str, Any]:
     return get_household_manager().create_list(name=name)

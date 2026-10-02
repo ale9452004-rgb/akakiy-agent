@@ -43,6 +43,24 @@ class NotesView(BaseView):
             bg=self.BG_MAIN
         ).pack(side="left")
 
+        # Кнопка очистки всех заметок
+        btn_clear_all = tk.Button(
+            header_row,
+            text="Очистить все",
+            font=self.FONT_CAPTION,
+            fg=self.ACCENT_RED,
+            bg="#21262d",
+            activebackground="#30363d",
+            activeforeground="#ff7b72",
+            bd=0,
+            padx=10,
+            pady=4,
+            cursor="hand2",
+            command=self.ui_clear_all_notes
+        )
+        btn_clear_all.pack(side="right", padx=(8, 0))
+        _bind_hover(btn_clear_all, "#21262d", "#30363d")
+
         # Поиск заметок
         search_box = tk.Frame(header_row, bg=self.BG_MAIN)
         search_box.pack(side="right")
@@ -257,3 +275,26 @@ class NotesView(BaseView):
             if self.household:
                 self.household.delete_note(note_id)
                 self.refresh()
+
+    def ui_clear_all_notes(self) -> None:
+        """Очистка всех заметок с подтверждением пользователя."""
+        if not self.household:
+            return
+        notes = self.household.list_notes().get("notes", [])
+        if not notes:
+            messagebox.showinfo("Заметки", "Список заметок уже пуст.")
+            return
+
+        if messagebox.askyesno(
+            "Подтверждение очистки",
+            f"Вы уверены, что хотите удалить все заметки ({len(notes)} шт.)?\nЭто действие нельзя отменить."
+        ):
+            self.household.clear_notes()
+            if self.entry_note_search:
+                self.entry_note_search.delete(0, tk.END)
+            self.refresh()
+            if self.shell and hasattr(self.shell, "home_view") and self.shell.home_view and self.shell.home_view.winfo_exists():
+                try:
+                    self.shell.home_view.refresh()
+                except Exception:
+                    pass

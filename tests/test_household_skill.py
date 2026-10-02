@@ -33,7 +33,10 @@ from tools.household import (
     HouseholdManager,
     get_household_manager,
     reset_household_manager,
-    parse_reminder_time
+    parse_reminder_time,
+    toggle_task,
+    clear_tasks,
+    clear_notes
 )
 from tools.registry import TOOLS, get_tools_schema
 from tools.dispatcher import set_confirmation_handler, get_confirmation_handler, dispatch
@@ -101,6 +104,84 @@ class TestHouseholdManagerTasks(unittest.TestCase):
         # Повторное удаление возвращает ошибку
         del_again = self.hm.delete_task(1)
         self.assertFalse(del_again["success"])
+
+    def test_toggle_task(self):
+        """Проверка переключения статуса задачи False -> True -> False и корректности completed_at."""
+        res = self.hm.create_task("Тестовая задача")
+        self.assertTrue(res["success"])
+        task_id = res["task"]["id"]
+        self.assertFalse(res["task"]["completed"])
+        self.assertNotIn("completed_at", res["task"])
+
+        # 1. False -> True
+        tog1 = self.hm.toggle_task(task_id)
+        self.assertTrue(tog1["success"])
+        self.assertTrue(tog1["task"]["completed"])
+        self.assertIn("completed_at", tog1["task"])
+        self.assertTrue(bool(tog1["task"]["completed_at"]))
+        self.assertIn("выполнена", tog1["message"])
+
+        # Проверка персистентности на диске
+        hm_disk = HouseholdManager(storage_path=self.file_path)
+        disk_task = hm_disk.list_tasks(status="all")["tasks"][0]
+        self.assertTrue(disk_task["completed"])
+        self.assertTrue(bool(disk_task.get("completed_at")))
+
+        # 2. True -> False
+        tog2 = self.hm.toggle_task(task_id)
+        self.assertTrue(tog2["success"])
+        self.assertFalse(tog2["task"]["completed"])
+        self.assertNotIn("completed_at", tog2["task"])
+        self.assertIn("не выполнена", tog2["message"])
+
+        # Проверка персистентности на диске после возврата в невыполненное состояние
+        hm_disk2 = HouseholdManager(storage_path=self.file_path)
+        disk_task2 = hm_disk2.list_tasks(status="all")["tasks"][0]
+        self.assertFalse(disk_task2["completed"])
+        self.assertNotIn("completed_at", disk_task2)
+
+        # Несуществующая задача
+        tog_err = self.hm.toggle_task(999)
+        self.assertFalse(tog_err["success"])
+
+    def test_clear_tasks_isolated(self):
+        """Проверка полной очистки только задач с сохранением напоминаний, заметок и списков."""
+        self.hm.create_task("Задача 1")
+        self.hm.create_task("Задача 2")
+        self.hm.create_reminder("Позвонить врачу", "21:00")
+        self.hm.create_note("Идея", "Сделать рефакторинг")
+        self.hm.create_list("покупки")
+        self.hm.add_list_item("покупки", "хлеб")
+
+        self.assertEqual(len(self.hm.tasks), 2)
+        self.assertEqual(len(self.hm.reminders), 1)
+        self.assertEqual(len(self.hm.notes), 1)
+        self.assertEqual(len(self.hm.lists), 1)
+
+        # Очистка всех задач
+        res = self.hm.clear_tasks()
+        self.assertTrue(res["success"])
+        self.assertEqual(res["count"], 2)
+        self.assertEqual(len(self.hm.tasks), 0)
+        self.assertEqual(self.hm.counters["task"], 0)
+
+        # Проверяем, что остальные сущности НЕ затронуты
+        self.assertEqual(len(self.hm.reminders), 1)
+        self.assertEqual(len(self.hm.notes), 1)
+        self.assertIn("покупки", self.hm.lists)
+        self.assertEqual(len(self.hm.lists["покупки"]), 1)
+
+        # Проверяем персистентность изоляции на диске
+        hm_disk = HouseholdManager(storage_path=self.file_path)
+        self.assertEqual(len(hm_disk.tasks), 0)
+        self.assertEqual(len(hm_disk.reminders), 1)
+        self.assertEqual(len(hm_disk.notes), 1)
+        self.assertEqual(len(hm_disk.lists["покупки"]), 1)
+
+        # Повторный вызов на пустом списке
+        res_empty = self.hm.clear_tasks()
+        self.assertTrue(res_empty["success"])
+        self.assertEqual(res_empty["count"], 0)
 
 
 class TestHouseholdManagerReminders(unittest.TestCase):
@@ -188,6 +269,45 @@ class TestHouseholdManagerNotes(unittest.TestCase):
         del_res = self.hm.delete_note(1)
         self.assertTrue(del_res["success"])
         self.assertEqual(len(self.hm.notes), 0)
+
+    def test_clear_notes_isolated(self):
+        """Проверка полной очистки только заметок с сохранением задач, напоминаний и списков."""
+        self.hm.create_note("Заметка 1", "Текст 1")
+        self.hm.create_note("Заметка 2", "Текст 2")
+        self.hm.create_task("Задача по работе")
+        self.hm.create_reminder("Позвонить", "18:00")
+        self.hm.create_list("дела")
+        self.hm.add_list_item("дела", "пункт 1")
+
+        self.assertEqual(len(self.hm.notes), 2)
+        self.assertEqual(len(self.hm.tasks), 1)
+        self.assertEqual(len(self.hm.reminders), 1)
+        self.assertEqual(len(self.hm.lists), 1)
+
+        # Очистка всех заметок
+        res = self.hm.clear_notes()
+        self.assertTrue(res["success"])
+        self.assertEqual(res["count"], 2)
+        self.assertEqual(len(self.hm.notes), 0)
+        self.assertEqual(self.hm.counters["note"], 0)
+
+        # Проверяем, что остальные сущности НЕ затронуты
+        self.assertEqual(len(self.hm.tasks), 1)
+        self.assertEqual(len(self.hm.reminders), 1)
+        self.assertIn("дела", self.hm.lists)
+        self.assertEqual(len(self.hm.lists["дела"]), 1)
+
+        # Проверяем персистентность изоляции на диске
+        hm_disk = HouseholdManager(storage_path=self.file_path)
+        self.assertEqual(len(hm_disk.notes), 0)
+        self.assertEqual(len(hm_disk.tasks), 1)
+        self.assertEqual(len(hm_disk.reminders), 1)
+        self.assertEqual(len(hm_disk.lists["дела"]), 1)
+
+        # Повторный вызов на пустом списке
+        res_empty = self.hm.clear_notes()
+        self.assertTrue(res_empty["success"])
+        self.assertEqual(res_empty["count"], 0)
 
 
 class TestHouseholdManagerLists(unittest.TestCase):
