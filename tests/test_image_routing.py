@@ -83,6 +83,27 @@ class TestImageRouterPatterns(unittest.TestCase):
                 self.assertEqual(route.get("type"), "image", f"Query '{query}' was not routed to 'image'")
                 self.assertEqual(route.get("prompt"), expected_prompt)
 
+    def test_natural_image_generation_phrases(self):
+        """Проверка естественных запросов генерации изображений без обязательных существительных."""
+        cases = [
+            ("сгенерируй кота", "кота"),
+            ("сгенерируйте кота", "кота"),
+            ("сгенерировать кота", "кота"),
+            ("создай изображение кота", "кота"),
+            ("сделай картинку кота", "кота"),
+            ("нарисуй кота", "кота"),
+            ("сгенерируй рыжего кота в космосе", "рыжего кота в космосе"),
+            ("сгенерируйте красивый закат", "красивый закат"),
+            ("сгенерировать старинный замок", "старинный замок"),
+            ("Акакий, сгенерируй мне собаку", "собаку"),
+            ("сгенерируй мне, пожалуйста, чашку кофе", "чашку кофе"),
+        ]
+        for query, expected_prompt in cases:
+            with self.subTest(query=query):
+                route = self.router.route(query)
+                self.assertEqual(route.get("type"), "image", f"Query '{query}' was not routed to 'image'")
+                self.assertEqual(route.get("prompt"), expected_prompt)
+
     def test_negative_patterns_not_triggering_image(self):
         cases = [
             "что такое изображение?",
@@ -95,6 +116,23 @@ class TestImageRouterPatterns(unittest.TestCase):
             "нарисуй",
             "сгенерируй изображение",
             "Привет, как дела?",
+            "сгенерируй код функции",
+            "сгенерируй класс User",
+            "сгенерируй файл test.txt",
+            "сгенерируй тест для модуля",
+            "сгенерируй задачу купить хлеб",
+            "сгенерируй заметку список",
+            "сгенерируй напоминание в 18:00",
+            "сгенерируй список покупок",
+            "сгенерируй план проекта",
+            "сгенерируй презентацию о продукте",
+            "сгенерируй документ отчет",
+            "сгенерируй исследование рынка",
+            "сгенерируй текст о погоде",
+            "сгенерируй статью про AI",
+            "сгенерируй стих про весну",
+            "сгенерируй историю о рыцарях",
+            "сгенерируй сказку на ночь",
         ]
 
         for query in cases:
@@ -289,6 +327,19 @@ class TestAgentImageProcessIntegration(unittest.TestCase):
         self.assertEqual(test_agent.last_context.get("width"), 1216)
         self.assertEqual(test_agent.last_context.get("height"), 832)
         self.assertEqual(test_agent.last_context.get("count"), 2)
+
+    def test_agent_process_natural_generate_cat(self):
+        """Проверка сквозного вызова Agent.process() для естественного запроса 'сгенерируй кота'."""
+        test_agent = DummyTestImageAgent(should_succeed=True)
+        self.agent.agent_registry.register(test_agent)
+
+        res = self.agent.process("сгенерируй кота")
+
+        self.assertEqual(res.get("type"), "image")
+        self.assertTrue(res.get("success"))
+        self.assertIsNotNone(test_agent.last_context)
+        self.assertEqual(test_agent.last_context.task, "кота")
+        self.assertFalse(self.mock_ai.send_chat.called)
 
 
 if __name__ == "__main__":

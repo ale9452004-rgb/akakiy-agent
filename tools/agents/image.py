@@ -345,6 +345,19 @@ class ImageAgent(SubAgent):
 
         # 2. Проверка доступности ComfyUI Worker
         if not self.client.is_available():
+            try:
+                from infrastructure.comfyui_manager import get_comfyui_manager
+                comfy_mgr = get_comfyui_manager()
+                if comfy_mgr.is_starting():
+                    wait_timeout = getattr(comfy_mgr, "timeout", 30.0)
+                    if not comfy_mgr.wait_until_ready(timeout=wait_timeout):
+                        return AgentResult.fail(
+                            error="Локальный ComfyUI Worker ещё запускается. Пожалуйста, повторите запрос через несколько секунд."
+                        )
+            except Exception:
+                pass
+
+        if not self.client.is_available():
             return AgentResult.fail(
                 error=f"Локальный ComfyUI Worker недоступен по адресу {self.base_url}. Убедитесь, что воркер запущен."
             )

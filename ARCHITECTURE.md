@@ -79,6 +79,8 @@
   * [ui/views/memory.py](file:///c:/Akakiy%20agent/ui/views/memory.py): Модульный экран памяти (`MemoryView`, фильтрация поиска по тексту и #ID, пагинация, ручное добавление, удаление фактов).
   * [ui/views/settings.py](file:///c:/Akakiy%20agent/ui/views/settings.py): Модульный экран настроек, валидации и резервного копирования (`SettingsView`, тумблеры звука уведомлений и TTS, запуск валидации, экспорт и импорт пользовательских данных).
 * [ui/pagination.py](file:///c:/Akakiy%20agent/ui/pagination.py): Переиспользуемый UI-механизм фильтрации и пагинации (`PaginationModel`, `PaginationBar`, `PagedListController`), подключенный к экранам `TasksView`, `NotesView`, `MemoryView` и `ListsView`.
+* [ui/clipboard.py](file:///c:/Akakiy%20agent/ui/clipboard.py): Подсистема буфера обмена и контекстных меню (`copy_to_clipboard`, `get_clipboard_text`, `attach_text_copy_handler`, `attach_entry_context_menu`, `attach_widget_copy_menu`, `create_context_menu`). Поддерживает выделение мышью, `Ctrl+C` (включая русские раскладки Windows `Cyrillic_es`), умный fallback (копирование сообщения/строки целиком при отсутствии выделения) и тёмные контекстные меню.
+* [ui/artifact_card.py](file:///c:/Akakiy%20agent/ui/artifact_card.py): Компоненты карточек артефактов (`ImageArtifactCard`, `FileArtifactCard`) с отображением превью, кнопками открытия файла/директории и контекстным меню копирования промпта и путей.
 * [commands.py](file:///c:/Akakiy%20agent/commands.py): Вспомогательные быстрые команды и диспетчер CLI REPL (`show_status`, `show_files`, `read_file`, `handle_cli_command`, алиасы `:status`, `:files`, `:read`, `:export`, `:import`, `:brief`, `:today`, `:help`, `:exit`).
 
 ### 3.2. Голосовой слой (Voice UX)
@@ -257,6 +259,13 @@
   * Строгое отслеживание владельца (`started_by_akakiy`): чужой, ранее запущенный процесс Ollama никогда не останавливается.
   * Корректная остановка только собственного процесса (`terminate` -> `wait` -> `kill`) при выходе из GUI или CLI (`finally: cleanup()`).
   * Регистрация аварийной очистки в `atexit` и полная изоляция внутренних исключений.
+* [infrastructure/comfyui_manager.py](file:///c:/Akakiy%20agent/infrastructure/comfyui_manager.py): Менеджер жизненного цикла генерации изображений (`ComfyUIManager`, `get_comfyui_manager`):
+  * Управление изолированным процессом ComfyUI Worker (`workers/comfyui/main.py --listen 127.0.0.1 --port 8188`).
+  * Проверка доступности API через `GET /system_stats` с валидацией возвращаемой структуры данных.
+  * Подключение к уже работающему ComfyUI без повторного запуска (`started_by_akakiy = False`).
+  * Безопасное завершение только собственного процесса (`cleanup()` / `stop()`) без остановки сторонних сервисов.
+  * Неблокирующий асинхронный запуск (`start_async`) для Tkinter GUI с индикацией статуса в Topbar (`chip_comfyui`).
+  * Предотвращение гонок при ранних запросах генерации через `is_starting()` и `wait_until_ready()`.
 
 ---
 

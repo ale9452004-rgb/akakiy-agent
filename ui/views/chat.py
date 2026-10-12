@@ -4,8 +4,9 @@
 
 import time
 import tkinter as tk
-from typing import Any, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
+from ui.clipboard import attach_text_copy_handler, copy_to_clipboard
 from ui.views.base import BaseView, _bind_hover
 
 
@@ -22,6 +23,7 @@ class ChatView(BaseView):
         self.log_text: tk.Text = None
         self._local_chat_messages: List[Tuple[str, str, str]] = []
         self._local_log_messages: List[Tuple[str, str, str]] = []
+        self._message_records: List[Dict[str, Any]] = []
         self.render()
 
     @property
@@ -41,6 +43,7 @@ class ChatView(BaseView):
         for w in self.winfo_children():
             w.destroy()
 
+        self._message_records.clear()
         chat_split = tk.Frame(self, bg=self.BG_MAIN)
         chat_split.pack(fill="both", expand=True)
 
@@ -125,6 +128,10 @@ class ChatView(BaseView):
         self.log_text.tag_config("done", foreground=self.ACCENT_GREEN)
         self.log_text.tag_config("err", foreground=self.ACCENT_RED)
 
+        # Подключение обработчиков выделения, копирования (Ctrl+C) и контекстного меню
+        attach_text_copy_handler(self.chat_text, get_message_fallback=self._get_chat_message_fallback)
+        attach_text_copy_handler(self.log_text, get_message_fallback=self._get_log_line_fallback)
+
         # Синхронизация виджетов с Shell
         if self.shell:
             self.shell.chat_text = self.chat_text
@@ -149,23 +156,36 @@ class ChatView(BaseView):
         """Вставка отформатированного сообщения в ленту чата с поддержкой артефактов и бейджа домена."""
         if not self.chat_text or not self.chat_text.winfo_exists():
             return
-        self.chat_text.insert(tk.END, "\n")
+        msg_idx = len(self._message_records)
+        msg_tag = f"msg_{msg_idx}"
+        body_tag = f"msg_body_{msg_idx}"
+        self._message_records.append({
+            "idx": msg_idx,
+            "tag": msg_tag,
+            "body_tag": body_tag,
+            "author": author,
+            "message": message,
+            "time": t_str,
+            "domain_badge": domain_badge
+        })
+
+        self.chat_text.insert(tk.END, "\n", (msg_tag,))
         author_upper = author.upper()
         if "ВЫ" in author_upper:
-            self.chat_text.insert(tk.END, f"● {author_upper}  ", "user_title")
-            self.chat_text.insert(tk.END, f"[{t_str}]\n", "time")
-            self.chat_text.insert(tk.END, f"{message}\n", "user_body")
+            self.chat_text.insert(tk.END, f"● {author_upper}  ", ("user_title", msg_tag))
+            self.chat_text.insert(tk.END, f"[{t_str}]\n", ("time", msg_tag))
+            self.chat_text.insert(tk.END, f"{message}\n", ("user_body", msg_tag, body_tag))
         else:
-            self.chat_text.insert(tk.END, f"● {author_upper}  ", "akakiy_title")
+            self.chat_text.insert(tk.END, f"● {author_upper}  ", ("akakiy_title", msg_tag))
             if domain_badge:
-                self.chat_text.insert(tk.END, f"[{domain_badge}]  ", "domain_badge")
-            self.chat_text.insert(tk.END, f"[{t_str}]\n", "time")
+                self.chat_text.insert(tk.END, f"[{domain_badge}]  ", ("domain_badge", msg_tag))
+            self.chat_text.insert(tk.END, f"[{t_str}]\n", ("time", msg_tag))
             if "\n\n✦" in message:
                 parts = message.split("\n\n✦", 1)
-                self.chat_text.insert(tk.END, f"{parts[0]}\n", "akakiy_body")
-                self.chat_text.insert(tk.END, f"\n✦{parts[1]}\n", "artifact")
+                self.chat_text.insert(tk.END, f"{parts[0]}\n", ("akakiy_body", msg_tag, body_tag))
+                self.chat_text.insert(tk.END, f"\n✦{parts[1]}\n", ("artifact", msg_tag, body_tag))
             else:
-                self.chat_text.insert(tk.END, f"{message}\n", "akakiy_body")
+                self.chat_text.insert(tk.END, f"{message}\n", ("akakiy_body", msg_tag, body_tag))
 
         # Встраивание интерактивных карточек артефактов (включая IMAGE с preview)
         if artifacts:
@@ -173,13 +193,13 @@ class ChatView(BaseView):
             for art in artifacts:
                 try:
                     card = create_artifact_card(self.chat_text, art, compact=False)
-                    self.chat_text.insert(tk.END, "\n")
+                    self.chat_text.insert(tk.END, "\n", (msg_tag,))
                     self.chat_text.window_create(tk.END, window=card)
-                    self.chat_text.insert(tk.END, "\n")
+                    self.chat_text.insert(tk.END, "\n", (msg_tag,))
                 except Exception:
                     pass
 
-        self.chat_text.insert(tk.END, "─" * 48 + "\n", "div")
+        self.chat_text.insert(tk.END, "─" * 48 + "\n", ("div", msg_tag))
         self.chat_text.see(tk.END)
 
     def append_chat(self, author: str, message: str, artifacts: Optional[List[Any]] = None, domain_badge: Optional[str] = None) -> None:
@@ -216,12 +236,67 @@ class ChatView(BaseView):
         """Очистка диалога, системного лога и контекстной истории агента."""
         self.chat_messages.clear()
         self.log_messages.clear()
+        self._message_records.clear()
         if self.chat_text and self.chat_text.winfo_exists():
             self.chat_text.delete("1.0", tk.END)
         if self.log_text and self.log_text.winfo_exists():
             self.log_text.delete("1.0", tk.END)
         if self.agent and hasattr(self.agent, "context_mgr") and hasattr(self.agent.context_mgr, "clear_history"):
             self.agent.context_mgr.clear_history()
+
+    def _get_chat_message_fallback(self, text_widget: tk.Text, index: str) -> str:
+        """Извлечение полного текста сообщения по позиции курсора или клика."""
+        if not self._message_records:
+            return ""
+
+        # Проверяем теги непосредственно под индексом
+        try:
+            tags = text_widget.tag_names(index)
+        except Exception:
+            tags = ()
+
+        for t in tags:
+            if t.startswith("msg_") and not t.startswith("msg_body_"):
+                try:
+                    idx = int(t.split("_")[1])
+                    if 0 <= idx < len(self._message_records):
+                        return self._message_records[idx]["message"]
+                except Exception:
+                    pass
+
+        # Если кликнули на границу строки, проверяем соседний символ слева
+        try:
+            prev_tags = text_widget.tag_names(f"{index}-1c")
+            for t in prev_tags:
+                if t.startswith("msg_") and not t.startswith("msg_body_"):
+                    idx = int(t.split("_")[1])
+                    if 0 <= idx < len(self._message_records):
+                        return self._message_records[idx]["message"]
+        except Exception:
+            pass
+
+        # Fallback: ближайшее сообщение выше по тексту
+        try:
+            line_num = int(str(index).split(".")[0])
+            for l in range(line_num, 0, -1):
+                line_tags = text_widget.tag_names(f"{l}.0")
+                for t in line_tags:
+                    if t.startswith("msg_") and not t.startswith("msg_body_"):
+                        idx = int(t.split("_")[1])
+                        if 0 <= idx < len(self._message_records):
+                            return self._message_records[idx]["message"]
+        except Exception:
+            pass
+
+        return self._message_records[-1]["message"] if self._message_records else ""
+
+    def _get_log_line_fallback(self, text_widget: tk.Text, index: str) -> str:
+        """Извлечение полной строки лога по позиции курсора или клика."""
+        try:
+            line_idx = str(index).split(".")[0]
+            return text_widget.get(f"{line_idx}.0", f"{line_idx}.end").strip()
+        except Exception:
+            return ""
 
     def refresh(self) -> None:
         """Реактивное обновление ленты чата (контракт BaseView)."""

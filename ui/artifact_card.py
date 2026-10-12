@@ -20,6 +20,7 @@ from tkinter import filedialog, messagebox
 
 from config import PROJECT_PATH
 from tools.agents.result import Artifact, ArtifactType
+from ui.clipboard import attach_widget_copy_menu, copy_to_clipboard
 from ui.typography import typography
 
 # Попытка импорта Pillow для качественного масштабирования (LANCZOS)
@@ -232,7 +233,7 @@ class ImageArtifactCard(tk.Frame):
         prompt_text = str(self.metadata.get("prompt") or self.metadata.get("description") or "").strip()
         if prompt_text:
             p_display = prompt_text if len(prompt_text) <= 120 else prompt_text[:117] + "..."
-            tk.Label(
+            lbl_prompt = tk.Label(
                 self,
                 text=f"«{p_display}»",
                 font=typography.FONT_CAPTION,
@@ -241,7 +242,12 @@ class ImageArtifactCard(tk.Frame):
                 anchor="w",
                 justify="left",
                 wraplength=420
-            ).pack(fill="x", padx=14, pady=(0, 6))
+            )
+            lbl_prompt.pack(fill="x", padx=14, pady=(0, 6))
+            self._setup_copy_menu(lbl_prompt)
+
+        self._setup_copy_menu(header)
+        self._setup_copy_menu(self)
 
         # Область изображения или ошибки
         photo = self._load_thumbnail()
@@ -400,14 +406,19 @@ class ImageArtifactCard(tk.Frame):
         prompt_text = str(self.metadata.get("prompt") or "").strip()
         if prompt_text:
             p_display = prompt_text if len(prompt_text) <= 60 else prompt_text[:57] + "..."
-            tk.Label(
+            lbl_prompt = tk.Label(
                 info_col,
                 text=f"«{p_display}»",
                 font=typography.FONT_CAPTION,
                 fg=self.FG_MAIN,
                 bg=self.BG_CARD,
                 anchor="w"
-            ).pack(anchor="w", pady=(0, 4))
+            )
+            lbl_prompt.pack(anchor="w", pady=(0, 4))
+            self._setup_copy_menu(lbl_prompt)
+
+        self._setup_copy_menu(top_line)
+        self._setup_copy_menu(self)
 
         btn_row = tk.Frame(info_col, bg=self.BG_CARD)
         btn_row.pack(anchor="w", pady=(2, 0))
@@ -443,6 +454,25 @@ class ImageArtifactCard(tk.Frame):
         )
         btn_save.pack(side="left")
         _bind_btn_hover(btn_save, "#131c2e", "#1e2d48")
+
+    def _setup_copy_menu(self, widget: tk.Widget) -> None:
+        """Привязка контекстного меню копирования к карточке и её элементам."""
+        prompt_val = str(self.metadata.get("prompt") or self.metadata.get("description") or "").strip()
+        path_val = self.resolved_path or self.raw_path or ""
+        name_val = self.artifact_name
+
+        def get_best_text() -> str:
+            return prompt_val or path_val or name_val
+
+        extra = []
+        if prompt_val:
+            extra.append(("Копировать промпт", lambda: copy_to_clipboard(self, prompt_val)))
+        if path_val:
+            extra.append(("Копировать путь к файлу", lambda: copy_to_clipboard(self, path_val)))
+        if name_val:
+            extra.append(("Копировать имя файла", lambda: copy_to_clipboard(self, name_val)))
+
+        attach_widget_copy_menu(widget, get_best_text, label="Копировать", extra_items=extra)
 
     def on_open_file(self) -> None:
         """Открытие файла в стандартном системном приложении."""
@@ -592,6 +622,25 @@ class FileArtifactCard(tk.Frame):
         )
         btn_open.pack(side="right")
         _bind_btn_hover(btn_open, "#162238", "#233658")
+
+        self._setup_copy_menu(main_row)
+        self._setup_copy_menu(self)
+
+    def _setup_copy_menu(self, widget: tk.Widget) -> None:
+        """Привязка контекстного меню копирования к карточке файла."""
+        path_val = self.resolved_path or self.raw_path or ""
+        name_val = self.artifact_name
+
+        def get_best_text() -> str:
+            return path_val or name_val
+
+        extra = []
+        if path_val:
+            extra.append(("Копировать путь к файлу", lambda: copy_to_clipboard(self, path_val)))
+        if name_val:
+            extra.append(("Копировать имя файла", lambda: copy_to_clipboard(self, name_val)))
+
+        attach_widget_copy_menu(widget, get_best_text, label="Копировать", extra_items=extra)
 
     def on_open_file(self) -> None:
         if not self.resolved_path or not os.path.exists(self.resolved_path):

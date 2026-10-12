@@ -6,6 +6,7 @@ import tkinter as tk
 from typing import Any, Optional
 
 from ui.typography import typography
+from ui.clipboard import attach_entry_context_menu, attach_widget_copy_menu, copy_to_clipboard
 
 
 def _bind_hover(
@@ -87,6 +88,10 @@ class BaseView(tk.Frame):
     DISPLAY_FAMILY = typography.display_family
     UI_FAMILY = typography.ui_family
     MONO_FAMILY = typography.mono_family
+
+    attach_entry_context_menu = staticmethod(attach_entry_context_menu)
+    attach_widget_copy_menu = staticmethod(attach_widget_copy_menu)
+    copy_to_clipboard = staticmethod(copy_to_clipboard)
 
     def __init__(self, master: tk.Widget, shell: Any = None, **kwargs):
         if "bg" not in kwargs:

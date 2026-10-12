@@ -15,6 +15,7 @@ import tkinter as tk
 from typing import Any, Optional, Union
 
 from tools.agents.result import ArtifactType
+from ui.clipboard import attach_widget_copy_menu
 from ui.native_visual_core import NativeGPUVisualCore
 from ui.akakiy_core import AkakiyCore
 from ui.views.base import BaseView, bind_hover
@@ -256,13 +257,16 @@ class HomeView(BaseView):
                 chk.pack(side="left")
 
                 title_clean = t["title"] if len(t["title"]) <= 38 else t["title"][:35] + "..."
-                tk.Label(
+                lbl_task = tk.Label(
                     t_row,
                     text=title_clean,
                     font=self.FONT_BODY,
                     fg=self.FG_MAIN,
                     bg=self.BG_CARD
-                ).pack(side="left", padx=4)
+                )
+                lbl_task.pack(side="left", padx=4)
+                attach_widget_copy_menu(t_row, lambda text=t["title"]: text, label="Копировать задачу")
+                attach_widget_copy_menu(lbl_task, lambda text=t["title"]: text, label="Копировать задачу")
 
             tk.Frame(card_tasks, bg=self.BG_CARD, height=6).pack()
 
@@ -328,13 +332,16 @@ class HomeView(BaseView):
                 ).pack(side="left")
 
                 t_snip = r["text"][:32] + ("..." if len(r["text"]) > 32 else "")
-                tk.Label(
+                lbl_rem = tk.Label(
                     r_row,
                     text=f" {t_snip}",
                     font=self.FONT_BODY,
                     fg=self.FG_MAIN,
                     bg=self.BG_CARD
-                ).pack(side="left")
+                )
+                lbl_rem.pack(side="left")
+                attach_widget_copy_menu(r_row, lambda text=r["text"]: text, label="Копировать напоминание")
+                attach_widget_copy_menu(lbl_rem, lambda text=r["text"]: text, label="Копировать напоминание")
 
                 time_badge = "Наступило!" if is_due else r.get("remind_at", "")[:10]
                 tk.Label(
@@ -485,6 +492,10 @@ class HomeView(BaseView):
                 top_l = tk.Frame(row, bg=self.BG_CARD_INNER)
                 top_l.pack(fill="x", padx=10, pady=(6, 2))
 
+                item_full_msg = str(item.get("message") or item.get("title") or item.get("query") or "")
+                attach_widget_copy_menu(row, lambda m=item_full_msg: m, label="Копировать")
+                attach_widget_copy_menu(top_l, lambda m=item_full_msg: m, label="Копировать")
+
                 is_ok = item.get("success", True)
                 b_color = self.ACCENT_GREEN if is_ok else self.ACCENT_RED
                 raw_type = str(item.get("type", "ДЕЙСТВИЕ")).upper()
@@ -522,13 +533,15 @@ class HomeView(BaseView):
                 title_txt = str(item.get("title", "") or item.get("query", ""))
                 if len(title_txt) > 38:
                     title_txt = title_txt[:35] + "..."
-                tk.Label(
+                lbl_title = tk.Label(
                     top_l,
                     text=f"  {title_txt}",
                     font=self.FONT_HEADING,
                     fg=self.FG_WHITE,
                     bg=self.BG_CARD_INNER
-                ).pack(side="left")
+                )
+                lbl_title.pack(side="left")
+                attach_widget_copy_menu(lbl_title, lambda m=item_full_msg: m, label="Копировать")
 
                 tk.Label(
                     top_l,
@@ -542,7 +555,7 @@ class HomeView(BaseView):
                 if msg_snip:
                     if len(msg_snip) > 105:
                         msg_snip = msg_snip[:102] + "..."
-                    tk.Label(
+                    lbl_msg = tk.Label(
                         row,
                         text=msg_snip,
                         font=self.FONT_BODY,
@@ -550,7 +563,9 @@ class HomeView(BaseView):
                         bg=self.BG_CARD_INNER,
                         justify="left",
                         anchor="w"
-                    ).pack(fill="x", padx=10, pady=(0, 4))
+                    )
+                    lbl_msg.pack(fill="x", padx=10, pady=(0, 4))
+                    attach_widget_copy_menu(lbl_msg, lambda m=item_full_msg: m, label="Копировать")
 
                 artifacts = item.get("artifacts") or []
                 c_files = item.get("created_files") or []
@@ -666,7 +681,7 @@ class HomeView(BaseView):
                 ).pack(anchor="w", padx=10, pady=(6, 2))
 
                 c_prev = n.get("content", "")[:75] + ("..." if len(n.get("content", "")) > 75 else "")
-                tk.Label(
+                lbl_note_c = tk.Label(
                     item_card,
                     text=c_prev,
                     font=self.FONT_BODY,
@@ -674,7 +689,12 @@ class HomeView(BaseView):
                     bg=self.BG_CARD_INNER,
                     justify="left",
                     wraplength=380
-                ).pack(anchor="w", padx=10, pady=(0, 6))
+                )
+                lbl_note_c.pack(anchor="w", padx=10, pady=(0, 6))
+
+                note_full = f"{n.get('title', '')}\n\n{n.get('content', '')}".strip()
+                attach_widget_copy_menu(item_card, lambda t=note_full: t, label="Копировать заметку")
+                attach_widget_copy_menu(lbl_note_c, lambda t=note_full: t, label="Копировать заметку")
 
             tk.Frame(notes_box, bg=self.BG_CARD, height=6).pack()
 

@@ -7,6 +7,7 @@ import tkinter as tk
 from typing import Callable, List, Optional
 
 from notifications.models import NotificationAction, NotificationItem
+from ui.clipboard import attach_widget_copy_menu
 
 
 def _bind_hover(
@@ -174,6 +175,8 @@ class NotificationWindow(tk.Toplevel):
             anchor="w"
         )
         self.lbl_text.pack(fill="x", anchor="w")
+        attach_widget_copy_menu(self.lbl_text, lambda: self.item.text, label="Копировать")
+        attach_widget_copy_menu(self.inner_frame, lambda: self.item.text, label="Копировать")
 
         if self.item.timestamp_str:
             self.lbl_time = tk.Label(
@@ -185,6 +188,7 @@ class NotificationWindow(tk.Toplevel):
                 anchor="w"
             )
             self.lbl_time.pack(fill="x", anchor="w", pady=(2, 0))
+            attach_widget_copy_menu(self.lbl_time, lambda: self.item.text, label="Копировать")
 
         # 3. Нижняя строка действий
         if self.item.actions:

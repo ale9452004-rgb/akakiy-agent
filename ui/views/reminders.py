@@ -74,6 +74,7 @@ class RemindersView(BaseView):
             relief="solid"
         )
         self.entry_rem_text.pack(side="left", fill="x", expand=True, padx=6, pady=8)
+        self.attach_entry_context_menu(self.entry_rem_text)
 
         tk.Label(
             add_box,
@@ -93,6 +94,7 @@ class RemindersView(BaseView):
             width=22
         )
         self.entry_rem_time.pack(side="left", padx=6, pady=8)
+        self.attach_entry_context_menu(self.entry_rem_time)
 
         btn_add = tk.Button(
             add_box,
@@ -178,13 +180,16 @@ class RemindersView(BaseView):
                 bg="#13171f"
             ).pack(side="left", padx=12, pady=8)
 
-            tk.Label(
+            lbl_rem = tk.Label(
                 row,
                 text=f"#{r['id']} {r['text']}",
                 font=(self.UI_FAMILY, 10),
                 fg=self.FG_WHITE,
                 bg="#13171f"
-            ).pack(side="left", padx=4)
+            )
+            lbl_rem.pack(side="left", padx=4)
+            self.attach_widget_copy_menu(row, lambda text=r["text"]: text, label="Копировать напоминание")
+            self.attach_widget_copy_menu(lbl_rem, lambda text=r["text"]: text, label="Копировать напоминание")
 
             repeat_val = r.get("repeat")
             if repeat_val:

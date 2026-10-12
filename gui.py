@@ -49,6 +49,8 @@ from ui.typography import typography, configure_tkinter_fonts
 from voice import VoiceService, GlobalHotKeyManager
 from notifications import NotificationService, ReminderMonitor
 from infrastructure.ollama_manager import get_ollama_manager, OllamaManager
+from infrastructure.comfyui_manager import get_comfyui_manager, ComfyUIManager
+from ui.clipboard import attach_entry_context_menu
 
 
 from ui.views import (
@@ -103,9 +105,10 @@ class AkakiyGUI:
     UI_FAMILY = typography.ui_family
     MONO_FAMILY = typography.mono_family
 
-    def __init__(self, root: tk.Tk, agent: Agent = None, household = None, memory = None, voice = None, ollama_mgr: Optional[OllamaManager] = None):
+    def __init__(self, root: tk.Tk, agent: Agent = None, household = None, memory = None, voice = None, ollama_mgr: Optional[OllamaManager] = None, comfyui_mgr: Optional[ComfyUIManager] = None):
         self.root = root
         self.ollama_mgr = ollama_mgr
+        self.comfyui_mgr = comfyui_mgr if comfyui_mgr is not None else get_comfyui_manager()
         configure_tkinter_fonts(self.root, typography)
         self.root.title("АКAKИЙ 2.0 // NEURAL HUB")
 
@@ -216,9 +219,20 @@ class AkakiyGUI:
         # Первичная загрузка главного экрана
         self._switch_section("home")
 
+        # Асинхронный неблокирующий запуск ComfyUI Worker
+        if self.comfyui_mgr is not None:
+            self.comfyui_mgr.start_async(callback=self._on_comfyui_status)
+
         # Обработка чистого закрытия окна
         try:
             self.root.protocol("WM_DELETE_WINDOW", self._on_window_close)
+        except Exception:
+            pass
+
+    def _on_comfyui_status(self, success: bool, msg: str):
+        """Передаёт событие статуса ComfyUI Worker в очередь главного потока GUI."""
+        try:
+            self.queue.put(("comfyui_status", (success, msg)))
         except Exception:
             pass
 
@@ -260,6 +274,11 @@ class AkakiyGUI:
         try:
             if hasattr(self, "voice") and self.voice and getattr(self.voice, "is_running", False):
                 self.voice.stop()
+        except Exception:
+            pass
+        try:
+            if hasattr(self, "comfyui_mgr") and self.comfyui_mgr:
+                self.comfyui_mgr.cleanup()
         except Exception:
             pass
         try:
@@ -386,6 +405,19 @@ class AkakiyGUI:
             highlightbackground="#133b25"
         )
         self.chip_ollama.pack(side="left", padx=4)
+
+        self.chip_comfyui = tk.Label(
+            chips_box,
+            text="COMFYUI: СТАРТ",
+            font=self.FONT_MONO,
+            fg=self.FG_MUTED,
+            bg="#0d131f",
+            padx=8, pady=2,
+            bd=0,
+            highlightthickness=1,
+            highlightbackground=self.BORDER_LIGHT
+        )
+        self.chip_comfyui.pack(side="left", padx=4)
 
         self.chip_voice = tk.Label(
             chips_box,
@@ -570,6 +602,7 @@ class AkakiyGUI:
 
         self.cmd_input.bind("<FocusIn>", on_focus_in)
         self.cmd_input.bind("<FocusOut>", on_focus_out)
+        attach_entry_context_menu(self.cmd_input, placeholder=self.cmd_placeholder)
 
         # Кнопка голосового режима
         self.btn_mic = tk.Button(
@@ -1498,6 +1531,29 @@ class AkakiyGUI:
                 elif msg_type == "reminder_due":
                     self._handle_reminder_due(data)
 
+                elif msg_type == "comfyui_status":
+                    success, text = data
+                    if hasattr(self, "chip_comfyui") and self.chip_comfyui:
+                        if success:
+                            self.chip_comfyui.config(
+                                text="COMFYUI ●",
+                                fg=self.ACCENT_GREEN,
+                                bg="#091b12",
+                                highlightbackground="#133b25"
+                            )
+                        else:
+                            self.chip_comfyui.config(
+                                text="COMFYUI: ВЫКЛ",
+                                fg=self.ACCENT_RED,
+                                bg="#210a0a",
+                                highlightbackground="#441515"
+                            )
+                    if success:
+                        logger.info(f"ComfyUI Worker: {text}")
+                    else:
+                        logger.warning(f"ComfyUI Worker: {text}")
+                        self._append_log("ERR", f"ComfyUI Worker: {text}")
+
         except queue.Empty:
             pass
 
@@ -1517,12 +1573,21 @@ def main():
     else:
         logger.info(f"Ollama startup: {status_msg}")
 
+    comfyui_mgr = get_comfyui_manager()
+
     root = tk.Tk()
-    app = AkakiyGUI(root, ollama_mgr=ollama_mgr)
+    app = AkakiyGUI(root, ollama_mgr=ollama_mgr, comfyui_mgr=comfyui_mgr)
     try:
         root.mainloop()
     finally:
-        ollama_mgr.cleanup()
+        try:
+            comfyui_mgr.cleanup()
+        except Exception:
+            pass
+        try:
+            ollama_mgr.cleanup()
+        except Exception:
+            pass
 
 
 if __name__ == "__main__":

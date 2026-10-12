@@ -12,6 +12,7 @@ from cli_formatters import (
     print_tool_result
 )
 from infrastructure.ollama_manager import get_ollama_manager
+from infrastructure.comfyui_manager import get_comfyui_manager
 
 
 def main():
@@ -53,10 +54,20 @@ def main():
     else:
         print(f"\n[Ollama] {msg}\n")
 
+    comfyui_mgr = get_comfyui_manager()
+    comfyui_mgr.start_async()
+
     try:
         _run_cli()
     finally:
-        ollama_mgr.cleanup()
+        try:
+            comfyui_mgr.cleanup()
+        except Exception:
+            pass
+        try:
+            ollama_mgr.cleanup()
+        except Exception:
+            pass
 
 
 def _run_cli():

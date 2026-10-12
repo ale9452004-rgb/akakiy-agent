@@ -65,6 +65,7 @@ class MemoryView(BaseView):
         )
         self.entry_mem_search.pack(side="left", padx=4)
         self.entry_mem_search.bind("<KeyRelease>", lambda e: self._on_search_changed())
+        self.attach_entry_context_menu(self.entry_mem_search)
 
         # Форма добавления факта
         add_box = tk.Frame(self, bg=self.BG_CARD, bd=1, relief="solid")
@@ -88,6 +89,7 @@ class MemoryView(BaseView):
         )
         self.entry_mem.pack(side="left", fill="x", expand=True, padx=6, pady=8)
         self.entry_mem.bind("<Return>", lambda e: self.ui_remember())
+        self.attach_entry_context_menu(self.entry_mem)
 
         btn_add = tk.Button(
             add_box,
@@ -157,13 +159,16 @@ class MemoryView(BaseView):
             bg="#13171f"
         ).pack(side="left", padx=10, pady=8)
 
-        tk.Label(
+        lbl_mem = tk.Label(
             row,
             text=f"#{m['id']} {m['text']}",
             font=self.FONT_BODY,
             fg=self.FG_WHITE,
             bg="#13171f"
-        ).pack(side="left", padx=4)
+        )
+        lbl_mem.pack(side="left", padx=4)
+        self.attach_widget_copy_menu(row, lambda text=m["text"]: text, label="Копировать факт")
+        self.attach_widget_copy_menu(lbl_mem, lambda text=m["text"]: text, label="Копировать факт")
 
         btn_del = tk.Button(
             row,

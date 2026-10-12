@@ -68,6 +68,7 @@ class ListsView(BaseView):
         )
         self.entry_list_search.pack(side="left", padx=4)
         self.entry_list_search.bind("<KeyRelease>", lambda e: self._on_search_changed())
+        self.attach_entry_context_menu(self.entry_list_search)
 
         body_split = tk.Frame(self, bg=self.BG_MAIN)
         body_split.pack(fill="both", expand=True)
@@ -98,6 +99,7 @@ class ListsView(BaseView):
         )
         self.entry_new_list.pack(side="left", fill="x", expand=True, padx=(0, 4))
         self.entry_new_list.bind("<Return>", lambda e: self.ui_create_list())
+        self.attach_entry_context_menu(self.entry_new_list)
 
         btn_create_l = tk.Button(
             new_l_box,
@@ -321,6 +323,7 @@ class ListsView(BaseView):
         )
         self.entry_item_text.pack(side="left", fill="x", expand=True, padx=(0, 8))
         self.entry_item_text.bind("<Return>", lambda e: self.ui_add_item(list_name))
+        self.attach_entry_context_menu(self.entry_item_text)
 
         btn_add_item = tk.Button(
             add_item_box,
@@ -381,6 +384,8 @@ class ListsView(BaseView):
                 lbl_text.bind("<Button-1>", lambda e, iid=it["id"]: self.ui_toggle_item(list_name, iid))
                 row.bind("<Button-1>", lambda e, iid=it["id"]: self.ui_toggle_item(list_name, iid))
                 row.config(cursor="hand2")
+                self.attach_widget_copy_menu(row, lambda text=it["text"]: text, label="Копировать пункт")
+                self.attach_widget_copy_menu(lbl_text, lambda text=it["text"]: text, label="Копировать пункт")
 
                 btn_del = tk.Button(
                     row,

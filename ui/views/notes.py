@@ -84,6 +84,7 @@ class NotesView(BaseView):
         )
         self.entry_note_search.pack(side="left", padx=4)
         self.entry_note_search.bind("<KeyRelease>", lambda e: self._on_search_changed())
+        self.attach_entry_context_menu(self.entry_note_search)
 
         # Форма создания заметки
         create_box = tk.Frame(self, bg=self.BG_CARD, bd=1, relief="solid")
@@ -106,6 +107,7 @@ class NotesView(BaseView):
             relief="solid"
         )
         self.entry_note_title.pack(fill="x", padx=16, pady=(0, 6))
+        self.attach_entry_context_menu(self.entry_note_title)
 
         tk.Label(
             create_box,
@@ -124,6 +126,7 @@ class NotesView(BaseView):
             relief="solid"
         )
         self.entry_note_content.pack(fill="x", padx=16, pady=(0, 10))
+        self.attach_entry_context_menu(self.entry_note_content)
 
         btn_save = tk.Button(
             create_box,
@@ -222,7 +225,7 @@ class NotesView(BaseView):
         )
         btn_del.pack(side="right")
 
-        tk.Label(
+        lbl_content = tk.Label(
             card,
             text=n.get("content", ""),
             font=self.FONT_BODY,
@@ -230,7 +233,12 @@ class NotesView(BaseView):
             bg=self.BG_CARD,
             justify="left",
             wraplength=800
-        ).pack(anchor="w", padx=14, pady=(0, 12))
+        )
+        lbl_content.pack(anchor="w", padx=14, pady=(0, 12))
+
+        note_full = f"{n.get('title', '')}\n\n{n.get('content', '')}".strip()
+        self.attach_widget_copy_menu(card, lambda t=note_full: t, label="Копировать заметку")
+        self.attach_widget_copy_menu(lbl_content, lambda t=note_full: t, label="Копировать заметку")
 
     def ui_create_note(self) -> None:
         """Создание новой заметки из полей ввода."""

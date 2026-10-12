@@ -83,6 +83,7 @@ class TasksView(BaseView):
         )
         self.entry_task_search.pack(side="left", padx=4)
         self.entry_task_search.bind("<KeyRelease>", lambda e: self._on_search_changed())
+        self.attach_entry_context_menu(self.entry_task_search)
 
         # Форма добавления задачи
         add_box = tk.Frame(self, bg=self.BG_CARD, bd=1, relief="solid")
@@ -106,6 +107,7 @@ class TasksView(BaseView):
         )
         self.entry_task.pack(side="left", fill="x", expand=True, padx=8, pady=8)
         self.entry_task.bind("<Return>", lambda e: self.ui_create_task())
+        self.attach_entry_context_menu(self.entry_task)
 
         btn_add = tk.Button(
             add_box,
@@ -185,13 +187,16 @@ class TasksView(BaseView):
         chk.pack(side="left", padx=12, pady=8)
 
         t_fg = self.FG_MUTED if is_done else self.FG_WHITE
-        tk.Label(
+        lbl_task = tk.Label(
             row,
             text=f"#{t['id']} {t['title']}",
             font=(self.UI_FAMILY, 10),
             fg=t_fg,
             bg="#13171f"
-        ).pack(side="left", padx=4)
+        )
+        lbl_task.pack(side="left", padx=4)
+        self.attach_widget_copy_menu(row, lambda text=t["title"]: text, label="Копировать задачу")
+        self.attach_widget_copy_menu(lbl_task, lambda text=t["title"]: text, label="Копировать задачу")
 
         # Дата
         tk.Label(
