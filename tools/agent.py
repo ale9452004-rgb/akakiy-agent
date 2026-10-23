@@ -1,4 +1,5 @@
 import inspect
+from pathlib import Path
 
 import json
 
@@ -65,6 +66,7 @@ class Agent:
         else:
             self.bridge = bridge
         self._last_result = None
+        self._last_image_result = None
         self._sync_memory_to_system_prompt()
 
     @property
@@ -472,7 +474,7 @@ class Agent:
             }
 
         # 1. Детерминированная маршрутизация через CommandRouter
-        route = self.router.route(user_input)
+        route = self.router.route(user_input, last_image=getattr(self, "_last_image_result", None))
         route_type = route.get("type")
 
         # 1.1. Долговременная память (Memory Fast-Path)
@@ -623,6 +625,8 @@ class Agent:
             height = route.get("height")
             count = route.get("count", 1)
             aspect_ratio = route.get("aspect_ratio")
+            is_revision = bool(route.get("is_revision", False))
+            critique_details = route.get("critique_details")
 
             subagent_kwargs = {}
             if width is not None:
@@ -633,10 +637,18 @@ class Agent:
                 subagent_kwargs["count"] = count
             if aspect_ratio is not None:
                 subagent_kwargs["aspect_ratio"] = aspect_ratio
+            if is_revision:
+                subagent_kwargs["is_revision"] = True
+            if critique_details:
+                subagent_kwargs["critique_details"] = critique_details
 
             subagent_res = self.run_subagent("image", task=prompt, **subagent_kwargs)
             if subagent_res.success:
-                answer = subagent_res.message
+                if is_revision:
+                    file_names = ", ".join(Path(p).name for p in subagent_res.created_files)
+                    answer = f"Я перегенерировал изображение с учётом замечаний: {file_names}"
+                else:
+                    answer = subagent_res.message
             else:
                 err_detail = subagent_res.error or subagent_res.message or "Неизвестная ошибка"
                 answer = f"Ошибка генерации изображения: {err_detail}"
@@ -646,17 +658,45 @@ class Agent:
                 "tool": "image",
                 "result": subagent_res,
                 "answer": answer,
+                "message": answer,
                 "success": subagent_res.success,
                 "created_files": list(subagent_res.created_files),
                 "artifacts": [a.to_dict() for a in subagent_res.artifacts],
                 "width": width,
                 "height": height,
                 "count": len(subagent_res.created_files) if subagent_res.success else count,
+                "is_revision": is_revision,
             }
             if not subagent_res.success:
                 resp["error"] = subagent_res.error or subagent_res.message
+            else:
+                self._last_image_result = {
+                    "prompt": prompt,
+                    "created_files": list(subagent_res.created_files),
+                    "artifacts": [a.to_dict() for a in subagent_res.artifacts],
+                    "width": width,
+                    "height": height,
+                    "aspect_ratio": aspect_ratio,
+                    "count": count,
+                    "data": getattr(subagent_res, "data", {})
+                }
 
             self._record_interaction(user_input, answer, tool_name="image")
+            return resp
+
+        # 1.3.1. Уточнение замечаний к изображению (Image Feedback Clarify)
+        if route_type == "image_feedback_clarify":
+            answer = (
+                "Я понял ваше замечание к изображению. Пожалуйста, уточните, что именно нужно изменить "
+                "(например, количество объектов, цвет или окружение), и я сразу перегенерирую картинку."
+            )
+            resp = {
+                "type": "chat",
+                "answer": answer,
+                "message": answer,
+                "success": True,
+            }
+            self._record_interaction(user_input, answer, tool_name="image:clarify")
             return resp
 
         # 1.4. Создание презентаций (Presentation Sub-Agent Fast-Path)

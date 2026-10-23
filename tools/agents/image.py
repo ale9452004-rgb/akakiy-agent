@@ -388,7 +388,23 @@ class ImageAgent(SubAgent):
 
         t_overall_start = time.time()
         try:
-            negative_prompt = str(context.get("negative_prompt", self.DEFAULT_NEGATIVE_PROMPT))
+            # 3.1. Семантическая компиляция и обогащение промпта для SDXL-Lightning
+            skip_compile = bool(context.get("skip_compile", False))
+            if not skip_compile:
+                from tools.prompt_compiler import compile_image_prompt
+                effective_prompt, effective_negative, prompt_meta = compile_image_prompt(
+                    raw_prompt=prompt,
+                    count=count,
+                    negative_prompt=context.get("negative_prompt"),
+                    is_revision=bool(context.get("is_revision", False)),
+                    critique_details=context.get("critique_details")
+                )
+            else:
+                effective_prompt = prompt
+                effective_negative = str(context.get("negative_prompt", self.DEFAULT_NEGATIVE_PROMPT))
+                prompt_meta = {}
+
+            negative_prompt = effective_negative
             steps = int(context.get("steps", self.DEFAULT_STEPS))
             cfg = float(context.get("cfg", self.DEFAULT_CFG))
             sampler = str(context.get("sampler", self.DEFAULT_SAMPLER))
@@ -407,8 +423,8 @@ class ImageAgent(SubAgent):
                 used_seeds.append(curr_seed)
 
                 workflow = self.build_workflow(
-                    prompt=prompt,
-                    negative_prompt=negative_prompt,
+                    prompt=effective_prompt,
+                    negative_prompt=effective_negative,
                     seed=curr_seed,
                     width=width,
                     height=height,
@@ -486,7 +502,10 @@ class ImageAgent(SubAgent):
                     total_file_size += len(image_bytes)
 
             workflow_data = {
-                "negative_prompt": negative_prompt,
+                "raw_prompt": prompt,
+                "positive_prompt": effective_prompt,
+                "negative_prompt": effective_negative,
+                "prompt_metadata": prompt_meta,
                 "width": width,
                 "height": height,
                 "steps": steps,

@@ -6,9 +6,9 @@
 
 ## 1. Текущий статус проекта
 
-* **Текущая версия**: Акакий 2.0 (Desktop Hub + Voice UX + Household Assistant + Memory + Core Dev Tools + Notifications + Fast CLI REPL + Global Push-to-Talk + Backup & Restore + UI Filter & Pagination + Recurring Reminders & Tasks + Daily Briefing + Audio Notifications & Settings + Sub-Agent Foundation + ImageAgent v1 + VRAM Manager v1 + Image Request Routing + ImageAgent v2 Generation Parameters + Agent Router Robust Routing + AgentContext v2 Foundation Contract + AgentResult v2 & Artifacts Foundation + PresentationAgent v1 Foundation + DocumentAgent v1 Foundation + ResearchAgent v1 Foundation + CodingAgent v1 Foundation + FileAgent v1 Foundation + Agent Teamwork v1 Pipeline + Task Planner v2 Structured Plans + Task Executor v2 Execution Engine + Self-Healing Error Recovery + Persistent Memory Layer + Voice Pipeline Engine + Desktop Hub GUI 2.0 + Permissions & Safety Layer).
-* **Состояние кодовой базы**: Стабильное, все тесты пройдены (636 тестов в `tests/`: 634 unit-тестов успешны, 2 интеграционных пропущены по умолчанию; 0 синтаксических ошибок в Python-файлах проекта).
-* **Последний этап**: Этап №19 — Permissions & Safety: единый централизованный слой разрешений и безопасности (`PermissionManager`, `RiskLevel`, `SecurityPolicy`, `PermissionAssessment`), контекстный анализ опасности (перезапись файлов, опасные команды PowerShell, git-мутации), интеграция проверок ДО фактического выполнения действия с `Dispatcher`, `TeamworkPipeline`, `PlanExecutor`, `Agent.run_subagent` и модальными окнами GUI `request_confirmation` без дублирования логики в инструментах.
+* **Текущая версия**: Акакий 2.0 (Desktop Hub + Voice UX + Household Assistant + Memory + Core Dev Tools + Notifications + Fast CLI REPL + Global Push-to-Talk + Backup & Restore + UI Filter & Pagination + Recurring Reminders & Tasks + Daily Briefing + Audio Notifications & Settings + Sub-Agent Foundation + ImageAgent v1 + VRAM Manager v1 + Image Request Routing + ImageAgent v2 Generation Parameters + Agent Router Robust Routing + AgentContext v2 Foundation Contract + AgentResult v2 & Artifacts Foundation + PresentationAgent v1 Foundation + DocumentAgent v1 Foundation + ResearchAgent v1 Foundation + CodingAgent v1 Foundation + FileAgent v1 Foundation + Agent Teamwork v1 Pipeline + Task Planner v2 Structured Plans + Task Executor v2 Execution Engine + Self-Healing Error Recovery + Persistent Memory Layer + Voice Pipeline Engine + Desktop Hub GUI 2.0 + Permissions & Safety Layer + ComfyUIManager + GUI Clipboard & Context Menus + Image PromptCompiler & Revision Pipeline).
+* **Состояние кодовой базы**: Стабильное, все тесты пройдены (65 тестовых наборов в `tests/`: 100% unit-тестов успешны; 0 синтаксических ошибок в Python-файлах проекта).
+* **Последний этап**: Этап №32 — Повышение точности генерации изображений (PromptCompiler для SDXL-Lightning в ComfyUI: positive/negative conditioning, подавление лишних объектов и конфликтующих цветов) и конвейер ревизии замечаний пользователя к изображениям в CommandRouter и Agent без шаблонных отписок.
 * **Ветка**: `master`, синхронизирована с `origin/master`.
 
 ---
@@ -556,6 +556,21 @@
   * В `gui.py` подключено отображение бейджа `💻 Разработка` для `coding` в `HomeView`, `ChatView` и недавней активности.
   * Разработан тестовый набор `tests/test_domain_coding_agent.py` (16 тестов, 100% pass), обновлён `tests/test_agent_multi_agent_integration.py` (11 тестов, 100% pass).
   * Полный регрессионный прогон: 62 тестовых файла из 62 пройдены со 100% OK.
+* [x] **Семантический компилятор промптов и обработка замечаний пользователя к изображениям (Этап 32)**:
+  * Создан модуль семантической компиляции промптов `tools/prompt_compiler.py` (`PromptCompiler`, `compile_image_prompt`):
+    * Выявление основного визуального объекта, грамматического числа, цвета/шерсти, позы, действий, фона, освещения и явных исключений («без белой шерсти»).
+    * Формирование Positive Prompt на английском языке для SDXL-Lightning OpenCLIP с фиксацией числа объектов (`solo, single <subject>, 1<subject>`) и параметров качества.
+    * Формирование контекстно-зависимого Negative Prompt: жесткий запрет лишних объектов (`multiple <subjects>, two <subjects>, extra animals, crowd`), конфликтующих оттенков (`white fur, black fur` при запросе рыжего окраса) и дефектов анатомии.
+    * Обобщённая поддержка произвольных объектов и сцен (животные, архитектура, техника, люди, пейзажи).
+  * Интеграция в `tools/agents/image.py` (`ImageAgent.run`): автоматическая компиляция перед постановкой задачи в ComfyUI с сохранением метаданных.
+  * Реализован конвейер распознавания замечаний и ревизии генераций:
+    * Метод `match_image_feedback` в `tools/router.py`: перехват критики («Ты сгенерировал двух котов, а я просил одного и рыжего», «переделай», «не тот цвет») с сохранением контекста предыдущей генерации.
+    * В `tools/agent.py` сохраняется `_last_image_result`. При ревизии вызывается генерация с объединенным промптом, пользователю возвращается понятный ответ с именем файла.
+    * Полностью исключены шаблонные отписки («Действие успешно завершено» / «Действие успешно выполнено»).
+    * Честная обработка сбоев генерации: при ошибке воркера возвращается информативное сообщение об ошибке, без ложных утверждений об исправлении.
+    * Абстрактные замечания («Мне не нравится картинка») направляются в вежливое уточнение (`image_feedback_clarify`).
+  * Разработан модульный тестовый набор `tests/test_image_prompt_compiler.py` (10 тестов, 100% pass) и сквозной верификационный скрипт `scratch/test_feedback_and_false_positive_routing.py` (3 теста, 100% pass).
+  * Успешно выполнен полный регрессионный прогон проекта: 65 тестовых файлов из 65 пройдены без единой ошибки.
 * [ ] **Интеграционные E2E тесты с виртуальным микрофоном**:
 
   * Реализовать тестовый сценарий, прогоняющий синтезированные аудиофайлы (WAV) через живой конвейер `VoiceService` с проверкой реакции GUI.

@@ -111,8 +111,11 @@ class VRAMManager:
                 )
                 if not is_loaded:
                     already_unloaded = True
+        except (requests.exceptions.ConnectionError, requests.exceptions.Timeout):
+            # Если сервер Ollama не запущен или недоступен, модель гарантированно не загружена в VRAM
+            already_unloaded = True
         except Exception:
-            # Если /api/ps недоступен, продолжаем попытку через /api/generate
+            # Если /api/ps недоступен по иной причине, продолжаем попытку через /api/generate
             pass
 
         if already_unloaded:

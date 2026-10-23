@@ -13,12 +13,12 @@ from typing import Any, Dict, Optional
 import re
 
 CALL_PREFIX_REGEX = re.compile(
-    r"^(?:(?:акакий|пожалуйста|плиз)[,\s:]*)+",
+    r"^(?:(?:акакий|пожалуйста|плиз|давай(?:те)?|а\s+давай(?:те)?|слушай(?:те)?)[,\s:]*)+",
     re.IGNORECASE
 )
 
 NON_IMAGE_TARGET_PATTERN = re.compile(
-    r"^(?:файл\w*|папк\w*|директори\w*|скрипт\w*|код\w*|класс\w*|функци\w*|модул\w*|тест\w*|коммит\w*|документ\w*|таблиц\w*|презентаци\w*|слайд\w*|исследован\w*|анализ\w*|задач\w*|заметк\w*|напоминан\w*|список\w*|списк\w*|план\w*|проект\w*|текст\w*|стать\w*|стих\w*|сказк\w*|рассказ\w*|истори\w*|эссе|поэм\w*|диалог\w*|ответ\w*|сообщен\w*|html\w*|css\w*|форм\w*|api\b|бд\b|баз\w*)\b",
+    r"^(?:файл\w*|папк\w*|директори\w*|скрипт\w*|код\w*|класс\w*|функци\w*|модул\w*|тест\w*|коммит\w*|документ\w*|таблиц\w*|презентаци\w*|слайд\w*|исследован\w*|анализ\w*|задач\w*|заметк\w*|напоминан\w*|список\w*|списк\w*|план\w*|проект\w*|текст\w*|стать\w*|стих\w*|сказк\w*|рассказ\w*|истори\w*|эссе|поэм\w*|диалог\w*|ответ\w*|сообщен\w*|html\w*|css\w*|форм\w*|api\b|бд\b|баз\w*|описан\w*|сценари\w*|промпт\w*|prompt\w*|python\w*|питон\w*|javascript\w*|js\b|typescript\w*|ts\b|программ\w*|алгоритм\w*|словами\b)\b",
     re.IGNORECASE
 )
 
@@ -659,7 +659,14 @@ class CommandRouter:
 
         # 1. Проверяем наличие управляющего глагола генерации/рисования в начале
         verb_pattern = re.compile(
-            r"^(?:создай|создайте|создать|сгенерируй|сгенерируйте|сгенерировать|сделай|сделайте|сделать|нарисуй|нарисуйте|нарисовать|изобрази|изобразите|изобразить|отрисуй|отрисуйте|отрисовать)(?:\s+мне)?(?:[,\s]+пожалуйста)?(?:\s*:\s*|[,\s]+)",
+            r"^(?:(?:давай(?:те)?|а\s+давай(?:те)?|можешь|можете|сможешь|сможете|попробуй|попробуйте)\s+)?"
+            r"(?:создай|создайте|создать|создадим"
+            r"|сген[еи]рируй|сген[еи]рируйте|сген[еи]рировать|сген[еи]рируем"
+            r"|сделай|сделайте|сделать|сделаем"
+            r"|нарисуй|нарисуйте|нарисовать|нарисуем"
+            r"|изобрази|изобразите|изобразить|изобразим"
+            r"|отрисуй|отрисуйте|отрисовать|отрисуем)"
+            r"(?:\s+мне)?(?:[,\s]+пожалуйста)?(?:\s*:\s*|[,\s]+)",
             re.IGNORECASE
         )
         verb_match = verb_pattern.match(body)
@@ -667,7 +674,11 @@ class CommandRouter:
             return None
 
         is_pure_draw = bool(re.match(
-            r"^(?:нарисуй|нарисуйте|нарисовать|изобрази|изобразите|изобразить|отрисуй|отрисуйте|отрисовать|сгенерируй|сгенерируйте|сгенерировать)\b",
+            r"^(?:(?:давай(?:те)?|а\s+давай(?:те)?|можешь|можете|сможешь|сможете|попробуй|попробуйте)\s+)?"
+            r"(?:нарисуй|нарисуйте|нарисовать|нарисуем"
+            r"|изобрази|изобразите|изобразить|изобразим"
+            r"|отрисуй|отрисуйте|отрисовать|отрисуем"
+            r"|сген[еи]рируй|сген[еи]рируйте|сген[еи]рировать|сген[еи]рируем)\b",
             body,
             re.IGNORECASE
         ))
@@ -696,7 +707,7 @@ class CommandRouter:
             remainder = remainder[:wxh_match.start()] + " " + remainder[wxh_match.end():]
 
         # Общий паттерн служебных существительных (изображение, картинка, рисунок, арт, фото и т.д.)
-        img_noun = r"(?:изображен\w*|картинк\w*|картинок|рисун\w*|иллюстрац\w*|арт\w*|фото\w*|постер\w*|штук\w*|шт)"
+        img_noun = r"(?:изображен\w*|картин\w*|рисун\w*|иллюстрац\w*|арт\w*|фото\w*|постер\w*|штук\w*|шт)"
 
         # 2.2. Поиск количества изображений (цифры или словесные числительные 1..4)
         count_noun_pattern = re.compile(
@@ -802,7 +813,7 @@ class CommandRouter:
         # 2.5. Очистка предлогов и концевой пунктуации
         clean_prompt = remainder.strip().lstrip(":").strip()
         clean_prompt = re.sub(r"^(?:мне|пожалуйста)[,\s]+", "", clean_prompt, flags=re.IGNORECASE).strip()
-        clean_prompt = clean_prompt.strip(".,;:!? ")
+        clean_prompt = clean_prompt.strip(".,;:!? \"'«»“”")
 
         if len(clean_prompt) < 2:
             return None
@@ -822,6 +833,105 @@ class CommandRouter:
             "width": width,
             "height": height,
             "count": count
+        }
+
+    def match_image_feedback(
+        self,
+        user_input: str,
+        last_image: Optional[Dict[str, Any]] = None
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Распознаёт замечания, критику и запросы на исправление ранее сгенерированного изображения:
+        - "Ты сгенерировал двух котов, а я просил одного и рыжего"
+        - "Тут два кота вместо одного, переделай"
+        - "Не тот цвет, кот должен быть рыжим"
+        - "Переделай изображение: только один кот и ярко-рыжий"
+        - "На картинке ошибка, я просил одного кота"
+        """
+        raw = user_input.strip()
+        cleaned = strip_call_prefixes(raw)
+
+        has_gen_verb = bool(re.search(
+            r"\b(?:сген[еи]рировал\w*|нарисовал\w*|создал\w*|отрисовал\w*|сделал\w*|выдал\w*|вышло|получилось)\b",
+            cleaned,
+            re.IGNORECASE
+        ))
+        has_img_noun = bool(re.search(
+            r"\b(?:на\s+картинк\w*|на\s+изображен\w*|на\s+рисунк\w*|на\s+фото\w*|картинк\w*|изображен\w*|рисун\w*|арт\b)\b",
+            cleaned,
+            re.IGNORECASE
+        ))
+        has_critique_phrase = bool(re.search(
+            r"\b(?:а\s+я\s+просил\w*|я\s+(?:же\s+)?просил\w*|но\s+я\s+просил\w*|вместо\s+одн\w*|не\s+тот\b|не\s+то\b|неправильн\w*|ошибк\w*|лишн\w*|не\s+подходит|не\s+нравит\w*|не\s+устроил\w*|плохо\b|ужасн\w*|почему\s+(?:тут|на\s+картинке|два))\b",
+            cleaned,
+            re.IGNORECASE
+        ))
+        has_revision_verb = bool(re.search(
+            r"\b(?:переделай\w*|перерисуй\w*|переген[еи]рируй\w*|исправь\w*|сделай\s+заново|повтори\s+генерац\w*)\b",
+            cleaned,
+            re.IGNORECASE
+        ))
+        has_count_discrepancy = bool(re.search(
+            r"\b(?:двух\s+кот\w*.*просил\s+одн\w*|два\s+кот\w*.*одн\w*|двух\s+.*одн\w*|два\s+вместо\s+одного|лишн\w*\s+кот\w*)\b",
+            cleaned,
+            re.IGNORECASE
+        ))
+
+        is_critique = (
+            has_count_discrepancy
+            or (has_gen_verb and has_critique_phrase)
+            or (has_img_noun and has_critique_phrase)
+            or (has_revision_verb and (last_image is not None or has_img_noun))
+            or (has_critique_phrase and last_image is not None)
+        )
+
+        if not is_critique:
+            return None
+
+        # Проверяем наличие конкретных уточняющих характеристик
+        has_specific_constraint = bool(re.search(
+            r"\b(?:одн[аоуеим]|одного|рыж\w*|оранжев\w*|бел\w*|черн\w*|чёрн\w*|сер\w*|на\s+пляж\w*|у\s+мор\w*|кот\w*|собак\w*|замок\w*|машин\w*)\b",
+            cleaned,
+            re.IGNORECASE
+        ))
+
+        last_prompt = ""
+        last_width = None
+        last_height = None
+        last_aspect = None
+        if last_image:
+            if isinstance(last_image, dict):
+                last_prompt = last_image.get("prompt") or last_image.get("clean_prompt") or ""
+                last_width = last_image.get("width")
+                last_height = last_image.get("height")
+                last_aspect = last_image.get("aspect_ratio")
+            elif hasattr(last_image, "get"):
+                last_prompt = last_image.get("prompt", "")
+                last_width = last_image.get("width")
+                last_height = last_image.get("height")
+                last_aspect = last_image.get("aspect_ratio")
+
+        is_actionable = (has_specific_constraint or has_revision_verb or has_count_discrepancy)
+
+        if is_actionable:
+            merged_prompt = f"{last_prompt}, {cleaned}".strip(" ,") if last_prompt else cleaned
+            return {
+                "action": "revise",
+                "is_revision": True,
+                "prompt": merged_prompt,
+                "original_prompt": last_prompt,
+                "critique_details": cleaned,
+                "width": last_width,
+                "height": last_height,
+                "aspect_ratio": last_aspect,
+                "count": 1
+            }
+
+        return {
+            "action": "clarify",
+            "is_revision": False,
+            "user_critique": cleaned,
+            "original_prompt": last_prompt
         }
 
     def choose_tool(self, user_input: str) -> Dict[str, Any]:
@@ -991,7 +1101,7 @@ class CommandRouter:
             "arguments": {}
         }
 
-    def route(self, user_input: str) -> Dict[str, Any]:
+    def route(self, user_input: str, last_image: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """
         Главная точка маршрутизации для Agent.process().
 
@@ -1000,14 +1110,29 @@ class CommandRouter:
         2. {"type": "plan", "action": ..., ...}
         3. {"type": "tool", "tool": ..., "arguments": ...}
         4. {"type": "subagent", "agent": ..., "task": ...}
-        5. {"type": "image", "action": "generate", "prompt": ..., ...}
-        6. {"type": None, "tool": None, "arguments": {}}
+        5. {"type": "image", "action": "generate" | "revise", "prompt": ..., ...}
+        6. {"type": "image_feedback_clarify", "action": "clarify", ...}
+        7. {"type": None, "tool": None, "arguments": {}}
         """
         raw_trimmed = user_input.strip()
         if not raw_trimmed:
             return {"type": None, "tool": None, "arguments": {}}
 
         cleaned = strip_call_prefixes(raw_trimmed)
+
+        # 0. Проверяем замечания и ревизию ранее сгенерированного изображения
+        feedback = self.match_image_feedback(cleaned, last_image=last_image)
+        if feedback:
+            if feedback.get("action") == "revise":
+                return {
+                    "type": "image",
+                    **feedback
+                }
+            elif feedback.get("action") == "clarify":
+                return {
+                    "type": "image_feedback_clarify",
+                    **feedback
+                }
 
         # 1. Проверяем команды памяти
         mem = self.match_memory(cleaned)

@@ -133,6 +133,12 @@ class TestImageRouterPatterns(unittest.TestCase):
             "сгенерируй стих про весну",
             "сгенерируй историю о рыцарях",
             "сгенерируй сказку на ночь",
+            "напиши Python-код для генерации изображения",
+            "опиши словами рыжего кота на фоне моря",
+            "сгенерируй Python-код для генерации изображения",
+            "сгенерируй описание рыжего кота на фоне моря",
+            "нарисуй словами рыжего кота на фоне моря",
+            "сгенерируй сценарий для ролика",
         ]
 
         for query in cases:
@@ -143,6 +149,32 @@ class TestImageRouterPatterns(unittest.TestCase):
                     "image",
                     f"Query '{query}' falsely triggered image route!"
                 )
+
+    def test_required_routing_cases_regression(self):
+        """Регрессионные тесты для обязательных кейсов из пользовательского запроса."""
+        positive_cases = [
+            ("сгенерируй кота", "кота"),
+            ("Давай сгенирируй рыжего кота на фоне моря", "рыжего кота на фоне моря"),
+            ("нарисуй закат над морем", "закат над морем"),
+            ("сгенерируй изображение рыжего кота на берегу", "рыжего кота на берегу"),
+        ]
+        for query, expected_prompt in positive_cases:
+            with self.subTest(positive_query=query):
+                route = self.router.route(query)
+                self.assertEqual(route.get("type"), "image", f"Query '{query}' must be routed to 'image'")
+                self.assertEqual(route.get("prompt"), expected_prompt)
+
+        negative_cases = [
+            "напиши Python-код для генерации изображения",
+            "опиши словами рыжего кота на фоне моря",
+            "сгенерируй Python-код для генерации изображения",
+            "сгенерируй описание рыжего кота на фоне моря",
+            "нарисуй словами рыжего кота на фоне моря",
+        ]
+        for query in negative_cases:
+            with self.subTest(negative_query=query):
+                route = self.router.route(query)
+                self.assertNotEqual(route.get("type"), "image", f"Query '{query}' must NOT be routed to 'image'")
 
     def test_routing_latency(self):
         """Проверка латентности: распознавание запроса к изображению должно занимать < 1 мс."""
