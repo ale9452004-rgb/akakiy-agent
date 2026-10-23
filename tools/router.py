@@ -18,7 +18,7 @@ CALL_PREFIX_REGEX = re.compile(
 )
 
 NON_IMAGE_TARGET_PATTERN = re.compile(
-    r"^(?:файл\w*|папк\w*|директори\w*|скрипт\w*|код\w*|класс\w*|функци\w*|модул\w*|тест\w*|коммит\w*|документ\w*|таблиц\w*|презентаци\w*|слайд\w*|исследован\w*|анализ\w*|задач\w*|заметк\w*|напоминан\w*|список\w*|списк\w*|план\w*|проект\w*|текст\w*|стать\w*|стих\w*|сказк\w*|рассказ\w*|истори\w*|эссе|поэм\w*|диалог\w*|ответ\w*|сообщен\w*|html\w*|css\w*|форм\w*|api\b|бд\b|баз\w*|описан\w*|сценари\w*|промпт\w*|prompt\w*|python\w*|питон\w*|javascript\w*|js\b|typescript\w*|ts\b|программ\w*|алгоритм\w*|словами\b)\b",
+    r"^(?:файл\w*|папк\w*|директори\w*|скрипт\w*|код\w*|класс\w*|функци\w*|модул\w*|тест\w*|коммит\w*|документ\w*|таблиц\w*|презентаци\w*|слайд\w*|исследован\w*|анализ\w*|задач\w*|заметк\w*|напоминан\w*|список\w*|списк\w*|план\w*|проект\w*|текст\w*|стать\w*|стих\w*|сказк\w*|рассказ\w*|истори\w*|эссе|поэм\w*|диалог\w*|ответ\w*|сообщен\w*|html\w*|css\w*|html-?форм\w*|веб-?форм\w*|api\b|бд\b|баз\w*|описан\w*|сценари\w*|промпт\w*|prompt\w*|python\w*|питон\w*|javascript\w*|js\b|typescript\w*|ts\b|программ\w*|алгоритм\w*|словами\b|парол\w*|настройк\w*|конфиг\w*|ветк\w*|репозитори\w*|уведомлен\w*)\b",
     re.IGNORECASE
 )
 
@@ -37,7 +37,8 @@ class CommandRouter:
     и возвращает структурированное решение о маршрутизации.
     """
 
-    def __init__(self):
+    def __init__(self, edit_planner: Optional[Any] = None):
+        self._edit_planner = edit_planner
         self._init_patterns()
 
     def strip_call_prefixes(self, text: str) -> str:
@@ -851,6 +852,10 @@ class CommandRouter:
         raw = user_input.strip()
         cleaned = strip_call_prefixes(raw)
 
+        # Прямые директивы модификации/удаления относятся к редактированию (Scenario C)
+        if re.search(r"^(?:убери|удали|сотри|поменяй|измени|замени|перекрась)\b", cleaned, re.IGNORECASE):
+            return None
+
         has_gen_verb = bool(re.search(
             r"\b(?:сген[еи]рировал\w*|нарисовал\w*|создал\w*|отрисовал\w*|сделал\w*|выдал\w*|вышло|получилось)\b",
             cleaned,
@@ -932,6 +937,167 @@ class CommandRouter:
             "is_revision": False,
             "user_critique": cleaned,
             "original_prompt": last_prompt
+        }
+
+    def classify_image_edit_type(self, text: str) -> str:
+        """
+        Классифицирует тип запроса на модификацию изображения.
+        Использует семантический разбор EditPlanner.
+        """
+        if not hasattr(self, "_edit_planner"):
+            from tools.edit_planner import EditPlanner
+            self._edit_planner = EditPlanner()
+        plan = self._edit_planner.plan(text)
+        return plan.action_type
+
+    def match_image_edit(
+        self,
+        user_input: str,
+        last_image: Optional[Any] = None
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Универсально распознаёт намерения редактирования ранее созданного изображения (Scenario C):
+        - изменение формы, размера, пропорций ("сделай кота стройнее", "измени форму крыши");
+        - изменение позы ("поменяй позу кота на сидячую", "оставь всё как есть, поменяй только позу");
+        - изменение цвета, окраса, материалов ("сделай кота рыжим", "перекрась машину в синий");
+        - изменение освещения, погоды, времени суток ("измени освещение на закатное", "добавь туман");
+        - изменение фона и локации ("измени фон на лес", "поменяй фон на море");
+        - изменение стиля ("сделай замок более готическим", "в стиле аниме");
+        - добавление / замена / удаление элементов ("убери лишнего кота", "добавь шляпу").
+        """
+        raw = user_input.strip()
+        cleaned = strip_call_prefixes(raw)
+
+        # 0. Запросы на создание нового изображения с нуля (Scenario A) никогда не относятся к edit
+        if re.search(
+            r"^(?:(?:давай(?:те)?|а\s+давай(?:те)?|можешь|можете|сможешь|сможете|попробуй|попробуйте)\s+)?"
+            r"(?:сген[еи]рируй\w*|создай\w*|нарисуй\w*|изобрази\w*|отрисуй\w*)\b",
+            cleaned,
+            re.IGNORECASE
+        ):
+            return None
+
+        if re.search(
+            r"^сделай\s+(?:мне\s+)?(?:картинк\w*|изображен\w*|фото\w*|рисун\w*|арт\b|иллюстрац\w*|постер\w*)\b",
+            cleaned,
+            re.IGNORECASE
+        ):
+            return None
+
+        # 1. Проверяем наличие контекста изображения или явного упоминания в запросе
+        has_img_noun = bool(re.search(
+            r"\b(?:на\s+картинк\w*|в\s+картинк\w*|на\s+изображен\w*|в\s+изображен\w*|на\s+рисунк\w*|в\s+рисунк\w*|на\s+фото\w*|в\s+фото\w*|в\s+кадре|картинк\w*|изображен\w*|рисун\w*|фото\w*)\b",
+            cleaned,
+            re.IGNORECASE
+        ))
+
+        has_last_image = False
+        source_image_path = None
+        last_prompt = ""
+        last_width = None
+        last_height = None
+        last_aspect = None
+
+        if last_image is not None:
+            if hasattr(last_image, "get_active_image_path"):
+                source_image_path = last_image.get_active_image_path(validate_disk=False)
+                last_prompt = last_image.get_active_prompt()
+                has_last_image = bool(source_image_path or last_prompt)
+            elif isinstance(last_image, dict):
+                last_prompt = last_image.get("prompt") or last_image.get("clean_prompt") or ""
+                last_width = last_image.get("width")
+                last_height = last_image.get("height")
+                last_aspect = last_image.get("aspect_ratio")
+                created = last_image.get("created_files") or []
+                source_image_path = created[0] if created else last_image.get("source_image_path")
+                has_last_image = bool(source_image_path or last_prompt)
+
+        # Если нет ни активного изображения, ни упоминания картинки в тексте — это не Scenario C
+        if not has_last_image and not has_img_noun:
+            return None
+
+        # 2. Исключаем не связанные с изображениями задачи (задачи, заметки, код, файлы, системные команды)
+        if NON_IMAGE_TARGET_PATTERN.search(cleaned):
+            return None
+
+        # 3. Маркеры намерений редактирования
+        # А. "Оставь всё как есть, поменяй только..."
+        m_keep = bool(re.search(
+            r"\bоставь\s+(?:вс[её]\s+)?как\s+есть[,\s]+(?:поменяй|измени|сделай|замени|только)\b",
+            cleaned,
+            re.IGNORECASE
+        ))
+
+        # Б. Прямые глаголы редактирования изображения
+        m_explicit_edit = bool(re.search(
+            r"\b(?:отредактируй|поправь|скорректируй|доработай|модифицируй)\s+(?:картинк\w*|изображен\w*|фото\w*|рисун\w*|кадр)\b",
+            cleaned,
+            re.IGNORECASE
+        ))
+
+        # В. Глаголы модификации в начале фразы
+        m_action_verb = re.search(
+            r"^(?:поменяй|измени|замени|перекрась|сделай|добавь|пририсуй|вставь|надень|наложи|убери|удали|сотри|стереть|увеличь|уменьши|осветли|затемни|поверни|разверни|перемести)\b(?:\s+(?:мне\s+)?(.+))?$",
+            cleaned,
+            re.IGNORECASE
+        )
+
+        is_edit_candidate = False
+        if m_keep or m_explicit_edit:
+            is_edit_candidate = True
+        elif m_action_verb:
+            remainder = m_action_verb.group(1) or ""
+            # Проверяем, что цель модификации не относится к коду, файлам, спискам
+            if not NON_IMAGE_TARGET_PATTERN.search(remainder):
+                if not re.search(r"\b(?:задач\w*|заметк\w*|напоминан\w*|список\w*|файл\w*|коммит\w*|парол\w*|репозитор\w*|ветк\w*)\b", remainder, re.IGNORECASE):
+                    is_edit_candidate = True
+        elif has_img_noun and re.search(r"\b(?:поменяй|измени|замени|перекрась|сделай|добавь|убери|удали)\b", cleaned, re.IGNORECASE):
+            is_edit_candidate = True
+
+        if not is_edit_candidate:
+            return None
+
+        # Если нет активного изображения, проверяем наличие явного контекста (на картинке / в изображении)
+        if not has_last_image:
+            has_explicit_context = bool(
+                m_keep or m_explicit_edit or re.search(
+                    r"\b(?:на\s+картинк\w*|в\s+картинк\w*|на\s+изображен\w*|в\s+изображен\w*|на\s+рисунк\w*|в\s+рисунк\w*|на\s+фото\w*|в\s+фото\w*|в\s+кадре)\b",
+                    cleaned,
+                    re.IGNORECASE
+                )
+            )
+            if not has_explicit_context:
+                return None
+
+        # 4. Формирование плана через EditPlanner
+        if getattr(self, "_edit_planner", None) is None:
+            from tools.edit_planner import EditPlanner
+            self._edit_planner = EditPlanner()
+
+        plan = self._edit_planner.plan(
+            instruction=cleaned,
+            base_prompt=last_prompt,
+            active_image_path=source_image_path
+        )
+
+        return {
+            "action": "edit",
+            "edit_type": plan.action_type,
+            "edit_instruction": cleaned,
+            "prompt": plan.compiled_prompt,
+            "negative_prompt": plan.compiled_negative,
+            "original_prompt": last_prompt,
+            "source_image_path": source_image_path,
+            "source_image": source_image_path,
+            "denoise": plan.denoise,
+            "recommended_mode": plan.recommended_mode,
+            "requires_specialized_model": plan.requires_specialized_model,
+            "what_to_change": plan.what_to_change,
+            "what_to_keep": plan.what_to_keep,
+            "width": last_width,
+            "height": last_height,
+            "aspect_ratio": last_aspect,
+            "count": 1
         }
 
     def choose_tool(self, user_input: str) -> Dict[str, Any]:
@@ -1133,6 +1299,14 @@ class CommandRouter:
                     "type": "image_feedback_clarify",
                     **feedback
                 }
+
+        # 0.1. Проверяем редактирование ранее сгенерированного изображения (Scenario C)
+        edit_route = self.match_image_edit(cleaned, last_image=last_image)
+        if edit_route:
+            return {
+                "type": "image",
+                **edit_route
+            }
 
         # 1. Проверяем команды памяти
         mem = self.match_memory(cleaned)

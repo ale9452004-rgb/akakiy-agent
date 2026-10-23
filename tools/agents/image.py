@@ -16,6 +16,7 @@ import json
 import os
 from pathlib import Path
 import random
+import shutil
 import time
 from typing import Any, Dict, List, Optional, Tuple
 import uuid
@@ -299,6 +300,138 @@ class ImageAgent(SubAgent):
             }
         }
 
+    def get_available_models(self) -> Dict[str, List[str]]:
+        """
+        Возвращает словарь реально установленных в ComfyUI моделей по категориям.
+        """
+        models_root = PROJECT_PATH / "workers" / "comfyui" / "models"
+        res: Dict[str, List[str]] = {
+            "checkpoints": [],
+            "controlnet": [],
+            "inpaint": [],
+            "loras": []
+        }
+        if not models_root.exists():
+            return res
+
+        for category, key in [
+            ("checkpoints", "checkpoints"),
+            ("controlnet", "controlnet"),
+            ("loras", "loras"),
+        ]:
+            cat_dir = models_root / category
+            if cat_dir.is_dir():
+                for f in cat_dir.iterdir():
+                    if f.is_file() and not f.name.startswith("put_"):
+                        res[key].append(f.name)
+
+        return res
+
+    def has_controlnet_openpose(self) -> bool:
+        """Проверяет наличие установленной модели ControlNet OpenPose/DWPose для SDXL."""
+        models = self.get_available_models()
+        for f in models.get("controlnet", []):
+            name_lower = f.lower()
+            if any(term in name_lower for term in ("openpose", "pose", "dwpose")):
+                return True
+        return False
+
+    def has_inpaint_model(self) -> bool:
+        """Проверяет наличие специализированной Inpaint-модели."""
+        models = self.get_available_models()
+        for cat in ("checkpoints", "controlnet"):
+            for f in models.get(cat, []):
+                if "inpaint" in f.lower():
+                    return True
+        return False
+
+    def build_img2img_workflow(
+        self,
+        input_image_name: str,
+        prompt: str,
+        negative_prompt: str = DEFAULT_NEGATIVE_PROMPT,
+        seed: Optional[int] = None,
+        denoise: float = 0.65,
+        steps: int = DEFAULT_STEPS,
+        cfg: float = DEFAULT_CFG,
+        sampler: str = DEFAULT_SAMPLER,
+        scheduler: str = DEFAULT_SCHEDULER,
+        checkpoint: str = DEFAULT_CHECKPOINT
+    ) -> Dict[str, Any]:
+        """
+        Формирует стандартный JSON-граф img2img для SDXL-Lightning 4-step:
+        LoadImage -> VAEEncode -> KSampler (denoise) -> VAEDecode -> SaveImage.
+        """
+        if seed is None:
+            seed = random.randint(1, 2**32 - 1)
+
+        denoise = max(0.1, min(1.0, float(denoise)))
+
+        return {
+            "1": {
+                "inputs": {
+                    "ckpt_name": checkpoint
+                },
+                "class_type": "CheckpointLoaderSimple"
+            },
+            "2": {
+                "inputs": {
+                    "text": prompt,
+                    "clip": ["1", 1]
+                },
+                "class_type": "CLIPTextEncode"
+            },
+            "3": {
+                "inputs": {
+                    "text": negative_prompt,
+                    "clip": ["1", 1]
+                },
+                "class_type": "CLIPTextEncode"
+            },
+            "4": {
+                "inputs": {
+                    "image": input_image_name
+                },
+                "class_type": "LoadImage"
+            },
+            "5": {
+                "inputs": {
+                    "pixels": ["4", 0],
+                    "vae": ["1", 2]
+                },
+                "class_type": "VAEEncode"
+            },
+            "6": {
+                "inputs": {
+                    "seed": seed,
+                    "steps": steps,
+                    "cfg": cfg,
+                    "sampler_name": sampler,
+                    "scheduler": scheduler,
+                    "denoise": denoise,
+                    "model": ["1", 0],
+                    "positive": ["2", 0],
+                    "negative": ["3", 0],
+                    "latent_image": ["5", 0]
+                },
+                "class_type": "KSampler"
+            },
+            "7": {
+                "inputs": {
+                    "samples": ["6", 0],
+                    "vae": ["1", 2]
+                },
+                "class_type": "VAEDecode"
+            },
+            "8": {
+                "inputs": {
+                    "filename_prefix": "Akakiy_ImageAgent_Edit",
+                    "images": ["7", 0]
+                },
+                "class_type": "SaveImage"
+            }
+        }
+
     def _generate_safe_filename(self) -> str:
         """Генерирует безопасное уникальное имя для сохраняемого файла изображения."""
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -343,6 +476,63 @@ class ImageAgent(SubAgent):
 
         count = safe_validate_count(context.get("count", 1))
 
+        # 1.2. Извлечение и валидация параметров редактирования (Scenario C)
+        action = str(context.get("action", "generate")).strip().lower()
+        edit_type = str(context.get("edit_type", "general")).strip().lower()
+        source_image_path = context.get("source_image_path")
+
+        if action == "edit":
+            if not source_image_path:
+                return AgentResult.fail(
+                    error="Не указан путь к исходному изображению для редактирования (source_image_path)."
+                )
+            if not Path(source_image_path).is_file():
+                return AgentResult.fail(
+                    error=f"Исходное изображение не найдено на диске: {source_image_path}"
+                )
+
+            # Проверка доступности специализированных моделей (Rule 5 & Rule 7)
+            if edit_type == "pose" and not self.has_controlnet_openpose():
+                msg = (
+                    "Для точного изменения позы персонажа с сохранением исходного изображения требуется "
+                    "модель управления позой (ControlNet OpenPose для SDXL), которая в данный момент "
+                    "не установлена в ComfyUI.\n\n"
+                    "Доступные варианты:\n"
+                    "1. Сгенерировать новое изображение с нужной позой по уточненному промпту.\n"
+                    "2. Создать вариацию через img2img (с изменением композиции без жесткой фиксации позы).\n\n"
+                    "Уточните, какой вариант вы хотите выполнить."
+                )
+                return AgentResult.ok(
+                    message=msg,
+                    data={
+                        "status": "missing_model",
+                        "edit_type": "pose",
+                        "missing_component": "ControlNet OpenPose (SDXL)",
+                        "source_image": str(source_image_path),
+                        "alternatives": ["generate_new", "img2img_variation"]
+                    }
+                )
+
+            if edit_type == "remove" and not self.has_inpaint_model():
+                msg = (
+                    "Для точечного удаления объекта с сохранением остального изображения требуется "
+                    "модель Inpainting или разметка маски, которая в данный момент не установлена в ComfyUI.\n\n"
+                    "Доступные варианты:\n"
+                    "1. Перегенерировать изображение с уточнением (только один объект, без лишних деталей).\n"
+                    "2. Создать вариацию через img2img.\n\n"
+                    "Уточните, какой вариант вы хотите выполнить."
+                )
+                return AgentResult.ok(
+                    message=msg,
+                    data={
+                        "status": "missing_model",
+                        "edit_type": "remove",
+                        "missing_component": "Inpainting Model / Segmentation Mask",
+                        "source_image": str(source_image_path),
+                        "alternatives": ["revise_prompt", "img2img_variation"]
+                    }
+                )
+
         # 2. Проверка доступности ComfyUI Worker
         if not self.client.is_available():
             try:
@@ -376,6 +566,21 @@ class ImageAgent(SubAgent):
                 )
 
         # 4. Выполнение генерации в защищенном блоке try...finally
+        staged_input_name = None
+        staged_input_path = None
+        if action == "edit" and source_image_path:
+            try:
+                comfy_input_dir = PROJECT_PATH / "workers" / "comfyui" / "input"
+                comfy_input_dir.mkdir(parents=True, exist_ok=True)
+                src_p = Path(source_image_path)
+                staged_input_name = f"edit_in_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:6]}{src_p.suffix}"
+                staged_input_path = comfy_input_dir / staged_input_name
+                shutil.copy2(src_p, staged_input_path)
+            except Exception as ex:
+                return AgentResult.fail(
+                    error=f"Ошибка подготовки входного изображения в ComfyUI input: {ex}"
+                )
+
         saved_target_paths = []
         total_file_size = 0
         generation_time = 0.0
@@ -390,7 +595,7 @@ class ImageAgent(SubAgent):
         try:
             # 3.1. Семантическая компиляция и обогащение промпта для SDXL-Lightning
             skip_compile = bool(context.get("skip_compile", False))
-            if not skip_compile:
+            if not skip_compile and action != "edit":
                 from tools.prompt_compiler import compile_image_prompt
                 effective_prompt, effective_negative, prompt_meta = compile_image_prompt(
                     raw_prompt=prompt,
@@ -422,18 +627,33 @@ class ImageAgent(SubAgent):
                     curr_seed = random.randint(1, 2**32 - 1)
                 used_seeds.append(curr_seed)
 
-                workflow = self.build_workflow(
-                    prompt=effective_prompt,
-                    negative_prompt=effective_negative,
-                    seed=curr_seed,
-                    width=width,
-                    height=height,
-                    steps=steps,
-                    cfg=cfg,
-                    sampler=sampler,
-                    scheduler=scheduler,
-                    checkpoint=checkpoint
-                )
+                if action == "edit" and staged_input_name:
+                    denoise = float(context.get("denoise", 0.65))
+                    workflow = self.build_img2img_workflow(
+                        input_image_name=staged_input_name,
+                        prompt=effective_prompt,
+                        negative_prompt=effective_negative,
+                        seed=curr_seed,
+                        denoise=denoise,
+                        steps=steps,
+                        cfg=cfg,
+                        sampler=sampler,
+                        scheduler=scheduler,
+                        checkpoint=checkpoint
+                    )
+                else:
+                    workflow = self.build_workflow(
+                        prompt=effective_prompt,
+                        negative_prompt=effective_negative,
+                        seed=curr_seed,
+                        width=width,
+                        height=height,
+                        steps=steps,
+                        cfg=cfg,
+                        sampler=sampler,
+                        scheduler=scheduler,
+                        checkpoint=checkpoint
+                    )
 
                 # Отправка задачи в ComfyUI
                 try:
@@ -522,6 +742,14 @@ class ImageAgent(SubAgent):
         except Exception as e:
             generation_error = str(e)
         finally:
+            # Очистка временного файла в ComfyUI input при редактировании
+            if staged_input_path:
+                try:
+                    if staged_input_path.exists():
+                        staged_input_path.unlink()
+                except Exception:
+                    pass
+
             # Гарантированное освобождение VRAM через VRAMManager в блоке finally
             if manage_vram and self.vram_manager:
                 try:
@@ -550,13 +778,19 @@ class ImageAgent(SubAgent):
                 }
             )
 
-        # Генерация успешна
+        # Генерация/редактирование успешны
         if len(saved_target_paths) == 1:
             safe_name = saved_target_paths[0].name
-            msg = f"Изображение успешно сгенерировано: {safe_name}"
+            if action == "edit":
+                msg = f"Изображение успешно отредактировано: {safe_name}"
+            else:
+                msg = f"Изображение успешно сгенерировано: {safe_name}"
         else:
             names = ", ".join(p.name for p in saved_target_paths)
-            msg = f"Успешно сгенерировано изображений: {len(saved_target_paths)} ({names})"
+            if action == "edit":
+                msg = f"Успешно отредактировано изображений: {len(saved_target_paths)} ({names})"
+            else:
+                msg = f"Успешно сгенерировано изображений: {len(saved_target_paths)} ({names})"
 
         if cleanup_error:
             msg += f" (Предупреждение: ошибка освобождения VRAM: {cleanup_error})"

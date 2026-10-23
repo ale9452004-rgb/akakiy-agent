@@ -50,7 +50,28 @@ SUBJECT_CATALOG: List[Tuple[re.Pattern, str, str, str]] = [
     (re.compile(r"\b(?:корабл\w*|лодк\w*|яхт\w*|катер\w*|ship\w*|boat\w*|yacht\w*)\b", re.IGNORECASE), "ship", "ships", "vehicle"),
     (re.compile(r"\b(?:замок\b|замк\w*|дворец\w*|дворц\w*|castle\w*|palace\w*)\b", re.IGNORECASE), "castle", "castles", "architecture"),
     (re.compile(r"\b(?:дом\b|дом[а-я]*|здани\w*|коттедж\w*|house\w*|building\w*|cottage\w*)\b", re.IGNORECASE), "house", "houses", "architecture"),
+    (re.compile(r"\b(?:комнат\w*|гостин\w*|спальн\w*|кабинет\w*|room\w*|bedroom|living\s*room)\b", re.IGNORECASE), "room", "rooms", "interior"),
+    (re.compile(r"\b(?:стол\b|стол[а-я]*|table\w*|desk\w*)\b", re.IGNORECASE), "table", "tables", "furniture"),
+    (re.compile(r"\b(?:окн\w*|window\w*)\b", re.IGNORECASE), "window", "windows", "interior"),
+    (re.compile(r"\b(?:улиц\w*|street\w*)\b", re.IGNORECASE), "street", "streets", "scenery"),
+    (re.compile(r"\b(?:город\w*|city\w*|town\w*)\b", re.IGNORECASE), "city", "cities", "scenery"),
+    (re.compile(r"\b(?:лес\w*|тайг\w*|forest\w*|woods)\b", re.IGNORECASE), "forest", "forests", "nature"),
+    (re.compile(r"\b(?:озер\w*|lake\w*)\b", re.IGNORECASE), "lake", "lakes", "nature"),
+    (re.compile(r"\b(?:пейзаж\w*|ландшафт\w*|landscape\w*|scenery)\b", re.IGNORECASE), "landscape", "landscapes", "scenery"),
 ]
+
+NON_SUBJECT_WORDS: Set[str] = {
+    "cinematic", "photorealistic", "wooden", "metallic", "glass", "slender", "chubby",
+    "gothic", "sunset", "sunrise", "misty", "foggy", "golden", "bright", "dark",
+    "warm", "cold", "blue", "red", "green", "orange", "white", "black", "grey", "gray",
+    "vibrant", "rich", "pure", "shot", "style", "view", "background", "lighting",
+    "color", "texture", "detailed", "quality", "masterpiece", "sharp", "focus",
+    "indoor", "outdoor", "cozy", "urban", "modern", "vintage", "retro", "evening",
+    "night", "morning", "day", "light", "shadow", "glow", "atmosphere", "atmospheric",
+    "clean", "scene", "soft", "spectacular", "photograph", "photo", "image", "picture",
+    "art", "rendering", "finish", "tone", "aesthetic", "slim", "plump", "lean", "muscular",
+    "dusk", "twilight", "reflection", "reflective", "transparent", "clear"
+}
 
 # Маркеры цвета и окраса: (regex, positive_en, negative_en)
 COLOR_CATALOG: List[Tuple[re.Pattern, List[str], List[str]]] = [
@@ -168,7 +189,7 @@ ENVIRONMENT_CATALOG: List[Tuple[re.Pattern, List[str]]] = [
         ["nighttime", "starry sky", "moonlight"]
     ),
     (
-        re.compile(r"\b(?:лес\w*|дерев\w*|forest|woods|trees)\b", re.IGNORECASE),
+        re.compile(r"\b(?:лес\w*|тайг\w*|бор\b|рощ\w*|деревь\w*|деревья|дерево\b|дерева\b|деревьев|forest|woods|trees)\b", re.IGNORECASE),
         ["in a lush forest", "tall green trees"]
     ),
     (
@@ -241,16 +262,17 @@ class PromptCompiler:
                 detected_category = cat
                 break
 
-        # Если объект не из каталога, пробуем выделить английское слово или общий термин
+        # Если объект не из каталога, пробуем выделить английское существительное (исключая модификаторы и стили)
         if not detected_subject:
             en_words = re.findall(r"\b[a-zA-Z]{3,}\b", combined_text)
-            if en_words:
-                detected_subject = en_words[0].lower()
+            candidates = [w.lower() for w in en_words if w.lower() not in NON_SUBJECT_WORDS]
+            if candidates:
+                detected_subject = candidates[0]
                 detected_subject_plural = f"{detected_subject}s"
                 detected_category = "general"
             else:
-                detected_subject = "subject"
-                detected_subject_plural = "subjects"
+                detected_subject = None
+                detected_subject_plural = None
                 detected_category = "general"
 
         # 2. Определение количества объектов
@@ -330,12 +352,13 @@ class PromptCompiler:
         # 7. Формирование Positive Prompt
         pos_parts: List[str] = []
 
-        # Строгое количество и субъект
-        if is_singular:
-            pos_parts.append(f"solo, single {detected_subject}, 1{detected_subject}")
-        else:
-            eff_count = count if (count and count > 1) else 2
-            pos_parts.append(f"{eff_count} {detected_subject_plural}")
+        # Строгое количество и субъект (если субъект определен)
+        if detected_subject:
+            if is_singular:
+                pos_parts.append(f"solo, single {detected_subject}, 1{detected_subject}")
+            else:
+                eff_count = count if (count and count > 1) else 2
+                pos_parts.append(f"{eff_count} {detected_subject_plural}")
 
         # Цвета и окрас
         if positive_colors:
@@ -364,8 +387,8 @@ class PromptCompiler:
         # 8. Формирование Negative Prompt
         neg_parts: List[str] = []
 
-        # Защита от лишних объектов (если требуется строго 1 объект)
-        if is_singular:
+        # Защита от лишних объектов (если требуется строго 1 конкретный объект)
+        if is_singular and detected_subject:
             neg_parts.extend([
                 f"multiple {detected_subject_plural}",
                 f"two {detected_subject_plural}",

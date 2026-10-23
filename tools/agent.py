@@ -66,7 +66,14 @@ class Agent:
         else:
             self.bridge = bridge
         self._last_result = None
+        from tools.image_context import ImageContextTracker
+        self.image_context = ImageContextTracker()
         self._last_image_result = None
+        from tools.edit_planner import EditPlanner
+        self.edit_planner = EditPlanner(ai_client=getattr(self, "ai", None))
+        if hasattr(self, "router") and self.router is not None:
+            if not getattr(self.router, "_edit_planner", None):
+                self.router._edit_planner = self.edit_planner
         self._sync_memory_to_system_prompt()
 
     @property
@@ -474,7 +481,20 @@ class Agent:
             }
 
         # 1. Детерминированная маршрутизация через CommandRouter
-        route = self.router.route(user_input, last_image=getattr(self, "_last_image_result", None))
+        last_img = None
+        if hasattr(self, "image_context") and self.image_context and self.image_context.has_active_image(validate_disk=True):
+            last_img = self.image_context.to_legacy_dict(validate_disk=True)
+        elif getattr(self, "_last_image_result", None):
+            last_img = self._last_image_result
+            if hasattr(self, "image_context") and self.image_context and not self.image_context.has_active_image(validate_disk=False):
+                from tools.image_context import ImageContextTracker
+                self.image_context = ImageContextTracker.from_legacy_dict(last_img)
+                if not self.image_context.has_active_image(validate_disk=True):
+                    last_img = None
+                else:
+                    last_img = self.image_context.to_legacy_dict(validate_disk=True)
+
+        route = self.router.route(user_input, last_image=last_img)
         route_type = route.get("type")
 
         # 1.1. Долговременная память (Memory Fast-Path)
@@ -618,8 +638,9 @@ class Agent:
                 self._record_interaction(user_input, resp)
                 return resp
 
-        # 1.3. Генерация изображений (Image Sub-Agent Fast-Path)
+        # 1.3. Генерация и редактирование изображений (Image Sub-Agent Fast-Path)
         if route_type == "image":
+            action = route.get("action", "generate")
             prompt = route.get("prompt", "")
             width = route.get("width")
             height = route.get("height")
@@ -627,6 +648,38 @@ class Agent:
             aspect_ratio = route.get("aspect_ratio")
             is_revision = bool(route.get("is_revision", False))
             critique_details = route.get("critique_details")
+
+            source_image_path = route.get("source_image_path") or route.get("source_image")
+            if hasattr(self, "image_context") and self.image_context:
+                valid_active = self.image_context.get_active_image_path(validate_disk=True)
+                if valid_active:
+                    source_image_path = valid_active
+                elif not source_image_path or not Path(source_image_path).exists():
+                    source_image_path = None
+            elif source_image_path and not Path(source_image_path).exists():
+                source_image_path = None
+
+            if not source_image_path and getattr(self, "_last_image_result", None):
+                last_files = self._last_image_result.get("created_files") or []
+                for fpath in last_files:
+                    if Path(fpath).exists():
+                        source_image_path = fpath
+                        break
+
+            if action == "edit" and not source_image_path:
+                answer = "Нет ранее сгенерированного изображения для редактирования. Сначала сгенерируйте изображение или укажите путь к файлу."
+                resp = {
+                    "type": "image",
+                    "tool": "image",
+                    "action": "edit",
+                    "answer": answer,
+                    "message": answer,
+                    "success": False,
+                    "created_files": [],
+                    "error": answer
+                }
+                self._record_interaction(user_input, answer, tool_name="image:edit")
+                return resp
 
             subagent_kwargs = {}
             if width is not None:
@@ -641,10 +694,36 @@ class Agent:
                 subagent_kwargs["is_revision"] = True
             if critique_details:
                 subagent_kwargs["critique_details"] = critique_details
+            if action:
+                subagent_kwargs["action"] = action
+            if route.get("edit_type"):
+                subagent_kwargs["edit_type"] = route.get("edit_type")
+            if route.get("edit_instruction"):
+                subagent_kwargs["edit_instruction"] = route.get("edit_instruction")
+            if route.get("negative_prompt"):
+                subagent_kwargs["negative_prompt"] = route.get("negative_prompt")
+            if route.get("denoise") is not None:
+                subagent_kwargs["denoise"] = route.get("denoise")
+            if route.get("recommended_mode"):
+                subagent_kwargs["recommended_mode"] = route.get("recommended_mode")
+            if route.get("requires_specialized_model"):
+                subagent_kwargs["requires_specialized_model"] = route.get("requires_specialized_model")
+            if route.get("what_to_change"):
+                subagent_kwargs["what_to_change"] = route.get("what_to_change")
+            if route.get("what_to_keep"):
+                subagent_kwargs["what_to_keep"] = route.get("what_to_keep")
+            if source_image_path:
+                subagent_kwargs["source_image_path"] = source_image_path
 
             subagent_res = self.run_subagent("image", task=prompt, **subagent_kwargs)
             if subagent_res.success:
-                if is_revision:
+                if action == "edit":
+                    if subagent_res.created_files:
+                        file_names = ", ".join(Path(p).name for p in subagent_res.created_files)
+                        answer = f"Изображение успешно отредактировано: {file_names}"
+                    else:
+                        answer = subagent_res.message
+                elif is_revision:
                     file_names = ", ".join(Path(p).name for p in subagent_res.created_files)
                     answer = f"Я перегенерировал изображение с учётом замечаний: {file_names}"
                 else:
@@ -656,6 +735,7 @@ class Agent:
             resp = {
                 "type": "image",
                 "tool": "image",
+                "action": action,
                 "result": subagent_res,
                 "answer": answer,
                 "message": answer,
@@ -669,17 +749,46 @@ class Agent:
             }
             if not subagent_res.success:
                 resp["error"] = subagent_res.error or subagent_res.message
-            else:
-                self._last_image_result = {
-                    "prompt": prompt,
-                    "created_files": list(subagent_res.created_files),
-                    "artifacts": [a.to_dict() for a in subagent_res.artifacts],
-                    "width": width,
-                    "height": height,
-                    "aspect_ratio": aspect_ratio,
-                    "count": count,
-                    "data": getattr(subagent_res, "data", {})
-                }
+            elif subagent_res.created_files:
+                new_file = subagent_res.created_files[0]
+                if hasattr(self, "image_context") and self.image_context:
+                    if action == "edit":
+                        self.image_context.track_edit(
+                            file_path=new_file,
+                            instruction=route.get("edit_instruction", user_input),
+                            prompt=prompt,
+                            source_image_path=source_image_path,
+                            edit_type=route.get("edit_type", "general"),
+                            width=width,
+                            height=height,
+                            aspect_ratio=aspect_ratio,
+                            count=count,
+                        )
+                    else:
+                        self.image_context.track_generation(
+                            file_path=new_file,
+                            prompt=prompt,
+                            is_revision=is_revision,
+                            critique_details=critique_details,
+                            width=width,
+                            height=height,
+                            aspect_ratio=aspect_ratio,
+                            count=count,
+                        )
+                    self._last_image_result = self.image_context.to_legacy_dict()
+                    self._last_image_result["artifacts"] = [a.to_dict() for a in subagent_res.artifacts]
+                    self._last_image_result["data"] = getattr(subagent_res, "data", {})
+                else:
+                    self._last_image_result = {
+                        "prompt": prompt,
+                        "created_files": list(subagent_res.created_files),
+                        "artifacts": [a.to_dict() for a in subagent_res.artifacts],
+                        "width": width,
+                        "height": height,
+                        "aspect_ratio": aspect_ratio,
+                        "count": count,
+                        "data": getattr(subagent_res, "data", {})
+                    }
 
             self._record_interaction(user_input, answer, tool_name="image")
             return resp
