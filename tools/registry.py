@@ -384,7 +384,7 @@ TOOL_PARAMETERS = {
             },
             "edit_type": {
                 "type": "string",
-                "description": "Тип правки: 'pose', 'color', 'remove', 'add', 'background', 'style', 'proportions', 'lighting', 'general' (опционально)"
+                "description": "Тип правки: 'replace', 'remove', 'add', 'color', 'pose', 'background', 'style', 'proportions', 'lighting', 'general' (опционально)"
             },
             "positive_prompt": {
                 "type": "string",
@@ -399,7 +399,7 @@ TOOL_PARAMETERS = {
             },
             "denoise": {
                 "type": "number",
-                "description": "Сила изменения img2img от 0.15 до 0.90 (чем выше, тем сильнее меняется картинка)"
+                "description": "Сила изменения от 0.15 до 0.90 для img2img или до 0.98 для inpainting по маске (опционально, подбирается автоматически)"
             },
             "mask_bbox": {
                 "type": "array",
@@ -415,7 +415,7 @@ TOOL_PARAMETERS = {
             },
             "feather": {
                 "type": "integer",
-                "description": "Радиус размытия краёв маски в пикселях для плавного перехода (по умолчанию 16)"
+                "description": "Радиус размытия краёв маски в пикселях для плавного перехода (по умолчанию 12)"
             },
             "control_type": {
                 "type": "string",

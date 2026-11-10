@@ -100,10 +100,12 @@ class OllamaClient:
         model: Optional[str] = None,
         response_format: Optional[Union[str, Dict[str, Any]]] = None,
         timeout: int = 120,
+        think: Optional[bool] = None,
+        options: Optional[Dict[str, Any]] = None,
     ):
         """
         Отправляет список сообщений в Ollama /api/chat.
-        Поддерживает переопределение модели (например, vision-модели) и формата ответа.
+        Поддерживает переопределение модели (например, vision-модели), режима think и формата ответа.
         """
         payload: Dict[str, Any] = {
             "model": model or self.model,
@@ -115,6 +117,10 @@ class OllamaClient:
             payload["tools"] = tools
         if response_format is not None:
             payload["format"] = response_format
+        if think is not None:
+            payload["think"] = bool(think)
+        if options:
+            payload["options"] = dict(options)
 
         response = requests.post(
             OLLAMA_URL,
@@ -129,6 +135,23 @@ class OllamaClient:
         answer = message.get("content", "")
         tool_calls = message.get("tool_calls") or []
 
+        # Ollama (особенно qwen3-vl при think=False + format="json") может вернуть
+        # полезный структурированный ответ в message["thinking"], оставив content пустым.
+        thinking_text = message.get("thinking")
+        if (
+            not str(answer or "").strip()
+            and not tool_calls
+            and isinstance(thinking_text, str)
+            and thinking_text.strip()
+        ):
+            stripped_think = thinking_text.strip()
+            if (
+                response_format is not None
+                or think is False
+                or stripped_think.startswith("{")
+            ):
+                answer = stripped_think
+
         return {
             "content": answer,
             "tool_calls": tool_calls,
@@ -142,6 +165,8 @@ class OllamaClient:
         model: Optional[str] = None,
         response_format: Optional[Union[str, Dict[str, Any]]] = None,
         timeout: int = 120,
+        think: Optional[bool] = False,
+        options: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
         Отправляет одиночный мультимодальный запрос к локальной Vision-модели Ollama.
@@ -165,6 +190,8 @@ class OllamaClient:
             model=eff_model,
             response_format=response_format,
             timeout=timeout,
+            think=think,
+            options=options,
         )
 
     def send_tool_step(self, turn_messages, tools=None):

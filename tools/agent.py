@@ -27,6 +27,30 @@ from tools.agents import AgentContext, AgentResult, get_agent_registry
 
 _DEFAULT_BRIDGE = object()
 
+_IMAGE_TOOL_NAMES = (
+    "generate_image",
+    "edit_image",
+    "inspect_image",
+    "get_active_image",
+    "select_image",
+)
+
+_IMAGE_QUERY_HARD_RE = re.compile(
+    r"(?:\b(?:картинк\w*|изображен\w*|рисун\w*|фото\w*|сним\w*|иллюстрац\w*|кадр\w*|сцен\w*|портрет\w*|пейзаж\w*|натюрморт\w*|png|sdxl|controlnet|inpaint\w*|bbox|зрен\w*)\b"
+    r"|\b(?:нарису\w*|сгенерир\w*|отредактир\w*|перерису\w*|изуч\w*\s+глазами|через\s+зрен\w*|с\s+помощью\s+зрен\w*)\b)",
+    re.IGNORECASE,
+)
+
+_IMAGE_QUERY_SOFT_RE = re.compile(
+    r"\b(?:увидет\w*|видн\w*|выгляд\w*|перекрас\w*|убер\w*|дорису\w*|прирису\w*|преврат\w*|осветл\w*|затемн\w*|фон\w*|освещен\w*)\b",
+    re.IGNORECASE,
+)
+
+_NON_IMAGE_GUARD_RE = re.compile(
+    r"\b(?:код\w*|файл\w*|проект\w*|git\w*|коммит\w*|терминал\w*|команд\w*|скрипт\w*|тест\w*|python|задач\w*|заметк\w*|напоминан\w*|спис\w*|памят\w*|брифинг\w*|систем\w*|директор\w*|папк\w*)\b",
+    re.IGNORECASE,
+)
+
 class Agent:
     """
     Главный интеллектуальный агент Акакия.
@@ -201,6 +225,28 @@ class Agent:
             if "id" in normalized_arguments and "reminder_id" not in normalized_arguments:
                 normalized_arguments["reminder_id"] = normalized_arguments.pop("id")
 
+        if tool_name == "generate_image":
+            if "prompt" not in normalized_arguments:
+                for alias in ("scene_description", "description", "image_prompt", "caption", "text"):
+                    if alias in normalized_arguments:
+                        normalized_arguments["prompt"] = normalized_arguments.pop(alias)
+                        break
+
+        if tool_name == "edit_image":
+            if "instruction" not in normalized_arguments and "prompt" in normalized_arguments:
+                normalized_arguments["instruction"] = normalized_arguments.pop("prompt")
+            if "target_image_path" not in normalized_arguments and "image_path" in normalized_arguments:
+                normalized_arguments["target_image_path"] = normalized_arguments.pop("image_path")
+
+        if tool_name == "inspect_image":
+            if "question" not in normalized_arguments:
+                for alias in ("prompt", "query", "task"):
+                    if alias in normalized_arguments:
+                        normalized_arguments["question"] = normalized_arguments.pop(alias)
+                        break
+            if "image_path" not in normalized_arguments and "target_image_path" in normalized_arguments:
+                normalized_arguments["image_path"] = normalized_arguments.pop("target_image_path")
+
         # =================================================
         # Получаем реальную сигнатуру инструмента
         # =================================================
@@ -220,12 +266,14 @@ class Agent:
         ]
 
         if unknown_arguments:
+            allowed_params = ", ".join(parameters.keys())
             return {
                 "success": False,
                 "error": (
                     f"Инструмент '{tool_name}' "
                     f"не принимает следующие аргументы: "
-                    f"{', '.join(unknown_arguments)}."
+                    f"{', '.join(unknown_arguments)}. "
+                    f"Допустимые аргументы: {allowed_params}."
                 )
             }
 
@@ -467,6 +515,35 @@ class Agent:
         self._last_result = execution_result
 
         return execution_result
+
+    @staticmethod
+    def _is_image_tool_query(user_input: str, last_img=None) -> bool:
+        text = str(user_input or "").strip()
+        if not text:
+            return False
+        if _IMAGE_QUERY_HARD_RE.search(text):
+            return True
+        if _NON_IMAGE_GUARD_RE.search(text):
+            return False
+        if _IMAGE_QUERY_SOFT_RE.search(text):
+            if last_img is not None:
+                return True
+            if re.search(r"\bхоч\w*\s+увидет\w*\b", text, re.IGNORECASE):
+                return True
+        return False
+
+    @staticmethod
+    def _is_schema_validation_error(result) -> bool:
+        if not isinstance(result, dict) or result.get("success", True):
+            return False
+        err = str(result.get("error") or "")
+        return (
+            err.startswith("Не указано имя инструмента.")
+            or err.startswith("Инструмент не найден:")
+            or err.startswith("Аргументы инструмента должны быть объектом JSON.")
+            or "не принимает следующие аргументы:" in err
+            or "не хватает обязательных аргументов:" in err
+        )
 
     def process(self, user_input):
         """
@@ -1084,6 +1161,17 @@ class Agent:
         if active_skill and getattr(active_skill, "enabled", True):
             tools_for_llm = active_skill.get_tools_schema()
             extra_instruction = active_skill.system_prompt
+        elif self._is_image_tool_query(user_input, last_img):
+            tools_for_llm = get_tools_schema(_IMAGE_TOOL_NAMES)
+            if hasattr(self.context_manager, "format_image_tool_instruction"):
+                extra_instruction = self.context_manager.format_image_tool_instruction(last_img) or None
+            else:
+                img_instruction = (
+                    self.context_manager.format_image_context_instruction(last_img)
+                    if hasattr(self.context_manager, "format_image_context_instruction")
+                    else ""
+                )
+                extra_instruction = img_instruction or None
         else:
             tools_for_llm = get_tools_schema()
             img_instruction = (
@@ -1099,7 +1187,9 @@ class Agent:
 
         MAX_TOOL_ROUNDS = 5
         MAX_CORRECTION_ATTEMPTS = 1
+        MAX_SCHEMA_RETRIES = 1
         correction_attempts = 0
+        schema_retries = 0
         has_validation_errors = False
         collected_files = []
         collected_artifacts = []
@@ -1213,17 +1303,21 @@ class Agent:
 
                 # Запрет write_file как корректирующей операции
                 if has_validation_errors and tool_name == "write_file":
+                    wf_err = (
+                        "Инструмент 'write_file' не разрешён для "
+                        "автоматического исправления ошибок валидации. "
+                        "Исправление должно быть точечным через 'edit_file'."
+                    )
                     resp = {
                         "type": "tool",
                         "tool": tool_name,
                         "result": {
                             "success": False,
-                            "error": (
-                                "Инструмент 'write_file' не разрешён для "
-                                "автоматического исправления ошибок валидации. "
-                                "Исправление должно быть точечным через 'edit_file'."
-                            )
-                        }
+                            "error": wf_err,
+                        },
+                        "success": False,
+                        "error": wf_err,
+                        "answer": wf_err,
                     }
                     self._record_interaction(user_input, resp, tool_name=tool_name, is_native_chat=False)
                     return resp
@@ -1240,25 +1334,32 @@ class Agent:
                     self._sync_memory_to_system_prompt()
 
                 # Если выполнение инструмента вернуло ошибку или отменено пользователем:
-                # 1. Немедленно прерываем цепочку
-                # 2. Не отправляем повторные запросы в Ollama
-                # 3. Не фиксируем незавершённый ход в истории сообщений
-                # 4. Возвращаем результат ошибки/отмены пользователю
+                # Допускается не более 1 мягкого возврата ошибки схемы аргументов в модель (role: tool);
+                # все прочие ошибки, отмены пользователя и блокировки безопасности немедленно прерывают цепочку.
                 if isinstance(result, dict) and not result.get("success", True):
-                    # Если до этой отмены/ошибки в текущем раунде уже были применены реальные мутации файлов,
-                    # запускаем валидацию только по фактически выполненным изменениям
-                    if mutations_in_round:
-                        self.execute_tool(
-                            "validate_project",
-                            {}
+                    if self._is_schema_validation_error(result) and schema_retries < MAX_SCHEMA_RETRIES:
+                        schema_retries += 1
+                    else:
+                        if mutations_in_round:
+                            self.execute_tool(
+                                "validate_project",
+                                {}
+                            )
+                        err_msg = str(
+                            result.get("error")
+                            or result.get("message")
+                            or "Ошибка выполнения инструмента."
                         )
-                    resp = {
-                        "type": "tool",
-                        "tool": tool_name,
-                        "result": result
-                    }
-                    self._record_interaction(user_input, resp, tool_name=tool_name, is_native_chat=False)
-                    return resp
+                        resp = {
+                            "type": "tool",
+                            "tool": tool_name,
+                            "result": result,
+                            "success": False,
+                            "error": err_msg,
+                            "answer": result.get("answer") or err_msg,
+                        }
+                        self._record_interaction(user_input, resp, tool_name=tool_name, is_native_chat=False)
+                        return resp
 
                 if isinstance(result, dict):
                     inner_res = result.get("result") if isinstance(result.get("result"), dict) else result

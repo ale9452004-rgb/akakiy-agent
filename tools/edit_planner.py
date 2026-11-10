@@ -147,12 +147,34 @@ class EditPlanner:
                 action_text = text_lower[:m_keep.start()].strip()
                 what_to_change = action_text
 
-        # 0. Конструкции замены: "замени/поменяй <исходное> на <желаемое>"
+        # 0. Конструкции замены: "замени/замена/поменяй <исходное> на <желаемое>", "преврати <объект> в <желаемое>" и англ. "replace <X> with <Y>"
         m_rep = re.search(
-            r"\b(?:замени|поменяй|смени)\s+(?:мне\s+)?(.+?)\s+на\s+(.+)$",
+            r"\b(?:замен[аиеу]?|поменяй|смени)\s+(?:мне\s+)?(.+?)\s+на\s+(.+)$",
+            action_text,
+            re.IGNORECASE
+        ) or re.search(
+            r"\b(?:replace|swap|exchange)\s+(?:the\s+|a\s+|an\s+)?(.+?)\s+(?:with|for|into|to)\s+(.+)$",
             action_text,
             re.IGNORECASE
         )
+        if not m_rep:
+            m_conv = re.search(
+                r"\bпреврат\w*\s+(?:мне\s+)?(.+?)\s+в[о]?\s+(.+)$",
+                action_text,
+                re.IGNORECASE
+            ) or re.search(
+                r"\b(?:turn|transform|convert|change)\s+(?:the\s+|a\s+|an\s+)?(.+?)\s+(?:into|to)\s+(.+)$",
+                action_text,
+                re.IGNORECASE
+            )
+            if m_conv:
+                c_from = m_conv.group(1).strip().lower()
+                c_to = m_conv.group(2).strip().lower()
+                if (
+                    c_from not in {"это", "it", "this", "scene", "image", "все", "всё", "картинку", "изображение", "сцену", "фото"}
+                    and not re.match(r"^(?:что-то|нечто|something)\b", c_to, re.IGNORECASE)
+                ):
+                    m_rep = m_conv
         if m_rep:
             from_part = m_rep.group(1).strip()
             to_part = m_rep.group(2).strip()
@@ -216,38 +238,57 @@ class EditPlanner:
                 what_to_keep = "окружение и остальные элементы сцены"
 
                 # Анализ исходного (удаляемого) состояния -> в negative_prompt_additions
-                if re.search(r"\bдеревянн\w*\b", from_part):
+                if re.search(r"\bдеревянн\w*\b|\bwood(?:en)?\b", from_part):
                     neg_additions.extend(["wooden", "wood material", "wooden texture"])
-                elif re.search(r"\bстеклянн\w*\b", from_part):
+                elif re.search(r"\bстеклянн\w*\b|\bglass\b", from_part):
                     neg_additions.extend(["glass", "glass material"])
-                elif re.search(r"\bметаллическ\w*\b", from_part):
+                elif re.search(r"\bметаллическ\w*\b|\bmetal(?:lic)?\b", from_part):
                     neg_additions.extend(["metallic", "metal"])
-                elif re.search(r"\bсин\w*\b", from_part):
-                    neg_additions.extend(["blue"])
-                elif re.search(r"\bкрасн\w*\b", from_part):
-                    neg_additions.extend(["red"])
-                elif re.search(r"\bрыж\w*|оранжев\w*\b", from_part):
+                elif re.search(r"\b(?:фарфор\w*|керамич\w*|ceramic|porcelain)\b", from_part):
+                    neg_additions.extend(["porcelain", "ceramic"])
+                if re.search(r"\bбел\w*\b|\bwhite\b", from_part):
+                    neg_additions.append("white")
+                elif re.search(r"\bч[её]рн\w*\b|\bblack\b", from_part):
+                    neg_additions.append("black")
+                elif re.search(r"\bсин\w*\b|\bblue\b", from_part):
+                    neg_additions.append("blue")
+                elif re.search(r"\bкрасн\w*\b|\bred\b", from_part):
+                    neg_additions.append("red")
+                elif re.search(r"\bрыж\w*|оранжев\w*\b|\b(?:ginger|orange)\b", from_part):
                     neg_additions.extend(["ginger", "orange"])
 
-                # Анализ целевого (желаемого) состояния -> в positive_prompt_additions
-                if re.search(r"\bстеклянн\w*\b", to_part):
-                    pos_additions.extend(["glass material", "transparent glass finish"])
-                elif re.search(r"\bдеревянн\w*\b", to_part):
-                    pos_additions.extend(["wooden texture", "polished wood"])
-                elif re.search(r"\bметаллическ\w*\b", to_part):
-                    pos_additions.extend(["metallic surface", "chrome finish"])
-                elif re.search(r"\bсин\w*\b", to_part):
-                    pos_additions.extend(["deep blue"])
-                elif re.search(r"\bкрасн\w*\b", to_part):
-                    pos_additions.extend(["vivid red"])
-                elif re.search(r"\bрыж\w*|оранжев\w*\b", to_part):
-                    pos_additions.extend(["vibrant ginger", "rich orange"])
-                elif re.search(r"\bсобак\w*\b", to_part):
-                    pos_additions.extend(["dog", "canine"])
-                elif re.search(r"\bкот\w*\b", to_part):
-                    pos_additions.extend(["cat", "feline"])
+                if re.search(r"\b(?:кружк\w*|чашк\w*|mug|cup)\b", from_part):
+                    neg_additions.extend(["mug", "ceramic cup"])
+                elif re.search(r"\bбутыл\w*\b|\bbottle\b", from_part):
+                    neg_additions.extend(["bottle", "glass bottle"])
 
-                for w in ("стол", "стул", "диван", "кот", "собака", "машина", "окно", "дверь", "дом", "забор"):
+                # Анализ целевого (желаемого) состояния -> в positive_prompt_additions
+                if re.search(r"\bстеклянн\w*\b|\bglass\b", to_part):
+                    pos_additions.extend(["glass material", "transparent glass finish"])
+                elif re.search(r"\bдеревянн\w*\b|\bwood(?:en)?\b", to_part):
+                    pos_additions.extend(["wooden texture", "polished wood"])
+                elif re.search(r"\bметаллическ\w*\b|\bmetal(?:lic)?\b", to_part):
+                    pos_additions.extend(["metallic surface", "chrome finish"])
+                if re.search(r"\bбел\w*\b|\bwhite\b", to_part):
+                    pos_additions.append("pure white")
+                elif re.search(r"\bч[её]рн\w*\b|\bblack\b", to_part):
+                    pos_additions.append("jet black")
+                elif re.search(r"\bсин\w*\b|\bblue\b", to_part):
+                    pos_additions.append("deep blue")
+                elif re.search(r"\bкрасн\w*\b|\bred\b", to_part):
+                    pos_additions.append("vivid red")
+                elif re.search(r"\bрыж\w*|оранжев\w*\b|\b(?:ginger|orange)\b", to_part):
+                    pos_additions.extend(["vibrant ginger", "rich orange"])
+                if re.search(r"\bсобак\w*\b|\bdog\b", to_part):
+                    pos_additions.extend(["dog", "canine"])
+                elif re.search(r"\bкот\w*\b|\bcat\b", to_part):
+                    pos_additions.extend(["cat", "feline"])
+                elif re.search(r"\bбутыл\w*\b|\bbottle\b", to_part):
+                    pos_additions.extend(["glass bottle", "bottle"])
+                elif re.search(r"\b(?:кружк\w*|чашк\w*|mug|cup)\b", to_part):
+                    pos_additions.extend(["mug", "cup"])
+
+                for w in ("стол", "стул", "диван", "кот", "собака", "машина", "окно", "дверь", "дом", "забор", "cup", "mug", "bottle", "table", "chair", "cat", "dog", "car"):
                     if w in from_part or w in to_part:
                         target = w
                         break

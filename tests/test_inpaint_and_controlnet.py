@@ -21,6 +21,7 @@ from tools.agent import Agent
 from tools.agents.context import AgentContext
 from tools.agents.image import ImageAgent, generate_feathered_mask_png
 from tools.context import ContextManager
+from tools.edit_planner import EditPlanner
 from tools.image_tools import edit_image, reset_fallback_image_context
 from tools.memory import MemoryManager
 from tools.registry import TOOL_PARAMETERS, TOOLS
@@ -433,6 +434,275 @@ class TestEndToEndVisionInspectToInpaintToolCalling(unittest.TestCase):
         self.assertEqual(wf["9"]["class_type"], "LoadImageMask")
         self.assertEqual(wf["10"]["class_type"], "SetLatentNoiseMask")
         self.assertIn("second cat", wf["3"]["inputs"]["text"].lower())
+
+
+class TestImageOrchestrationScopingAndPlanner(unittest.TestCase):
+    """Регрессионные тесты scoping'а 5 image-инструментов, алиасов/retry и EditPlanner 'преврати ... в ...'."""
+
+    def setUp(self):
+        reset_fallback_image_context()
+        self.tmp_dir = tempfile.TemporaryDirectory()
+        self.tmp_path = Path(self.tmp_dir.name)
+        self.src_img = Path(_make_png(self.tmp_path / "mug_scene.png", size=(256, 256)))
+
+    def tearDown(self):
+        reset_fallback_image_context()
+        self.tmp_dir.cleanup()
+
+    def test_image_query_scopes_tools_without_affecting_system_queries(self):
+        mock_ai = MagicMock()
+        mock_ai.send_chat.side_effect = [
+            {"content": "Ок", "tool_calls": []},
+            {"content": "Ок", "tool_calls": []},
+        ]
+        mem = MemoryManager(storage_path=self.tmp_path / "mem.json")
+        ctx = ContextManager(memory_manager=mem)
+        agent = Agent(
+            memory_manager=mem,
+            context_manager=ctx,
+            ai_client=mock_ai,
+            bridge=None,
+            image_context_path=self.tmp_path / "img_ctx.json",
+        )
+
+        agent.process("Хочется увидеть солнечный летний кадр: зелёная лужайка и стол")
+        img_call_kwargs = mock_ai.send_chat.call_args_list[0][1]
+        img_msgs = mock_ai.send_chat.call_args_list[0][0][0]
+        img_tool_names = {t["function"]["name"] for t in img_call_kwargs["tools"]}
+        self.assertEqual(
+            img_tool_names,
+            {"generate_image", "edit_image", "inspect_image", "get_active_image", "select_image"},
+        )
+        self.assertIn("ПРАВИЛА РАБОТЫ С ИЗОБРАЖЕНИЯМИ", img_msgs[0]["content"])
+
+        agent.process("Сделай что-нибудь полезное для системы")
+        sys_call_kwargs = mock_ai.send_chat.call_args_list[1][1]
+        sys_tool_names = {t["function"]["name"] for t in sys_call_kwargs["tools"]}
+        self.assertEqual(len(sys_tool_names), len(TOOLS))
+
+    def test_generate_image_synonym_alias_and_single_schema_retry(self):
+        mock_ai = MagicMock()
+        # Попытка 1: ошибочный лишний параметр background_color + алиас scene_description
+        # Попытка 2: модель исправляется и передаёт корректный prompt
+        # Попытка 3: финальный ответ
+        mock_ai.send_chat.side_effect = [
+            {
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "c_bad",
+                        "function": {
+                            "name": "generate_image",
+                            "arguments": {"scene_description": "sunny green meadow", "background_color": "#7CFC00"},
+                        },
+                    }
+                ],
+            },
+            {
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "c_good",
+                        "function": {
+                            "name": "generate_image",
+                            "arguments": {"scene_description": "sunny green meadow", "aspect_ratio": "landscape"},
+                        },
+                    }
+                ],
+            },
+            {"content": "Изображение сгенерировано.", "tool_calls": []},
+        ]
+        mem = MemoryManager(storage_path=self.tmp_path / "mem2.json")
+        ctx = ContextManager(memory_manager=mem)
+        agent = Agent(
+            memory_manager=mem,
+            context_manager=ctx,
+            ai_client=mock_ai,
+            bridge=None,
+            image_context_path=self.tmp_path / "img_ctx2.json",
+        )
+        img_agent = ImageAgent(output_dir=str(self.tmp_path / "out2"))
+        agent.agent_registry.register(img_agent)
+
+        with patch.object(img_agent.client, "is_available", return_value=True), \
+             patch.object(img_agent.client, "queue_prompt", return_value={"prompt_id": "alias_1"}), \
+             patch.object(img_agent.client, "get_history", return_value={
+                 "status": {"completed": True},
+                 "outputs": {"7": {"images": [{"filename": "g.png", "subfolder": "", "type": "output"}]}},
+             }), \
+             patch.object(img_agent.client, "view_image", return_value=b"\x89PNG\r\n\x1a\nmock_g"), \
+             patch.object(img_agent.vram_manager, "prepare_for_image_generation", return_value={"success": True}), \
+             patch.object(img_agent.vram_manager, "restore_after_image_generation", return_value={"success": True}):
+            resp = agent.process("Хочется увидеть солнечный летний кадр на лужайке")
+
+        self.assertEqual(resp["type"], "chat")
+        self.assertEqual(len(resp.get("created_files", [])), 1)
+        # Первый раунд вернул в модель role: tool с подсказкой допустимых аргументов
+        second_msgs = mock_ai.send_chat.call_args_list[1][0][0]
+        self.assertEqual(second_msgs[-1]["role"], "tool")
+        self.assertIn("Допустимые аргументы", second_msgs[-1]["content"])
+
+        # Проверка жёсткого лимита MAX_SCHEMA_RETRIES = 1 при повторной ошибке схемы
+        mock_ai_fail = MagicMock()
+        mock_ai_fail.send_chat.side_effect = [
+            {
+                "content": "",
+                "tool_calls": [{"id": "b1", "function": {"name": "generate_image", "arguments": {"bad1": 1}}}],
+            },
+            {
+                "content": "",
+                "tool_calls": [{"id": "b2", "function": {"name": "generate_image", "arguments": {"bad2": 2}}}],
+            },
+        ]
+        agent_fail = Agent(
+            memory_manager=mem,
+            context_manager=ctx,
+            ai_client=mock_ai_fail,
+            bridge=None,
+            image_context_path=self.tmp_path / "img_ctx3.json",
+        )
+        fail_resp = agent_fail.process("Хочется увидеть кадр летней лужайки")
+        self.assertEqual(fail_resp["type"], "tool")
+        self.assertFalse(fail_resp["success"])
+        self.assertTrue(bool(fail_resp.get("answer")))
+        self.assertTrue(bool(fail_resp.get("error")))
+
+    def test_edit_planner_prevratit_replace_and_no_color_leak_under_mask(self):
+        planner = EditPlanner(ai_client=None)
+        plan = planner.plan(
+            "преврати белую кружку в синюю стеклянную бутылку, сохранив стол и лужайку",
+            base_prompt="white porcelain mug on wooden table, green lawn",
+            use_llm=False,
+        )
+        self.assertEqual(plan.action_type, "replace")
+        self.assertGreaterEqual(plan.denoise, 0.55)
+        neg_text = " ".join(plan.negative_prompt_additions).lower()
+        self.assertTrue("mug" in neg_text or "cup" in neg_text)
+        self.assertIn("white", neg_text)
+
+        mock_ai = MagicMock()
+        mock_ai.send_chat.side_effect = [
+            {
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "ed_1",
+                        "function": {
+                            "name": "edit_image",
+                            "arguments": {
+                                "instruction": "преврати кружку в синюю стеклянную бутылку",
+                                "edit_type": "replace",
+                                "positive_prompt": "translucent blue glass bottle on wooden table",
+                                "negative_prompt": "white porcelain mug, ceramic cup",
+                                "mask_bbox": [0.3, 0.3, 0.55, 0.65],
+                            },
+                        },
+                    }
+                ],
+            },
+            {"content": "Кружка заменена на бутылку.", "tool_calls": []},
+        ]
+        mem = MemoryManager(storage_path=self.tmp_path / "mem3.json")
+        ctx = ContextManager(memory_manager=mem)
+        agent = Agent(
+            memory_manager=mem,
+            context_manager=ctx,
+            ai_client=mock_ai,
+            bridge=None,
+            image_context_path=self.tmp_path / "img_ctx4.json",
+        )
+        img_agent = ImageAgent(output_dir=str(self.tmp_path / "out4"))
+        agent.agent_registry.register(img_agent)
+        agent.image_context.track_generation(
+            file_path=str(self.src_img),
+            prompt="white porcelain mug on wooden table, green lawn",
+        )
+
+        captured = []
+        with patch.object(img_agent.client, "is_available", return_value=True), \
+             patch.object(img_agent.client, "queue_prompt", side_effect=lambda wf: captured.append(wf) or {"prompt_id": "m1"}), \
+             patch.object(img_agent.client, "get_history", return_value={
+                 "status": {"completed": True},
+                 "outputs": {"8": {"images": [{"filename": "e.png", "subfolder": "", "type": "output"}]}},
+             }), \
+             patch.object(img_agent.client, "view_image", return_value=b"\x89PNG\r\n\x1a\nmock_bottle"), \
+             patch.object(img_agent.vram_manager, "prepare_for_image_generation", return_value={"success": True}), \
+             patch.object(img_agent.vram_manager, "restore_after_image_generation", return_value={"success": True}):
+            resp = agent.process("Определи с помощью зрения координаты кружки и преврати её в синюю стеклянную бутылку")
+
+        self.assertEqual(resp["type"], "chat")
+        self.assertEqual(len(captured), 1)
+        wf = captured[0]
+        wf_neg = wf["3"]["inputs"]["text"].lower()
+        self.assertNotIn("black fur", wf_neg)
+        self.assertNotIn("orange fur", wf_neg)
+        self.assertIn("mug", wf_neg)
+        self.assertIn("blue glass bottle", wf["2"]["inputs"]["text"].lower())
+        self.assertGreaterEqual(wf["6"]["inputs"]["denoise"], 0.78)
+
+    def test_english_replace_planner_and_general_edit_type_masked_defaults(self):
+        planner = EditPlanner(ai_client=None)
+        plan = planner.plan(
+            "replace the white porcelain cup with a translucent blue glass bottle",
+            base_prompt="white porcelain cup on wooden table, green lawn",
+            use_llm=False,
+        )
+        self.assertEqual(plan.action_type, "replace")
+        neg_text = " ".join(plan.negative_prompt_additions).lower()
+        pos_text = " ".join(plan.positive_prompt_additions).lower()
+        self.assertIn("white", neg_text)
+        self.assertTrue("mug" in neg_text or "cup" in neg_text)
+        self.assertIn("deep blue", pos_text)
+        self.assertIn("glass bottle", pos_text)
+
+        from tools.image_tools import bind_active_image_agent
+
+        mem = MemoryManager(storage_path=self.tmp_path / "mem4.json")
+        ctx = ContextManager(memory_manager=mem)
+        agent = Agent(
+            memory_manager=mem,
+            context_manager=ctx,
+            ai_client=MagicMock(),
+            bridge=None,
+            image_context_path=self.tmp_path / "img_ctx5.json",
+        )
+        img_agent = ImageAgent(output_dir=str(self.tmp_path / "out5"))
+        agent.agent_registry.register(img_agent)
+        agent.image_context.track_generation(
+            file_path=str(self.src_img),
+            prompt="white porcelain cup on wooden table, green lawn",
+        )
+
+        captured = []
+        with bind_active_image_agent(agent), \
+             patch.object(img_agent.client, "is_available", return_value=True), \
+             patch.object(img_agent.client, "queue_prompt", side_effect=lambda wf: captured.append(wf) or {"prompt_id": "m2"}), \
+             patch.object(img_agent.client, "get_history", return_value={
+                 "status": {"completed": True},
+                 "outputs": {"8": {"images": [{"filename": "e2.png", "subfolder": "", "type": "output"}]}},
+             }), \
+             patch.object(img_agent.client, "view_image", return_value=b"\x89PNG\r\n\x1a\nmock_bottle2"), \
+             patch.object(img_agent.vram_manager, "prepare_for_image_generation", return_value={"success": True}), \
+             patch.object(img_agent.vram_manager, "restore_after_image_generation", return_value={"success": True}):
+            res = edit_image(
+                instruction="replace white porcelain cup with blue glass bottle",
+                edit_type="general",
+                positive_prompt="translucent cobalt blue glass bottle resting on wooden saucer",
+                mask_bbox=[0.27, 0.35, 0.45, 0.72],
+            )
+
+        self.assertTrue(res["success"], res.get("error"))
+        self.assertEqual(res["edit_type"], "replace")
+        self.assertGreaterEqual(res["denoise"], 0.94)
+        self.assertEqual(len(captured), 1)
+        wf = captured[0]
+        self.assertEqual(wf["6"]["inputs"]["steps"], 6)
+        self.assertAlmostEqual(wf["6"]["inputs"]["cfg"], 2.4)
+        self.assertGreaterEqual(wf["6"]["inputs"]["denoise"], 0.94)
+        wf_neg = wf["3"]["inputs"]["text"].lower()
+        self.assertIn("mug", wf_neg)
+        self.assertNotIn("black fur", wf_neg)
+        self.assertNotIn("orange fur", wf_neg)
 
 
 if __name__ == "__main__":

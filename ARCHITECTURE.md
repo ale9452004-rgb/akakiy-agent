@@ -116,13 +116,13 @@
   * **Интеграция с MultiAgentBridge**: бесшовное перенаправление бытовых и исследовательских запросов в новую multi-agent подсистему с сохранением совместимого типа (`CompatibleType`), полей `result`, `artifacts`, `tool`, фиксацией в `ContextManager` и сохранением `_last_result`.
   * **Маршрутизация к Sub-Agent'ам**: прямое исполнение `route_type == "image"` и `route_type == "subagent"` через `run_subagent(name, task=...)` с изоляцией VRAM, фиксацией хода диалога в `ContextManager` и возвратом структурированного результата.
   * **Интеграция навыков**: выбор активного навыка через `SkillRegistry` для контекстной фильтрации инструментов.
-  * **Multi-turn loop**: до 5 раундов вызова инструментов Ollama Native Tool Calling за один ход.
+  * **Multi-turn loop**: до 5 раундов вызова инструментов Ollama Native Tool Calling за один ход; динамический скоупинг 5 image-инструментов на мультимодальных запросах и однократное самоисправление ошибок аргументов (`MAX_SCHEMA_RETRIES = 1`).
   * **Self-healing**: однократная попытка исправления синтаксиса через `edit_file` при возникновении ошибок валидации.
 * [tools/context.py](file:///c:/Akakiy%20agent/tools/context.py): Класс `ContextManager` — единый источник истины о диалоге.
   * Скользящее окно краткосрочной памяти (`max_turns=10`).
   * Защита от prompt injection (пользовательские данные передаются как справочный блок, а не часть системного промпта).
   * Контекстное извлечение релевантных фактов из долговременной памяти по ключевым словам.
-  * Динамическая инъекция контекста активного PNG в системный промпт раунда (`format_image_context_instruction()`).
+  * Динамическая инъекция контекста активного PNG и правил оркестрации инструментов изображений в системный промпт раунда (`format_image_context_instruction()`, `format_image_tool_instruction()`).
   * Потокобезопасность (`threading.RLock`).
 * [skills/registry.py](file:///c:/Akakiy%20agent/skills/registry.py): Реестр навыков (`SkillRegistry`). Управляет навыками `ProjectSkill`, `MemorySkill`, `HouseholdSkill`.
 * [tools/planner.py](file:///c:/Akakiy%20agent/tools/planner.py): Модуль планирования задач (Task Planner v2):

@@ -865,7 +865,7 @@ class ImageAgent(SubAgent):
         mask_bbox = context.get("mask_bbox")
         mask_path_raw = context.get("mask_path")
         mask_path = str(mask_path_raw).strip() if mask_path_raw else None
-        feather = context.get("feather", 16)
+        feather = context.get("feather", 12)
         raw_control_type = context.get("control_type")
         requested_control_type = str(raw_control_type).strip().lower() if raw_control_type else None
         control_strength = context.get("control_strength", 0.8)
@@ -1096,13 +1096,17 @@ class ImageAgent(SubAgent):
                 inpaint_checkpoint if (staged_mask_name and inpaint_checkpoint) else self.DEFAULT_CHECKPOINT
             )
             use_inpaint_cond = bool(staged_mask_name and ("inpaint" in checkpoint.lower()))
+            is_non_lightning_inpaint = (
+                "inpaint" in checkpoint.lower() and "lightning" not in checkpoint.lower()
+            )
+            is_masked_standard = bool(staged_mask_name and not is_non_lightning_inpaint)
             default_steps = (
-                20 if ("inpaint" in checkpoint.lower() and "lightning" not in checkpoint.lower())
-                else self.DEFAULT_STEPS
+                20 if is_non_lightning_inpaint
+                else (6 if is_masked_standard else self.DEFAULT_STEPS)
             )
             default_cfg = (
-                6.5 if ("inpaint" in checkpoint.lower() and "lightning" not in checkpoint.lower())
-                else self.DEFAULT_CFG
+                6.5 if is_non_lightning_inpaint
+                else (2.4 if is_masked_standard else self.DEFAULT_CFG)
             )
             steps = int(context.get("steps", default_steps))
             cfg = float(context.get("cfg", default_cfg))

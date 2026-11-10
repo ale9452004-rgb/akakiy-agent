@@ -230,7 +230,7 @@ def edit_image(
     denoise: Optional[float] = None,
     mask_bbox: Optional[List[float]] = None,
     mask_path: Optional[str] = None,
-    feather: int = 16,
+    feather: int = 12,
     control_type: Optional[str] = None,
     control_strength: Optional[float] = None,
 ) -> Dict[str, Any]:
@@ -277,24 +277,43 @@ def edit_image(
         use_llm=False,
     )
 
-    eff_edit_type = str(edit_type or plan.action_type or "general").strip().lower()
+    req_type = str(edit_type or "").strip().lower()
+    eff_edit_type = (
+        req_type
+        if req_type not in ("", "general", "auto")
+        else str(plan.action_type or req_type or "general").strip().lower()
+    )
+    has_mask_arg = bool((mask_path and str(mask_path).strip()) or mask_bbox is not None)
     if denoise is not None:
         try:
-            eff_denoise = max(0.15, min(0.90, float(denoise)))
+            max_denoise = 0.98 if has_mask_arg else 0.90
+            eff_denoise = max(0.15, min(max_denoise, float(denoise)))
         except (TypeError, ValueError):
             eff_denoise = plan.denoise
     else:
         eff_denoise = plan.denoise
 
     eff_positive = plan.compiled_prompt
+    has_custom_en_positive = False
     if positive_prompt and str(positive_prompt).strip():
         custom_pos = str(positive_prompt).strip()
         if not _CYRILLIC_RE.search(custom_pos):
             eff_positive = custom_pos
+            has_custom_en_positive = True
         else:
             eff_positive = f"{custom_pos}, {plan.compiled_prompt}".strip(" ,")
 
-    eff_negative = _merge_negative_prompts(negative_prompt, plan.compiled_negative)
+    plan_neg_adds = ", ".join(getattr(plan, "negative_prompt_additions", []) or [])
+    if has_custom_en_positive and has_mask_arg:
+        if negative_prompt and str(negative_prompt).strip():
+            if eff_edit_type == "replace" and plan_neg_adds:
+                eff_negative = _merge_negative_prompts(negative_prompt, plan_neg_adds, BASE_NEGATIVE_PROMPT)
+            else:
+                eff_negative = _merge_negative_prompts(negative_prompt, BASE_NEGATIVE_PROMPT)
+        else:
+            eff_negative = _merge_negative_prompts(plan_neg_adds, BASE_NEGATIVE_PROMPT)
+    else:
+        eff_negative = _merge_negative_prompts(negative_prompt, plan.compiled_negative)
 
     clean_mask_path = str(mask_path).strip() if mask_path else None
     if clean_mask_path and not os.path.isfile(clean_mask_path):
@@ -323,10 +342,11 @@ def edit_image(
     try:
         eff_feather = max(0, min(128, int(feather)))
     except (TypeError, ValueError):
-        eff_feather = 16
+        eff_feather = 12
 
-    if denoise is None and (clean_mask_path or norm_bbox is not None) and eff_edit_type in ("remove", "add", "replace"):
-        eff_denoise = max(eff_denoise, 0.78)
+    if denoise is None and (clean_mask_path or norm_bbox is not None) and eff_edit_type in ("remove", "add", "replace", "general"):
+        min_masked_denoise = 0.94 if eff_edit_type in ("replace", "remove") else 0.90
+        eff_denoise = max(eff_denoise, min_masked_denoise)
 
     subagent_kwargs: Dict[str, Any] = {
         "action": "edit",
@@ -496,9 +516,11 @@ def _normalize_bbox(
     raw_bbox: Any,
     img_width: Optional[int] = None,
     img_height: Optional[int] = None,
+    prefer_scale_1000: bool = False,
 ) -> Optional[List[float]]:
     """
     Валидирует и нормализует bounding box в [x1, y1, x2, y2] (0.0 .. 1.0).
+    Поддерживает шкалу 0..1, смешанный/полный формат 0..1000 (Qwen3-VL) и пиксельные координаты.
     """
     if not isinstance(raw_bbox, (list, tuple)) or len(raw_bbox) != 4:
         return None
@@ -511,10 +533,21 @@ def _normalize_bbox(
 
     x1, y1, x2, y2 = vals
     max_v = max(abs(x1), abs(y1), abs(x2), abs(y2))
-    # Значения до ~1.5 считаем лёгким выходом за [0..1] и просто зажимаем,
-    # а > 1.5 пересчитываем из пикселей или шкалы 0..1000.
+    # Значения до ~1.5 считаем лёгким выходом за [0..1] и просто зажимаем;
+    # при > 1.5 различаем смешанную шкалу (0..1 + 0..1000), сетку 0..1000 и пиксели.
     if max_v > 1.5:
-        if img_width and img_height and img_width > 0 and img_height > 0:
+        has_unit_float = any(0.0 < abs(v) <= 1.0 for v in (x1, y1, x2, y2))
+        if has_unit_float and max_v <= 1000.0:
+            x1 = x1 if abs(x1) <= 1.5 else x1 / 1000.0
+            y1 = y1 if abs(y1) <= 1.5 else y1 / 1000.0
+            x2 = x2 if abs(x2) <= 1.5 else x2 / 1000.0
+            y2 = y2 if abs(y2) <= 1.5 else y2 / 1000.0
+        elif prefer_scale_1000 and max_v <= 1000.0:
+            x1 /= 1000.0
+            y1 /= 1000.0
+            x2 /= 1000.0
+            y2 /= 1000.0
+        elif img_width and img_height and img_width > 0 and img_height > 0:
             x1 /= float(img_width)
             x2 /= float(img_width)
             y1 /= float(img_height)
@@ -636,23 +669,50 @@ def inspect_image(
     try:
         if return_bbox:
             vision_prompt = (
-                "Analyze this image carefully and answer the question strictly based on what is visible.\n"
-                "Return ONLY a JSON object matching this schema:\n"
+                "Analyze this image carefully and answer strictly based on what is actually visible.\n"
+                "Return ONLY a JSON object with this schema:\n"
                 "{\n"
                 '  "answer": "concise factual answer in Russian",\n'
-                '  "objects": [{"label": "object name", "bbox": [x1, y1, x2, y2]}],\n'
-                '  "mask_bbox": [x1, y1, x2, y2]\n'
+                '  "mask_bbox": [x1, y1, x2, y2],\n'
+                '  "objects": [{"label": "object name", "bbox": [x1, y1, x2, y2]}]\n'
                 "}\n"
-                "Rules: coordinates in bbox and mask_bbox MUST be normalized floats in [0.0, 1.0] "
-                "(left, top, right, bottom). If no specific region needs editing or the object is absent, "
-                'set "mask_bbox": null.\n\n'
+                "Rules: use integer grid coordinates [0, 1000] for [left, top, right, bottom] "
+                "(0 is left/top edge, 1000 is right/bottom edge) OR floats in [0.0, 1.0]; "
+                "include at most 5 key objects in 'objects'; set 'mask_bbox': null if no target region applies.\n\n"
                 f"Question: {clean_q}"
             )
+            bbox_schema = {
+                "type": "object",
+                "properties": {
+                    "answer": {"type": "string"},
+                    "mask_bbox": {
+                        "type": ["array", "null"],
+                        "items": {"type": "number"},
+                    },
+                    "objects": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "label": {"type": "string"},
+                                "bbox": {
+                                    "type": "array",
+                                    "items": {"type": "number"},
+                                },
+                            },
+                            "required": ["label", "bbox"],
+                        },
+                    },
+                },
+                "required": ["answer", "mask_bbox"],
+            }
             res = client.send_vision_query(
                 prompt=vision_prompt,
                 images=target_path,
                 model=vision_model,
-                response_format="json",
+                response_format=bbox_schema,
+                think=False,
+                options={"num_predict": 512, "temperature": 0.1},
             )
             raw_content = str(res.get("content", "")).strip()
             parsed = _parse_vision_json(raw_content)
@@ -664,13 +724,29 @@ def inspect_image(
             if parsed:
                 if isinstance(parsed.get("answer"), str) and parsed["answer"].strip():
                     answer_text = parsed["answer"].strip()
-                mask_bbox = _normalize_bbox(parsed.get("mask_bbox"), img_width, img_height)
+                raw_mask = parsed.get("mask_bbox")
+                if raw_mask is None:
+                    raw_mask = parsed.get("mask_bbox_1000")
+                mask_bbox = _normalize_bbox(
+                    raw_mask,
+                    img_width,
+                    img_height,
+                    prefer_scale_1000=True,
+                )
                 raw_objs = parsed.get("objects")
                 if isinstance(raw_objs, list):
                     for obj in raw_objs:
                         if not isinstance(obj, dict):
                             continue
-                        norm_obj_bbox = _normalize_bbox(obj.get("bbox"), img_width, img_height)
+                        raw_obj_bbox = obj.get("bbox")
+                        if raw_obj_bbox is None:
+                            raw_obj_bbox = obj.get("bbox_1000")
+                        norm_obj_bbox = _normalize_bbox(
+                            raw_obj_bbox,
+                            img_width,
+                            img_height,
+                            prefer_scale_1000=True,
+                        )
                         if norm_obj_bbox is not None:
                             objects_clean.append({
                                 "label": str(obj.get("label") or "object"),
@@ -692,16 +768,32 @@ def inspect_image(
             }
         else:
             vision_prompt = (
-                "Внимательно рассмотри изображение и ответь точно только по тому, что реально видно на картинке "
-                "(учитывай количество объектов, цвета, позы, фон и возможные дефекты).\n\n"
+                "Внимательно рассмотри изображение и ответь кратко и точно по-русски "
+                "только по тому, что реально видно на картинке (предметы, цвета, количество, позы, фон и дефекты). "
+                'Верни JSON формата {"answer": "..."}.\n\n'
                 f"Вопрос: {clean_q}"
             )
+            qa_schema = {
+                "type": "object",
+                "properties": {
+                    "answer": {"type": "string"},
+                },
+                "required": ["answer"],
+            }
             res = client.send_vision_query(
                 prompt=vision_prompt,
                 images=target_path,
                 model=vision_model,
+                response_format=qa_schema,
+                think=False,
+                options={"num_predict": 512, "temperature": 0.1},
             )
-            answer_text = str(res.get("content", "")).strip()
+            raw_content = str(res.get("content", "")).strip()
+            parsed = _parse_vision_json(raw_content)
+            if parsed and isinstance(parsed.get("answer"), str) and parsed["answer"].strip():
+                answer_text = parsed["answer"].strip()
+            else:
+                answer_text = raw_content
             if not answer_text:
                 return {
                     "success": False,

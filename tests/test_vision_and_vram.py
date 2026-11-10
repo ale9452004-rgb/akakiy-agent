@@ -113,6 +113,29 @@ class TestAppSettingsAndOllamaVisionSupport(unittest.TestCase):
         with self.assertRaises(FileNotFoundError):
             encode_images_base64(self.tmp_path / "missing.png")
 
+    @patch("ollama_client.requests.post")
+    def test_ollama_client_thinking_fallback_and_think_false(self, mock_post):
+        mock_post.return_value = MagicMock(
+            status_code=200,
+            json=lambda: {
+                "message": {
+                    "content": "",
+                    "thinking": '{"answer": "Белая кружка на столе", "mask_bbox": [395, 300, 608, 582]}',
+                }
+            },
+        )
+        client = OllamaClient()
+        res = client.send_vision_query(
+            prompt="Где кружка?",
+            images=self.img_path,
+            response_format={"type": "object"},
+            options={"num_predict": 512, "temperature": 0.1},
+        )
+        self.assertIn("Белая кружка", res["content"])
+        called_payload = mock_post.call_args[1]["json"]
+        self.assertIs(called_payload["think"], False)
+        self.assertEqual(called_payload["options"]["num_predict"], 512)
+
     @patch("infrastructure.ollama_manager.requests.get")
     def test_ollama_manager_vision_model_check(self, mock_get):
         mgr = OllamaManager()
@@ -225,6 +248,15 @@ class TestInspectImageToolAndSettingsView(unittest.TestCase):
         )
         # Вырожденная коробка отбрасывается
         self.assertIsNone(_normalize_bbox([0.5, 0.5, 0.501, 0.9]))
+        # Смешанная (0..1 + 0..1000) и полная 0..1000 сетка Qwen3-VL
+        self.assertEqual(
+            _normalize_bbox([0.397, 300, 606, 578], img_width=1216, img_height=832, prefer_scale_1000=True),
+            [0.397, 0.3, 0.606, 0.578],
+        )
+        self.assertEqual(
+            _normalize_bbox([395, 300, 608, 582], img_width=1216, img_height=832, prefer_scale_1000=True),
+            [0.395, 0.3, 0.608, 0.582],
+        )
 
     @patch("infrastructure.ollama_manager.get_ollama_manager")
     @patch("ollama_client.requests.post")
