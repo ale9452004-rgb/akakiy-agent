@@ -250,6 +250,54 @@ class AkakiyGUI:
     def destroy(self):
         self._on_window_close()
 
+    def _on_power_off_models(self):
+        """
+        Принудительно выгружает все активные модели из видеопамяти (VRAM)
+        и освобождает ресурсы ComfyUI и Ollama без закрытия самого приложения Акакий.
+        """
+        def _worker():
+            results = []
+            # 1. Выгрузка Ollama
+            if hasattr(self, "ollama_mgr") and self.ollama_mgr:
+                ok, msg = self.ollama_mgr.unload_models()
+                results.append(f"Ollama: {msg}")
+            else:
+                try:
+                    from infrastructure.ollama_manager import get_ollama_manager
+                    mgr = get_ollama_manager()
+                    ok, msg = mgr.unload_models()
+                    results.append(f"Ollama: {msg}")
+                except Exception as e:
+                    results.append(f"Ollama: {e}")
+
+            # 2. Выгрузка ComfyUI
+            if hasattr(self, "comfyui_mgr") and self.comfyui_mgr:
+                ok, msg = self.comfyui_mgr.unload_models()
+                results.append(f"ComfyUI: {msg}")
+            else:
+                try:
+                    from infrastructure.comfyui_manager import get_comfyui_manager
+                    mgr = get_comfyui_manager()
+                    ok, msg = mgr.unload_models()
+                    results.append(f"ComfyUI: {msg}")
+                except Exception as e:
+                    results.append(f"ComfyUI: {e}")
+
+            summary = " • ".join(results)
+            try:
+                self.queue.put(("power_off_done", summary))
+            except Exception:
+                pass
+
+        self._set_state("thinking")
+        self._append_log("SYS", "Выгрузка моделей и освобождение VRAM...")
+        if hasattr(self, "btn_power"):
+            self.btn_power.config(text="⏻ ВЫГРУЗКА...", state="disabled")
+        if hasattr(self, "btn_sidebar_power"):
+            self.btn_sidebar_power.config(text="⏻ Выгрузка...", state="disabled")
+
+        threading.Thread(target=_worker, name="PowerOffModelsThread", daemon=True).start()
+
     def _on_window_close(self):
         self._is_closing = True
         try:
@@ -433,6 +481,25 @@ class AkakiyGUI:
         )
         self.chip_voice.pack(side="left", padx=4)
 
+        # Кнопка быстрой выгрузки моделей и освобождения VRAM
+        self.btn_power = tk.Button(
+            chips_box,
+            text="⏻ ВЫКЛ МОДЕЛИ",
+            font=self.FONT_MONO,
+            fg=self.ACCENT_RED,
+            bg="#180b0e",
+            activeforeground="#ffffff",
+            activebackground="#7f1d1d",
+            padx=8, pady=2,
+            bd=0,
+            cursor="hand2",
+            highlightthickness=1,
+            highlightbackground="#4c1d24",
+            command=self._on_power_off_models
+        )
+        self.btn_power.pack(side="left", padx=6)
+        _bind_hover(self.btn_power, "#180b0e", "#371318", self.ACCENT_RED, "#ffffff")
+
         # Часы
         clock_box = tk.Frame(right_box, bg=self.BG_PANEL)
         clock_box.pack(side="right")
@@ -545,7 +612,24 @@ class AkakiyGUI:
             fg=self.FG_MUTED,
             bg=self.BG_CARD,
             justify="left"
-        ).pack(anchor="w", padx=10, pady=(0, 8))
+        ).pack(anchor="w", padx=10, pady=(0, 6))
+
+        self.btn_sidebar_power = tk.Button(
+            sidebar_footer,
+            text="⏻ Выключить модели",
+            font=self.FONT_CAPTION,
+            fg=self.ACCENT_RED,
+            bg="#180b0e",
+            activeforeground="#ffffff",
+            activebackground="#7f1d1d",
+            bd=0,
+            cursor="hand2",
+            padx=8, pady=4,
+            relief="flat",
+            command=self._on_power_off_models
+        )
+        self.btn_sidebar_power.pack(fill="x", padx=8, pady=(0, 8))
+        _bind_hover(self.btn_sidebar_power, "#180b0e", "#371318", self.ACCENT_RED, "#ffffff")
 
     # =========================================================================
     # 3. Command Bar (80px)
@@ -1586,6 +1670,16 @@ class AkakiyGUI:
                     else:
                         logger.warning(f"ComfyUI Worker: {text}")
                         self._append_log("ERR", f"ComfyUI Worker: {text}")
+
+                elif msg_type == "power_off_done":
+                    summary = str(data or "")
+                    self._set_state("idle")
+                    self._append_log("SYS", f"Модели выгружены: {summary}")
+                    self._append_chat("Акакий", "Все нейросетевые модели успешно выгружены из видеопамяти. VRAM освобождена.")
+                    if hasattr(self, "btn_power"):
+                        self.btn_power.config(text="⏻ ВЫКЛ МОДЕЛИ", state="normal")
+                    if hasattr(self, "btn_sidebar_power"):
+                        self.btn_sidebar_power.config(text="⏻ Выключить модели", state="normal")
 
         except queue.Empty:
             pass

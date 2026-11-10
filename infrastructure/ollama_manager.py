@@ -261,6 +261,28 @@ class OllamaManager:
         """
         return self.start_or_connect(require_model=require_model)
 
+    def unload_models(self) -> Tuple[bool, str]:
+        """
+        Принудительно выгружает все активные модели из видеопамяти (VRAM/RAM)
+        путём отправки запроса с keep_alive=0.
+        """
+        try:
+            if not self.is_running():
+                return True, "Сервер Ollama не запущен."
+            models_to_unload = [self.model_name, DEFAULT_VISION_MODEL]
+            unloaded = []
+            for m in models_to_unload:
+                try:
+                    url = f"{self.base_url}/api/generate"
+                    requests.post(url, json={"model": m, "keep_alive": 0}, timeout=2.0)
+                    unloaded.append(m)
+                except Exception:
+                    pass
+            return True, f"Модели {', '.join(unloaded)} выгружены из VRAM."
+        except Exception as e:
+            logger.warning(f"Ошибка при выгрузке моделей Ollama: {e}")
+            return False, str(e)
+
     def cleanup(self) -> None:
         """
         Останавливает процесс Ollama, ТОЛЬКО если он был запущен текущим экземпляром Акакия.

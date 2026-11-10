@@ -47,6 +47,7 @@ def show_help():
     print("  :export [файл]           - экспортировать данные в JSON")
     print("  :import <файл>           - импортировать данные из backup-файла")
     print("  :brief, :today, :сводка   - дневной брифинг (сводка на сегодня)")
+    print("  :off, :выкл, :poweroff   - выгрузить модели и освободить VRAM")
     print("  :help, :h, помощь        - показать эту справку")
     print("  :exit, :quit, выход      - завершить работу")
     print("\nРабота с планами:")
@@ -231,6 +232,19 @@ def handle_cli_command(user_input: str) -> bool:
         from tools.daily_briefing import get_daily_briefing
         res = get_daily_briefing()
         _safe_print(f"\n{res.get('text', '')}")
+        return True
+
+    # 8. Выгрузка моделей и освобождение VRAM
+    if cmd_lower in (":poweroff", ":unload", ":off", ":stop-models", ":выкл", ":стоп"):
+        _safe_print("\nОсвобождение VRAM и выгрузка моделей...")
+        from infrastructure.ollama_manager import get_ollama_manager
+        from infrastructure.comfyui_manager import get_comfyui_manager
+
+        res_ollama = get_ollama_manager().unload_models()
+        res_comfy = get_comfyui_manager().unload_models()
+        _safe_print(f"✓ Ollama: {res_ollama[1]}")
+        _safe_print(f"✓ ComfyUI: {res_comfy[1]}")
+        _safe_print("VRAM полностью освобождена.")
         return True
 
     return False

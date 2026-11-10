@@ -313,6 +313,22 @@ class ComfyUIManager:
         thread.start()
         return thread
 
+    def unload_models(self) -> Tuple[bool, str]:
+        """
+        Принудительно освобождает видеопамять ComfyUI Worker (/free API).
+        """
+        try:
+            if not self.is_running():
+                return True, "ComfyUI Worker не запущен."
+            url = f"{self.base_url}/free"
+            resp = requests.post(url, json={"unload_models": True, "free_memory": True}, timeout=3.0)
+            if resp.status_code == 200:
+                return True, "Модели ComfyUI выгружены, VRAM освобождена."
+            return False, f"ComfyUI вернул статус {resp.status_code}"
+        except Exception as e:
+            logger.warning(f"Ошибка при выгрузке моделей ComfyUI: {e}")
+            return False, str(e)
+
     def stop(self) -> None:
         """Синоним cleanup для удобства."""
         self.cleanup()
