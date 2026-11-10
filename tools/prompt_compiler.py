@@ -45,6 +45,7 @@ SUBJECT_CATALOG: List[Tuple[re.Pattern, str, str, str]] = [
     (re.compile(r"\b(?:человек\w*|люд\w*|person|people)\b", re.IGNORECASE), "person", "people", "human"),
     (re.compile(r"\b(?:девушк\w*|женщин\w*|woman|women|girl\w*)\b", re.IGNORECASE), "woman", "women", "human"),
     (re.compile(r"\b(?:парен\w*|мужчин\w*|man|men|boy\w*)\b", re.IGNORECASE), "man", "men", "human"),
+    (re.compile(r"\b(?:нив[аеуыо]|ваз[- ]?2121|2121|niva)\b", re.IGNORECASE), "VAZ-2121 Niva car", "VAZ-2121 Niva cars", "vehicle"),
     (re.compile(r"\b(?:машин\w*|автомоб\w*|спорткар\w*|авто\b|car\w*|vehicle\w*)\b", re.IGNORECASE), "car", "cars", "vehicle"),
     (re.compile(r"\b(?:самол[её]т\w*|вертол[её]т\w*|airplane|plane|helicopter)\b", re.IGNORECASE), "airplane", "airplanes", "vehicle"),
     (re.compile(r"\b(?:корабл\w*|лодк\w*|яхт\w*|катер\w*|ship\w*|boat\w*|yacht\w*)\b", re.IGNORECASE), "ship", "ships", "vehicle"),
@@ -173,6 +174,14 @@ ENVIRONMENT_CATALOG: List[Tuple[re.Pattern, List[str]]] = [
         ["sea in the background", "ocean waves", "blue water horizon"]
     ),
     (
+        re.compile(r"\b(?:шторм\w*|буря|штормов\w*|storm\w*|stormy)\b", re.IGNORECASE),
+        ["stormy weather", "dramatic stormy sea", "dark churning waves", "dramatic storm clouds"]
+    ),
+    (
+        re.compile(r"\b(?:берег\w*|побережь\w*|shore\w*|coast\w*)\b", re.IGNORECASE),
+        ["on the rugged coastal shore", "rocky seaside"]
+    ),
+    (
         re.compile(r"\b(?:солн\w*|солнечн\w*|sunny|bright sun)\b", re.IGNORECASE),
         ["sunny day", "bright natural sunlight", "clear summer sky"]
     ),
@@ -282,9 +291,10 @@ class PromptCompiler:
             combined_text,
             re.IGNORECASE
         )
-        # Проверяем явные указания на множественность
+        # Проверяем явные указания на множественность (исключая технические характеристики вроде 3-door, 4x4, 4-wheel)
         multi_markers = re.search(
-            r"\b(?:два|две|двое|двух|2|три|тр[её]х|3|четыр\w*|4|нескольк\w*|пар[ау]|two|three|multiple|group)\b",
+            r"\b(?:два|две|двое|двух|три|тр[её]х|четыр\w*|нескольк\w*|пар[ау]|two|three|multiple|group)\b|"
+            r"(?<![x\-\d])\b(?:2|3|4)\b(?![x\-\d])(?!\s*[-–]\s*(?:door|step|wheel|speed|seater|pass))",
             combined_text,
             re.IGNORECASE
         )
@@ -355,7 +365,8 @@ class PromptCompiler:
         # Строгое количество и субъект (если субъект определен)
         if detected_subject:
             if is_singular:
-                pos_parts.append(f"solo, single {detected_subject}, 1{detected_subject}")
+                tag_1 = f"1{detected_subject}" if " " not in detected_subject else f"1 {detected_subject}"
+                pos_parts.append(f"solo, single {detected_subject}, {tag_1}")
             else:
                 eff_count = count if (count and count > 1) else 2
                 pos_parts.append(f"{eff_count} {detected_subject_plural}")
@@ -408,6 +419,12 @@ class PromptCompiler:
                     "extra people",
                     "two people",
                     "multiple people",
+                ])
+            elif detected_category == "vehicle":
+                neg_parts.extend([
+                    "extra vehicles",
+                    "two cars",
+                    "multiple cars",
                 ])
 
         # Конфликтующие цвета (например, белая шерсть при запросе рыжего кота)

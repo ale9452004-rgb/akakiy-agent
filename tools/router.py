@@ -853,7 +853,9 @@ class CommandRouter:
         cleaned = strip_call_prefixes(raw)
 
         # Прямые директивы модификации/удаления относятся к редактированию (Scenario C)
-        if re.search(r"^(?:убери|удали|сотри|поменяй|измени|замени|перекрась)\b", cleaned, re.IGNORECASE):
+        if re.search(r"\b(?:отредактируй|поправь|скорректируй|доработай|модифицируй)\b", cleaned, re.IGNORECASE):
+            return None
+        if re.search(r"^(?:убери|удали|сотри|поменяй|измени|замени|перекрась|добавь|дорисуй|пририсуй|вставь|помести)\b", cleaned, re.IGNORECASE):
             return None
 
         has_gen_verb = bool(re.search(
@@ -998,6 +1000,12 @@ class CommandRouter:
         last_height = None
         last_aspect = None
 
+        if last_image is None:
+            if hasattr(self, "image_context") and self.image_context:
+                last_image = self.image_context
+            elif getattr(self, "last_image", None):
+                last_image = self.last_image
+
         if last_image is not None:
             if hasattr(last_image, "get_active_image_path"):
                 source_image_path = last_image.get_active_image_path(validate_disk=False)
@@ -1028,22 +1036,29 @@ class CommandRouter:
             re.IGNORECASE
         ))
 
-        # Б. Прямые глаголы редактирования изображения
+        # Б. Прямые глаголы и намерения редактирования изображения
         m_explicit_edit = bool(re.search(
-            r"\b(?:отредактируй|поправь|скорректируй|доработай|модифицируй)\s+(?:картинк\w*|изображен\w*|фото\w*|рисун\w*|кадр)\b",
+            r"\b(?:отредактируй|поправь|скорректируй|доработай|модифицируй)\b",
             cleaned,
             re.IGNORECASE
-        ))
+        )) and (has_img_noun or has_last_image)
 
-        # В. Глаголы модификации в начале фразы
+        # В. Указание на отсутствующий / недостающий объект
+        m_missing_obj = bool(re.search(
+            r"\b(?:нет\b|не\s+хватает|отсутствует|не\s+видно|не\s+появил\w*|где\b|забыл\w*)\b.*?\b(?:чтобы\s+(?:была|был|было|были|появил\w*)|добавь|дорисуй|пририсуй|вставь|помести|расположи|сделай|отредактируй)\b",
+            cleaned,
+            re.IGNORECASE
+        )) and (has_img_noun or has_last_image)
+
+        # Г. Глаголы модификации в начале фразы
         m_action_verb = re.search(
-            r"^(?:поменяй|измени|замени|перекрась|сделай|добавь|пририсуй|вставь|надень|наложи|убери|удали|сотри|стереть|увеличь|уменьши|осветли|затемни|поверни|разверни|перемести)\b(?:\s+(?:мне\s+)?(.+))?$",
+            r"^(?:поменяй|измени|замени|перекрась|сделай|добавь|дорисуй|пририсуй|вставь|помести|расположи|надень|наложи|убери|удали|сотри|стереть|увеличь|уменьши|осветли|затемни|поверни|разверни|перемести)\b(?:\s+(?:мне\s+)?(.+))?$",
             cleaned,
             re.IGNORECASE
         )
 
         is_edit_candidate = False
-        if m_keep or m_explicit_edit:
+        if m_keep or m_explicit_edit or m_missing_obj:
             is_edit_candidate = True
         elif m_action_verb:
             remainder = m_action_verb.group(1) or ""
@@ -1051,8 +1066,14 @@ class CommandRouter:
             if not NON_IMAGE_TARGET_PATTERN.search(remainder):
                 if not re.search(r"\b(?:задач\w*|заметк\w*|напоминан\w*|список\w*|файл\w*|коммит\w*|парол\w*|репозитор\w*|ветк\w*)\b", remainder, re.IGNORECASE):
                     is_edit_candidate = True
-        elif has_img_noun and re.search(r"\b(?:поменяй|измени|замени|перекрась|сделай|добавь|убери|удали)\b", cleaned, re.IGNORECASE):
-            is_edit_candidate = True
+        elif (has_img_noun or has_last_image) and re.search(
+            r"\b(?:поменяй|измени|замени|перекрась|сделай|добавь|дорисуй|пририсуй|вставь|помести|расположи|нарисуй|убери|удали|отредактируй|поправь|скорректируй|доработай)\b",
+            cleaned,
+            re.IGNORECASE
+        ):
+            if not NON_IMAGE_TARGET_PATTERN.search(cleaned):
+                if not re.search(r"\b(?:задач\w*|заметк\w*|напоминан\w*|список\w*|файл\w*|коммит\w*|парол\w*|репозитор\w*|ветк\w*)\b", cleaned, re.IGNORECASE):
+                    is_edit_candidate = True
 
         if not is_edit_candidate:
             return None

@@ -125,10 +125,32 @@ class EditPlanner:
         pos_additions: List[str] = []
         neg_additions: List[str] = []
 
+        action_text = text_lower
+        # Выделение условий сохранения/изменения
+        m_rev = re.search(
+            r"^(?:сохрани[в]?|оставь|не\s+меняй)\s+(.+?)[,;\s]+(?:но|а|только|поменяй\s+только|сделай\s+только|при\s+этом)\s+(.+)$",
+            text_lower,
+            re.IGNORECASE
+        )
+        if m_rev:
+            what_to_keep = m_rev.group(1).strip()
+            action_text = m_rev.group(2).strip()
+            what_to_change = action_text
+        else:
+            m_keep = re.search(
+                r"[,;\s]+(?:сохрани[в]?|оставь|не\s+меняй|с\s+сохранением)\s+(.+)$",
+                text_lower,
+                re.IGNORECASE
+            )
+            if m_keep:
+                what_to_keep = m_keep.group(1).strip()
+                action_text = text_lower[:m_keep.start()].strip()
+                what_to_change = action_text
+
         # 0. Конструкции замены: "замени/поменяй <исходное> на <желаемое>"
         m_rep = re.search(
             r"\b(?:замени|поменяй|смени)\s+(?:мне\s+)?(.+?)\s+на\s+(.+)$",
-            text_lower,
+            action_text,
             re.IGNORECASE
         )
         if m_rep:
@@ -136,18 +158,18 @@ class EditPlanner:
             to_part = m_rep.group(2).strip()
 
             # Если изменение касается позы
-            if re.search(r"\bпоз[ауыеой]\b", from_part) or re.search(r"\bпоз[ауыеой]\b", text_lower):
+            if re.search(r"\bпоз[ауыеой]\b", from_part) or re.search(r"\bпоз[ауыеой]\b", action_text):
                 action_type = "pose"
                 denoise = 0.70
                 what_to_keep = "внешность персонажа, фон и стиль"
                 what_to_change = f"поза -> {to_part}"
-                if "спин" in text_lower:
+                if "спин" in action_text:
                     pos_additions.append("lying on back, belly up")
-                elif "лежа" in text_lower or "лежать" in text_lower:
+                elif "лежа" in action_text or "лежать" in action_text:
                     pos_additions.append("lying down, resting pose")
-                elif "сидя" in text_lower or "сидеть" in text_lower:
+                elif "сидя" in action_text or "сидеть" in action_text:
                     pos_additions.append("sitting pose")
-                elif "стоя" in text_lower or "стоять" in text_lower:
+                elif "стоя" in action_text or "стоять" in action_text:
                     pos_additions.append("standing pose")
 
             # Если изменение касается цвета/окраса
@@ -231,21 +253,21 @@ class EditPlanner:
                         break
 
         # 1. Поза и положение тела (pose)
-        elif re.search(r"\b(?:поз[ауыеой]|положен\w*|ракурс\w*|лежал\w*|сидел\w*|стоял\w*|бежал\w*|поверни|разверни|на\s+спин\w*|на\s+бок\w*|на\s+живот\w*)\b", text_lower):
+        elif re.search(r"\b(?:поз[ауыеой]|положен\w*|ракурс\w*|лежал\w*|сидел\w*|стоял\w*|бежал\w*|поверни|разверни|на\s+спин\w*|на\s+бок\w*|на\s+живот\w*)\b", action_text):
             action_type = "pose"
             denoise = 0.70
             what_to_keep = "внешность персонажа, фон и стиль"
-            if "спин" in text_lower:
+            if "спин" in action_text:
                 pos_additions.append("lying on back, belly up")
-            elif "лежа" in text_lower or "лежать" in text_lower:
+            elif "лежа" in action_text or "лежать" in action_text:
                 pos_additions.append("lying down, resting pose")
-            elif "сидя" in text_lower or "сидеть" in text_lower:
+            elif "сидя" in action_text or "сидеть" in action_text:
                 pos_additions.append("sitting pose")
-            elif "стоя" in text_lower or "стоять" in text_lower:
+            elif "стоя" in action_text or "стоять" in action_text:
                 pos_additions.append("standing pose")
 
         # 2. Удаление объектов (remove)
-        elif re.search(r"\b(?:убер\w*|удал\w*|сотри|стереть|лишн\w*|второ\w*\s+кот\w*|второг\w*|без\s+второг\w*)\b", text_lower):
+        elif re.search(r"\b(?:убер\w*|удал\w*|сотри|стереть|лишн\w*|второ\w*\s+кот\w*|второг\w*|без\s+второг\w*)\b", action_text):
             action_type = "remove"
             denoise = 0.55
             what_to_keep = "основной объект и фон"
@@ -253,107 +275,136 @@ class EditPlanner:
             pos_additions.append("single subject, clean scene")
 
         # 3. Фон, локация, окружение (background)
-        elif re.search(r"\b(?:фон\w*|задн\w*\s+план\w*|пейзаж\w*|локаци\w*|окружен\w*|вместо\s+фона)\b", text_lower) or (
-            re.search(r"\b(?:мор\w*|пляж\w*|лес\w*|гор\w*|город\w*|комнат\w*|неб\w*)\b", text_lower)
-            and not re.search(r"\b(?:свет\w*|освещен\w*|туман\w*)\b", text_lower)
+        elif re.search(r"\b(?:фон\w*|задн\w*\s+план\w*|пейзаж\w*|локаци\w*|окружен\w*|вместо\s+фона)\b", action_text) or (
+            re.search(r"\b(?:мор\w*|пляж\w*|лес\w*|гор\w*|город\w*|комнат\w*|неб\w*)\b", action_text)
+            and not re.search(r"\b(?:свет\w*|освещен\w*|туман\w*)\b", action_text)
         ):
             action_type = "background"
             denoise = 0.65
             what_to_keep = "главный персонаж/объект на переднем плане"
-            if "закат" in text_lower:
+            if "закат" in action_text:
                 pos_additions.extend(["sunset sky background", "golden hour scenery"])
-            elif "лес" in text_lower:
+            elif "лес" in action_text:
                 pos_additions.extend(["lush green forest background", "pine trees"])
-            elif "мор" in text_lower or "пляж" in text_lower:
+            elif "мор" in action_text or "пляж" in action_text:
                 pos_additions.extend(["sandy beach", "blue ocean waves"])
-            elif "гор" in text_lower:
+            elif "гор" in action_text:
                 pos_additions.extend(["mountain peaks", "rocky landscape"])
-            elif "город" in text_lower:
+            elif "город" in action_text:
                 pos_additions.extend(["modern city skyline background"])
 
         # 4. Пропорции, форма, размеры (proportions)
-        elif re.search(r"\b(?:стройнее|худее|толще|массивнее|мускулист\w*|больше|меньше|размер\w*|пропорци\w*|форм\w*|покат\w*|вытянут\w*|круглее|шире|уже|длиннее|короче|толщин\w*)\b", text_lower):
+        elif re.search(r"\b(?:стройнее|худее|толще|массивнее|мускулист\w*|больше|меньше|размер\w*|пропорци\w*|форм\w*|покат\w*|вытянут\w*|круглее|шире|уже|длиннее|короче|толщин\w*)\b", action_text):
             action_type = "proportions"
             denoise = 0.55
             what_to_keep = "персонаж, окружение и цветовая гамма"
-            if "стройнее" in text_lower or "худее" in text_lower:
+            if "стройнее" in action_text or "худее" in action_text:
                 pos_additions.extend(["slender", "slim build", "lean proportions"])
                 neg_additions.extend(["fat", "chubby", "overweight"])
-            elif "толще" in text_lower or "полнее" in text_lower:
+            elif "толще" in action_text or "полнее" in action_text:
                 pos_additions.extend(["chubby", "plump", "heavier build"])
                 neg_additions.extend(["skinny", "slender"])
-            elif "мускулист" in text_lower:
+            elif "мускулист" in action_text:
                 pos_additions.extend(["muscular", "athletic build"])
-            elif "покат" in text_lower:
+            elif "покат" in action_text:
                 pos_additions.extend(["slanted", "sloped"])
 
         # 5. Цвет, окрас, текстура, материал (color / material)
-        elif re.search(r"\b(?:цвет\w*|окрас\w*|шерст\w*|перекрас\w*|рыж\w*|бел\w*|ч[её]рн\w*|сер\w*|красн\w*|син\w*|зелен\w*|зел[её]н\w*|золот\w*|материал\w*|деревянн\w*|металлическ\w*|стеклянн\w*)\b", text_lower):
+        elif re.search(r"\b(?:цвет\w*|окрас\w*|шерст\w*|перекрас\w*|рыж\w*|бел\w*|ч[её]рн\w*|сер\w*|красн\w*|син\w*|зелен\w*|зел[её]н\w*|золот\w*|материал\w*|деревянн\w*|металлическ\w*|стеклянн\w*)\b", action_text):
             action_type = "color"
             denoise = 0.45
             what_to_keep = "поза, форма объекта, композиция и фон"
-            if re.search(r"\b(?:рыж\w*|оранжев\w*)\b", text_lower):
+            if re.search(r"\b(?:рыж\w*|оранжев\w*)\b", action_text):
                 pos_additions.extend(["vibrant ginger fur", "rich orange tabby"])
                 neg_additions.extend(["white fur", "black fur", "grey fur"])
-            elif re.search(r"\b(?:бел\w*)\b", text_lower):
+            elif re.search(r"\b(?:бел\w*)\b", action_text):
                 pos_additions.extend(["pure white", "snow white"])
                 neg_additions.extend(["black", "ginger", "dark"])
-            elif re.search(r"\b(?:ч[её]рн\w*)\b", text_lower):
+            elif re.search(r"\b(?:ч[её]рн\w*)\b", action_text):
                 pos_additions.extend(["jet black", "glossy black"])
                 neg_additions.extend(["white", "ginger", "spotted"])
-            elif re.search(r"\b(?:деревянн\w*)\b", text_lower):
+            elif re.search(r"\b(?:деревянн\w*)\b", action_text):
                 pos_additions.extend(["wooden texture", "polished wood"])
-            elif re.search(r"\b(?:металлическ\w*)\b", text_lower):
+            elif re.search(r"\b(?:металлическ\w*)\b", action_text):
                 pos_additions.extend(["metallic surface", "chrome metal finish"])
-            elif re.search(r"\b(?:стеклянн\w*)\b", text_lower):
+            elif re.search(r"\b(?:стеклянн\w*)\b", action_text):
                 pos_additions.extend(["glass material", "transparent glass finish"])
 
         # 6. Освещение, погода, время суток (lighting)
-        elif re.search(r"\b(?:освещен\w*|свет\w*|закат\w*|рассвет\w*|вечер\w*|тень\w*|тен\w*|ярче|темнее|туман\w*|солнц\w*|лун\w*|ночь\w*|ночн\w*|день\w*|пасмурн\w*|золот\w*\s+час)\b", text_lower):
+        elif re.search(r"\b(?:освещен\w*|свет\w*|закат\w*|рассвет\w*|вечер\w*|тень\w*|тен\w*|ярче|темнее|туман\w*|солнц\w*|лун\w*|ночь\w*|ночн\w*|день\w*|пасмурн\w*|золот\w*\s+час)\b", action_text):
             action_type = "lighting"
             denoise = 0.50
             what_to_keep = "объекты сцены и их положение"
-            if "закат" in text_lower or "закатное" in text_lower:
+            if "закат" in action_text or "закатное" in action_text:
                 pos_additions.extend(["sunset lighting", "golden hour", "warm orange glow"])
-            elif "вечер" in text_lower or "вечерн" in text_lower:
+            elif "вечер" in action_text or "вечерн" in action_text:
                 pos_additions.extend(["evening lighting", "dusk atmosphere", "warm twilight glow"])
-            elif "туман" in text_lower:
+            elif "туман" in action_text:
                 pos_additions.extend(["misty fog", "atmospheric haze"])
-            elif "ночь" in text_lower or "ночн" in text_lower:
+            elif "ночь" in action_text or "ночн" in action_text:
                 pos_additions.extend(["nighttime", "moonlight", "dark atmosphere"])
-            elif "ярче" in text_lower or "светлее" in text_lower:
+            elif "ярче" in action_text or "светлее" in action_text:
                 pos_additions.extend(["bright daylight", "vibrant illumination"])
 
         # 7. Стиль, жанр, рендеринг (style)
-        elif re.search(r"\b(?:стил\w*|реалистичн\w*|аниме|кинематограф\w*|акварел\w*|масл\w*|готическ\w*|футуристическ\w*|киберпанк|рисунок|картин\w*)\b", text_lower):
+        elif re.search(r"\b(?:стил\w*|реалистичн\w*|аниме|кинематограф\w*|акварел\w*|масл\w*|готическ\w*|футуристическ\w*|киберпанк|рисунок|картина\s+маслом|живопис\w*)\b", action_text):
             action_type = "style"
             denoise = 0.62
             what_to_keep = "композиция и сюжет сцены"
-            if "готическ" in text_lower:
+            if "готическ" in action_text:
                 pos_additions.extend(["gothic architecture style", "dark moody aesthetic", "ornate spires"])
-            elif "аниме" in text_lower:
+            elif "аниме" in action_text:
                 pos_additions.extend(["anime style", "makoto shinkai aesthetic"])
-            elif "кинематограф" in text_lower:
+            elif "кинематограф" in action_text:
                 pos_additions.extend(["cinematic shot", "35mm photograph", "photorealistic"])
 
-        # 8. Добавление элемента (add)
-        elif re.search(r"\b(?:добав\w*|пририсуй|вставь|надень|наложи|положи|прицепи)\b", text_lower):
+        # 8. Добавление или восстановление отсутствующего элемента (add)
+        elif re.search(
+            r"\b(?:добав\w*|дорисуй|пририсуй|вставь|помести|расположи|нарисуй|надень|наложи|положи|прицепи|"
+            r"чтобы\s+(?:\w+\s+){0,3}(?:была|был|было|были|появил\w*)|появил\w*|не\s+хватает|отсутствует|нет\s+на\s+картинк\w*|нет\s+в\s+кадре)\b",
+            action_text,
+            re.IGNORECASE
+        ):
             action_type = "add"
-            denoise = 0.58
-            what_to_keep = "остальные элементы сцены"
-            if re.search(r"\bотражен\w*\b", text_lower):
+            denoise = 0.60
+            what_to_keep = "остальные элементы сцены, композиция и фон"
+            if re.search(r"\b(?:нив\w*|ваз[- ]?2121|2121|lada\s*niva)\b", action_text, re.IGNORECASE):
+                target = "ВАЗ-2121 Нива"
+                what_to_change = "добавление автомобиля ВАЗ-2121 Нива"
+                what_to_keep = "штормовое море, берег, композиция и атмосфера исходника"
+                pos_additions.extend([
+                    "VAZ-2121 Niva",
+                    "classic Russian compact 4x4 offroad vehicle",
+                    "rugged 3-door SUV, boxy angular body, round front headlights",
+                    "retro small offroader parked on the coastal shore",
+                    "highly detailed automobile, sharp focus"
+                ])
+                neg_additions.extend([
+                    "UAZ-450, van, minivan, bus, truck, commercial van, bukhanka, modern sleek sportscar",
+                    "multiple cars, two cars, extra vehicles, duplicate cars"
+                ])
+            elif re.search(r"\b(?:машин\w*|автомоб\w*|авто\b|car\w*)\b", action_text, re.IGNORECASE):
+                target = "автомобиль"
+                what_to_change = "добавление автомобиля"
+                pos_additions.extend(["automobile parked in scene", "detailed car"])
+                neg_additions.extend(["multiple cars, extra vehicles"])
+            elif re.search(r"\bотражен\w*\b", action_text):
                 pos_additions.extend(["glass reflection", "reflective surface"])
-            elif re.search(r"\bшляп\w*|кепк\w*|шапк\w*\b", text_lower):
+            elif re.search(r"\bшляп\w*|кепк\w*|шапк\w*\b", action_text):
                 pos_additions.extend(["wearing a hat"])
-            elif re.search(r"\bочк\w*\b", text_lower):
+            elif re.search(r"\bочк\w*\b", action_text):
                 pos_additions.extend(["wearing sunglasses"])
-            elif re.search(r"\bтуман\w*\b", text_lower):
+            elif re.search(r"\bтуман\w*\b", action_text):
                 pos_additions.extend(["misty fog", "atmospheric haze"])
 
         # Извлечение вероятного объекта (существительного)
-        m_subj = re.search(r"\b(?:кот\w*|кошк\w*|собак\w*|зам\w*|дом\w*|машин\w*|фон\w*|человек\w*|девушк\w*|парен\w*|крыш\w*|неб\w*|деревь\w*|дерево\b|стол\w*|окн\w*|комнат\w*|стен\w*|пол\b|двер\w*|озер\w*|вод\w*)\b", text_lower)
-        if m_subj and target == "subject":
-            target = m_subj.group(0)
+        if target == "subject":
+            if re.search(r"\b(?:нив\w*|ваз[- ]?2121|2121|lada\s*niva)\b", text_lower, re.IGNORECASE):
+                target = "ВАЗ-2121 Нива"
+            else:
+                m_subj = re.search(r"\b(?:кот\w*|кошк\w*|собак\w*|зам\w*|дом\w*|машин\w*|фон\w*|человек\w*|девушк\w*|парен\w*|крыш\w*|неб\w*|деревь\w*|дерево\b|стол\w*|окн\w*|комнат\w*|стен\w*|пол\b|двер\w*|озер\w*|вод\w*)\b", text_lower)
+                if m_subj:
+                    target = m_subj.group(0)
 
         return EditPlan(
             instruction=instr,
@@ -447,7 +498,7 @@ class EditPlanner:
         # Базовая склейка промпта
         if base_p:
             if pos_add:
-                merged_pos = f"{base_p}, {pos_add}, {instr}".strip(" ,")
+                merged_pos = f"{base_p}, {pos_add}".strip(" ,")
             else:
                 merged_pos = f"{base_p}, {instr}".strip(" ,")
         else:

@@ -756,6 +756,64 @@ class TestUniversalImageEditHardening(unittest.TestCase):
         self.assertIsNotNone(plan_fallback)
         self.assertEqual(plan_fallback.action_type, "general")
 
+    def test_missing_object_niva_edit_routing_and_semantics(self):
+        """
+        Тестирование обработки запросов с отсутствующим объектом и автомобильной семантикой ВАЗ-2121 Нива:
+        'Машины нет на картинке, отредактируй, чтобы на картинке была нива 2121'
+        - маршрутизируется в Scenario C (action: 'edit', edit_type: 'add');
+        - использует существующее изображение из контекста;
+        - компилирует Positive Prompt с характерными чертами ВАЗ-2121 (3-door, 4x4, round headlights);
+        - подавляет в Negative Prompt нежелательные типы техники (UAZ-450, van, bukhanka, multiple cars);
+        - не путает '3-door' / '4x4' с количеством машин (is_singular = True, 1 car);
+        - сохраняет исходный контекст окружения (море, берег, шторм).
+        """
+        sea_storm_context = {
+            "prompt": "sea in the background, ocean waves, blue water horizon, dramatic stormy sea, rugged coastal shore",
+            "created_files": ["C:/Akakiy agent/data/generated/images/img_20261024_003216_48e00a.png"],
+            "width": 1024,
+            "height": 1024,
+            "aspect_ratio": "1:1",
+            "count": 1
+        }
+
+        queries = [
+            "Машины нет на картинке, отредактируй, чтобы на картинке была нива 2121",
+            "На картинке нет машины, добавь ниву 2121",
+            "Не хватает машины на изображении, дорисуй ниву 2121",
+            "Отредактируй картинку, чтобы на ней появилась нива 2121",
+        ]
+
+        router = CommandRouter()
+        for q in queries:
+            with self.subTest(query=q):
+                route = router.route(q, last_image=sea_storm_context)
+                self.assertEqual(route.get("type"), "image", f"Query must route to image: {q}")
+                self.assertEqual(route.get("action"), "edit", f"Query must route to edit action: {q}")
+                self.assertEqual(route.get("edit_type"), "add", f"Query must have action_type add: {q}")
+                self.assertEqual(
+                    route.get("source_image_path"),
+                    "C:/Akakiy agent/data/generated/images/img_20261024_003216_48e00a.png"
+                )
+
+                prompt_lower = route.get("prompt", "").lower()
+                neg_lower = route.get("negative_prompt", "").lower()
+
+                # Проверка единственного числа (не '2 cars', не 'multiple cars')
+                self.assertNotIn("2 cars", prompt_lower)
+                self.assertNotIn("multiple cars", prompt_lower)
+                self.assertIn("vaz-2121 niva", prompt_lower)
+                self.assertIn("3-door", prompt_lower)
+                self.assertIn("4x4", prompt_lower)
+
+                # Проверка подавления нежелательных типов в negative prompt
+                self.assertIn("uaz-450", neg_lower)
+                self.assertIn("bukhanka", neg_lower)
+                self.assertIn("van", neg_lower)
+                self.assertIn("multiple cars", neg_lower)
+
+                # Проверка сохранения моря / берега / шторма
+                self.assertTrue("sea" in prompt_lower or "ocean" in prompt_lower or "shore" in prompt_lower)
+
 
 if __name__ == "__main__":
     unittest.main()
