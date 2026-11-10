@@ -76,7 +76,8 @@ TOOLS = {
         "function": edit_image,
         "description": (
             "Редактирует активное или указанное PNG-изображение с сохранением неизменяемых деталей. "
-            "Используй для любых правок картинки: поза, цвет, фон, добавление или удаление объекта, освещение, стиль."
+            "Поддерживает точечный inpainting по mask_bbox/mask_path, ControlNet и img2img: "
+            "поза, цвет, фон, добавление или удаление объекта, освещение, стиль."
         ),
         "requires_confirmation": False
     },
@@ -399,6 +400,30 @@ TOOL_PARAMETERS = {
             "denoise": {
                 "type": "number",
                 "description": "Сила изменения img2img от 0.15 до 0.90 (чем выше, тем сильнее меняется картинка)"
+            },
+            "mask_bbox": {
+                "type": "array",
+                "items": {"type": "number"},
+                "description": (
+                    "Нормализованные координаты [x1, y1, x2, y2] от 0.0 до 1.0 (из inspect_image) "
+                    "для точечного inpainting с сохранением остального фона"
+                )
+            },
+            "mask_path": {
+                "type": "string",
+                "description": "Путь к готовому PNG-файлу маски (белый — область правки, чёрный — сохраняется, опционально)"
+            },
+            "feather": {
+                "type": "integer",
+                "description": "Радиус размытия краёв маски в пикселях для плавного перехода (по умолчанию 16)"
+            },
+            "control_type": {
+                "type": "string",
+                "description": "Тип структурного контроля ControlNet: 'canny', 'openpose', 'depth' (опционально, требует модель ControlNet)"
+            },
+            "control_strength": {
+                "type": "number",
+                "description": "Сила влияния ControlNet от 0.0 до 2.0 (по умолчанию 0.8)"
             }
         },
         "required": ["instruction"]

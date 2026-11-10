@@ -13,6 +13,7 @@
 
 from datetime import datetime
 import json
+import math
 import os
 from pathlib import Path
 import random
@@ -179,6 +180,102 @@ def safe_validate_count(count: Any) -> int:
     return max(1, min(4, c))
 
 
+def normalize_mask_bbox(
+    raw_bbox: Any,
+    img_width: Optional[int] = None,
+    img_height: Optional[int] = None,
+) -> Optional[Tuple[float, float, float, float]]:
+    """
+    Валидирует и нормализует прямоугольник маски в (left, top, right, bottom) в [0.0, 1.0].
+    Поддерживает как нормализованные значения (0..1), так и пиксельные / 0..1000 координаты.
+    """
+    if not isinstance(raw_bbox, (list, tuple)) or len(raw_bbox) != 4:
+        return None
+    try:
+        vals = [float(v) for v in raw_bbox]
+    except (TypeError, ValueError):
+        return None
+    if any(not math.isfinite(v) for v in vals):
+        return None
+
+    x1, y1, x2, y2 = vals
+    max_v = max(abs(x1), abs(y1), abs(x2), abs(y2))
+    if max_v > 1.5:
+        if img_width and img_height and img_width > 0 and img_height > 0:
+            x1 /= float(img_width)
+            x2 /= float(img_width)
+            y1 /= float(img_height)
+            y2 /= float(img_height)
+        elif max_v <= 1000.0:
+            x1 /= 1000.0
+            y1 /= 1000.0
+            x2 /= 1000.0
+            y2 /= 1000.0
+
+    x1 = max(0.0, min(1.0, x1))
+    y1 = max(0.0, min(1.0, y1))
+    x2 = max(0.0, min(1.0, x2))
+    y2 = max(0.0, min(1.0, y2))
+
+    left, right = (x1, x2) if x1 <= x2 else (x2, x1)
+    top, bottom = (y1, y2) if y1 <= y2 else (y2, y1)
+    if (right - left) < 0.01 or (bottom - top) < 0.01:
+        return None
+
+    return (left, top, right, bottom)
+
+
+def generate_feathered_mask_png(
+    source_image_path: str,
+    mask_bbox: Any,
+    output_path: Path,
+    fallback_width: int = 1024,
+    fallback_height: int = 1024,
+    feather: int = 16,
+) -> Tuple[int, int]:
+    """
+    Создаёт PNG-маску (белый внутри bbox — область правки, чёрный снаружи — сохраняется)
+    с мягким размытием краёв (GaussianBlur).
+    """
+    from PIL import Image, ImageDraw, ImageFilter
+
+    img_w, img_h = int(fallback_width or 1024), int(fallback_height or 1024)
+    try:
+        with Image.open(source_image_path) as src_im:
+            if src_im.size[0] > 0 and src_im.size[1] > 0:
+                img_w, img_h = int(src_im.size[0]), int(src_im.size[1])
+    except Exception:
+        pass
+
+    norm = normalize_mask_bbox(mask_bbox, img_width=img_w, img_height=img_h)
+    if norm is None:
+        raise ValueError(
+            "Некорректный формат mask_bbox: ожидается список из 4 чисел [x1, y1, x2, y2]."
+        )
+
+    x1, y1, x2, y2 = norm
+    px1 = max(0, min(img_w - 1, int(round(x1 * img_w))))
+    py1 = max(0, min(img_h - 1, int(round(y1 * img_h))))
+    px2 = max(px1 + 1, min(img_w, int(round(x2 * img_w))))
+    py2 = max(py1 + 1, min(img_h, int(round(y2 * img_h))))
+
+    mask_img = Image.new("L", (img_w, img_h), 0)
+    draw = ImageDraw.Draw(mask_img)
+    draw.rectangle([px1, py1, px2, py2], fill=255)
+
+    try:
+        blur_radius = max(0.0, min(128.0, float(feather)))
+    except (TypeError, ValueError):
+        blur_radius = 16.0
+    if blur_radius > 0:
+        mask_img = mask_img.filter(ImageFilter.GaussianBlur(radius=blur_radius))
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    # Сохраняем в RGB, чтобы ComfyUI LoadImageMask(channel="red") однозначно читал маску
+    mask_img.convert("RGB").save(str(output_path), format="PNG")
+    return img_w, img_h
+
+
 class ImageAgent(SubAgent):
     """
     Специализированный SubAgent генерации изображений через локальный ComfyUI Worker.
@@ -329,12 +426,43 @@ class ImageAgent(SubAgent):
 
     def has_controlnet_openpose(self) -> bool:
         """Проверяет наличие установленной модели ControlNet OpenPose/DWPose для SDXL."""
+        return self.find_controlnet_model("openpose") is not None
+
+    def has_controlnet_canny(self) -> bool:
+        """Проверяет наличие установленной модели ControlNet Canny для SDXL."""
+        return self.find_controlnet_model("canny") is not None
+
+    def find_controlnet_model(self, control_type: str) -> Optional[str]:
+        """Возвращает имя файла установленной модели ControlNet заданного типа (или None)."""
+        ct = str(control_type or "").strip().lower()
+        if not ct:
+            return None
+
+        if any(k in ct for k in ("openpose", "pose", "dwpose")):
+            terms = ("openpose", "pose", "dwpose")
+        elif "canny" in ct:
+            terms = ("canny",)
+        elif "depth" in ct:
+            terms = ("depth",)
+        elif any(k in ct for k in ("softedge", "hed", "scribble")):
+            terms = ("softedge", "hed", "scribble")
+        else:
+            terms = (ct,)
+
         models = self.get_available_models()
         for f in models.get("controlnet", []):
             name_lower = f.lower()
-            if any(term in name_lower for term in ("openpose", "pose", "dwpose")):
-                return True
-        return False
+            if any(term in name_lower for term in terms):
+                return f
+        return None
+
+    def get_inpaint_checkpoint(self) -> Optional[str]:
+        """Возвращает имя установленного Inpaint checkpoint (если есть)."""
+        models = self.get_available_models()
+        for f in models.get("checkpoints", []):
+            if "inpaint" in f.lower():
+                return f
+        return None
 
     def has_inpaint_model(self) -> bool:
         """Проверяет наличие специализированной Inpaint-модели."""
@@ -432,6 +560,260 @@ class ImageAgent(SubAgent):
             }
         }
 
+    def build_inpaint_workflow(
+        self,
+        input_image_name: str,
+        mask_image_name: str,
+        prompt: str,
+        negative_prompt: str = DEFAULT_NEGATIVE_PROMPT,
+        seed: Optional[int] = None,
+        denoise: float = 0.78,
+        steps: int = DEFAULT_STEPS,
+        cfg: float = DEFAULT_CFG,
+        sampler: str = DEFAULT_SAMPLER,
+        scheduler: str = DEFAULT_SCHEDULER,
+        checkpoint: str = DEFAULT_CHECKPOINT,
+        use_inpaint_conditioning: bool = False,
+    ) -> Dict[str, Any]:
+        """
+        Формирует JSON-граф локального Inpainting:
+        - со стандартным checkpoint (в т.ч. SDXL-Lightning): LoadImageMask + SetLatentNoiseMask;
+        - со специализированной inpaint-моделью: LoadImageMask + InpaintModelConditioning.
+        """
+        if seed is None:
+            seed = random.randint(1, 2**32 - 1)
+
+        denoise = max(0.15, min(1.0, float(denoise)))
+
+        workflow: Dict[str, Any] = {
+            "1": {
+                "inputs": {
+                    "ckpt_name": checkpoint
+                },
+                "class_type": "CheckpointLoaderSimple"
+            },
+            "2": {
+                "inputs": {
+                    "text": prompt,
+                    "clip": ["1", 1]
+                },
+                "class_type": "CLIPTextEncode"
+            },
+            "3": {
+                "inputs": {
+                    "text": negative_prompt,
+                    "clip": ["1", 1]
+                },
+                "class_type": "CLIPTextEncode"
+            },
+            "4": {
+                "inputs": {
+                    "image": input_image_name
+                },
+                "class_type": "LoadImage"
+            },
+            "9": {
+                "inputs": {
+                    "image": mask_image_name,
+                    "channel": "red"
+                },
+                "class_type": "LoadImageMask"
+            },
+        }
+
+        if use_inpaint_conditioning:
+            workflow["10"] = {
+                "inputs": {
+                    "positive": ["2", 0],
+                    "negative": ["3", 0],
+                    "vae": ["1", 2],
+                    "pixels": ["4", 0],
+                    "mask": ["9", 0],
+                    "noise_mask": True,
+                },
+                "class_type": "InpaintModelConditioning"
+            }
+            pos_ref = ["10", 0]
+            neg_ref = ["10", 1]
+            latent_ref = ["10", 2]
+        else:
+            workflow["5"] = {
+                "inputs": {
+                    "pixels": ["4", 0],
+                    "vae": ["1", 2]
+                },
+                "class_type": "VAEEncode"
+            }
+            workflow["10"] = {
+                "inputs": {
+                    "samples": ["5", 0],
+                    "mask": ["9", 0]
+                },
+                "class_type": "SetLatentNoiseMask"
+            }
+            pos_ref = ["2", 0]
+            neg_ref = ["3", 0]
+            latent_ref = ["10", 0]
+
+        workflow["6"] = {
+            "inputs": {
+                "seed": seed,
+                "steps": steps,
+                "cfg": cfg,
+                "sampler_name": sampler,
+                "scheduler": scheduler,
+                "denoise": denoise,
+                "model": ["1", 0],
+                "positive": pos_ref,
+                "negative": neg_ref,
+                "latent_image": latent_ref
+            },
+            "class_type": "KSampler"
+        }
+        workflow["7"] = {
+            "inputs": {
+                "samples": ["6", 0],
+                "vae": ["1", 2]
+            },
+            "class_type": "VAEDecode"
+        }
+        workflow["8"] = {
+            "inputs": {
+                "filename_prefix": "Akakiy_ImageAgent_Inpaint",
+                "images": ["7", 0]
+            },
+            "class_type": "SaveImage"
+        }
+        return workflow
+
+    def build_controlnet_workflow(
+        self,
+        input_image_name: str,
+        controlnet_name: str,
+        prompt: str,
+        negative_prompt: str = DEFAULT_NEGATIVE_PROMPT,
+        seed: Optional[int] = None,
+        denoise: float = 0.72,
+        control_type: str = "canny",
+        control_strength: float = 0.8,
+        start_percent: float = 0.0,
+        end_percent: float = 1.0,
+        steps: int = DEFAULT_STEPS,
+        cfg: float = DEFAULT_CFG,
+        sampler: str = DEFAULT_SAMPLER,
+        scheduler: str = DEFAULT_SCHEDULER,
+        checkpoint: str = DEFAULT_CHECKPOINT,
+    ) -> Dict[str, Any]:
+        """
+        Формирует JSON-граф редактирования с ControlNet (Canny / OpenPose / Depth).
+        При control_type='canny' автоматически подключает встроенный препроцессор Canny.
+        """
+        if seed is None:
+            seed = random.randint(1, 2**32 - 1)
+
+        denoise = max(0.15, min(1.0, float(denoise)))
+        control_strength = max(0.0, min(2.0, float(control_strength)))
+        ct = str(control_type or "canny").strip().lower()
+
+        workflow: Dict[str, Any] = {
+            "1": {
+                "inputs": {
+                    "ckpt_name": checkpoint
+                },
+                "class_type": "CheckpointLoaderSimple"
+            },
+            "2": {
+                "inputs": {
+                    "text": prompt,
+                    "clip": ["1", 1]
+                },
+                "class_type": "CLIPTextEncode"
+            },
+            "3": {
+                "inputs": {
+                    "text": negative_prompt,
+                    "clip": ["1", 1]
+                },
+                "class_type": "CLIPTextEncode"
+            },
+            "4": {
+                "inputs": {
+                    "image": input_image_name
+                },
+                "class_type": "LoadImage"
+            },
+            "5": {
+                "inputs": {
+                    "pixels": ["4", 0],
+                    "vae": ["1", 2]
+                },
+                "class_type": "VAEEncode"
+            },
+            "9": {
+                "inputs": {
+                    "control_net_name": controlnet_name
+                },
+                "class_type": "ControlNetLoader"
+            },
+        }
+
+        if ct == "canny":
+            workflow["10"] = {
+                "inputs": {
+                    "image": ["4", 0],
+                    "low_threshold": 0.4,
+                    "high_threshold": 0.8,
+                },
+                "class_type": "Canny"
+            }
+            hint_image_ref = ["10", 0]
+        else:
+            hint_image_ref = ["4", 0]
+
+        workflow["11"] = {
+            "inputs": {
+                "positive": ["2", 0],
+                "negative": ["3", 0],
+                "control_net": ["9", 0],
+                "image": hint_image_ref,
+                "strength": control_strength,
+                "start_percent": max(0.0, min(1.0, float(start_percent))),
+                "end_percent": max(0.0, min(1.0, float(end_percent))),
+                "vae": ["1", 2],
+            },
+            "class_type": "ControlNetApplyAdvanced"
+        }
+        workflow["6"] = {
+            "inputs": {
+                "seed": seed,
+                "steps": steps,
+                "cfg": cfg,
+                "sampler_name": sampler,
+                "scheduler": scheduler,
+                "denoise": denoise,
+                "model": ["1", 0],
+                "positive": ["11", 0],
+                "negative": ["11", 1],
+                "latent_image": ["5", 0]
+            },
+            "class_type": "KSampler"
+        }
+        workflow["7"] = {
+            "inputs": {
+                "samples": ["6", 0],
+                "vae": ["1", 2]
+            },
+            "class_type": "VAEDecode"
+        }
+        workflow["8"] = {
+            "inputs": {
+                "filename_prefix": "Akakiy_ImageAgent_ControlNet",
+                "images": ["7", 0]
+            },
+            "class_type": "SaveImage"
+        }
+        return workflow
+
     def _generate_safe_filename(self) -> str:
         """Генерирует безопасное уникальное имя для сохраняемого файла изображения."""
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -480,6 +862,16 @@ class ImageAgent(SubAgent):
         action = str(context.get("action", "generate")).strip().lower()
         edit_type = str(context.get("edit_type", "general")).strip().lower()
         source_image_path = context.get("source_image_path")
+        mask_bbox = context.get("mask_bbox")
+        mask_path_raw = context.get("mask_path")
+        mask_path = str(mask_path_raw).strip() if mask_path_raw else None
+        feather = context.get("feather", 16)
+        raw_control_type = context.get("control_type")
+        requested_control_type = str(raw_control_type).strip().lower() if raw_control_type else None
+        control_strength = context.get("control_strength", 0.8)
+        normalized_mask_bbox = None
+        controlnet_name: Optional[str] = None
+        inpaint_checkpoint: Optional[str] = None
 
         if action == "edit":
             if not source_image_path:
@@ -500,8 +892,52 @@ class ImageAgent(SubAgent):
                 except Exception:
                     pass
 
+            if mask_path:
+                if not Path(mask_path).is_file():
+                    return AgentResult.fail(
+                        error=f"Файл маски не найден на диске: {mask_path}"
+                    )
+            elif mask_bbox is not None:
+                normalized_mask_bbox = normalize_mask_bbox(
+                    mask_bbox, img_width=width, img_height=height
+                )
+                if normalized_mask_bbox is None:
+                    return AgentResult.fail(
+                        error="Некорректные координаты области маски (mask_bbox): ожидается [x1, y1, x2, y2]."
+                    )
+
+            has_explicit_mask = bool(mask_path or normalized_mask_bbox is not None)
+
+            if requested_control_type:
+                controlnet_name = self.find_controlnet_model(requested_control_type)
+                if not controlnet_name:
+                    comp_label = (
+                        "ControlNet OpenPose (SDXL)"
+                        if any(k in requested_control_type for k in ("openpose", "pose", "dwpose"))
+                        else f"ControlNet {requested_control_type.upper() if requested_control_type == 'canny' else requested_control_type.title()} (SDXL)"
+                    )
+                    msg = (
+                        f"Для структурного редактирования с '{requested_control_type}' требуется "
+                        f"модель {comp_label}, которая в данный момент не установлена в ComfyUI "
+                        f"(workers/comfyui/models/controlnet/).\n\n"
+                        "Доступные варианты:\n"
+                        "1. Выполнить редактирование без ControlNet (через img2img или точечный inpainting по маске).\n"
+                        "2. Сгенерировать новое изображение по уточнённому промпту."
+                    )
+                    return AgentResult.ok(
+                        message=msg,
+                        data={
+                            "status": "missing_model",
+                            "edit_type": edit_type,
+                            "control_type": requested_control_type,
+                            "missing_component": comp_label,
+                            "source_image": str(source_image_path),
+                            "alternatives": ["img2img_variation", "generate_new"],
+                        }
+                    )
+
             # Проверка доступности специализированных моделей (Rule 5 & Rule 7)
-            if edit_type == "pose" and not self.has_controlnet_openpose():
+            if edit_type == "pose" and not self.has_controlnet_openpose() and not has_explicit_mask:
                 msg = (
                     "Для точного изменения позы персонажа с сохранением исходного изображения требуется "
                     "модель управления позой (ControlNet OpenPose для SDXL), которая в данный момент "
@@ -522,7 +958,7 @@ class ImageAgent(SubAgent):
                     }
                 )
 
-            if edit_type == "remove" and not self.has_inpaint_model():
+            if edit_type == "remove" and not self.has_inpaint_model() and not has_explicit_mask:
                 msg = (
                     "Для точечного удаления объекта с сохранением остального изображения требуется "
                     "модель Inpainting или разметка маски, которая в данный момент не установлена в ComfyUI.\n\n"
@@ -541,6 +977,9 @@ class ImageAgent(SubAgent):
                         "alternatives": ["revise_prompt", "img2img_variation"]
                     }
                 )
+
+            if has_explicit_mask:
+                inpaint_checkpoint = self.get_inpaint_checkpoint()
 
         # 2. Проверка доступности ComfyUI Worker
         if not self.client.is_available():
@@ -577,17 +1016,43 @@ class ImageAgent(SubAgent):
         # 4. Выполнение генерации в защищенном блоке try...finally
         staged_input_name = None
         staged_input_path = None
+        staged_mask_name = None
+        staged_mask_path = None
         if action == "edit" and source_image_path:
             try:
                 comfy_input_dir = PROJECT_PATH / "workers" / "comfyui" / "input"
                 comfy_input_dir.mkdir(parents=True, exist_ok=True)
                 src_p = Path(source_image_path)
-                staged_input_name = f"edit_in_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:6]}{src_p.suffix}"
+                stamp = f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:6]}"
+                staged_input_name = f"edit_in_{stamp}{src_p.suffix}"
                 staged_input_path = comfy_input_dir / staged_input_name
                 shutil.copy2(src_p, staged_input_path)
+
+                if mask_path:
+                    mask_src_p = Path(mask_path)
+                    staged_mask_name = f"mask_{stamp}{mask_src_p.suffix or '.png'}"
+                    staged_mask_path = comfy_input_dir / staged_mask_name
+                    shutil.copy2(mask_src_p, staged_mask_path)
+                elif normalized_mask_bbox is not None:
+                    staged_mask_name = f"mask_{stamp}.png"
+                    staged_mask_path = comfy_input_dir / staged_mask_name
+                    generate_feathered_mask_png(
+                        source_image_path=str(source_image_path),
+                        mask_bbox=list(normalized_mask_bbox),
+                        output_path=staged_mask_path,
+                        fallback_width=width,
+                        fallback_height=height,
+                        feather=feather,
+                    )
             except Exception as ex:
+                for p in (staged_input_path, staged_mask_path):
+                    if p and p.exists():
+                        try:
+                            p.unlink()
+                        except Exception:
+                            pass
                 return AgentResult.fail(
-                    error=f"Ошибка подготовки входного изображения в ComfyUI input: {ex}"
+                    error=f"Ошибка подготовки входных файлов в ComfyUI input: {ex}"
                 )
 
         saved_target_paths = []
@@ -599,6 +1064,7 @@ class ImageAgent(SubAgent):
         vram_restore_info = None
         cleanup_error = None
         used_seeds = []
+        edit_mode = "txt2img"
 
         t_overall_start = time.time()
         try:
@@ -625,12 +1091,24 @@ class ImageAgent(SubAgent):
                 prompt_meta = {}
 
             negative_prompt = effective_negative
-            steps = int(context.get("steps", self.DEFAULT_STEPS))
-            cfg = float(context.get("cfg", self.DEFAULT_CFG))
+            raw_ckpt = context.get("checkpoint")
+            checkpoint = str(raw_ckpt) if raw_ckpt else (
+                inpaint_checkpoint if (staged_mask_name and inpaint_checkpoint) else self.DEFAULT_CHECKPOINT
+            )
+            use_inpaint_cond = bool(staged_mask_name and ("inpaint" in checkpoint.lower()))
+            default_steps = (
+                20 if ("inpaint" in checkpoint.lower() and "lightning" not in checkpoint.lower())
+                else self.DEFAULT_STEPS
+            )
+            default_cfg = (
+                6.5 if ("inpaint" in checkpoint.lower() and "lightning" not in checkpoint.lower())
+                else self.DEFAULT_CFG
+            )
+            steps = int(context.get("steps", default_steps))
+            cfg = float(context.get("cfg", default_cfg))
             sampler = str(context.get("sampler", self.DEFAULT_SAMPLER))
             scheduler = str(context.get("scheduler", self.DEFAULT_SCHEDULER))
             base_seed = context.get("seed")
-            checkpoint = str(context.get("checkpoint", self.DEFAULT_CHECKPOINT))
             timeout = int(context.get("timeout", self.timeout))
 
             self.output_dir.mkdir(parents=True, exist_ok=True)
@@ -643,20 +1121,58 @@ class ImageAgent(SubAgent):
                 used_seeds.append(curr_seed)
 
                 if action == "edit" and staged_input_name:
-                    denoise = float(context.get("denoise", 0.65))
-                    workflow = self.build_img2img_workflow(
-                        input_image_name=staged_input_name,
-                        prompt=effective_prompt,
-                        negative_prompt=effective_negative,
-                        seed=curr_seed,
-                        denoise=denoise,
-                        steps=steps,
-                        cfg=cfg,
-                        sampler=sampler,
-                        scheduler=scheduler,
-                        checkpoint=checkpoint
-                    )
+                    if staged_mask_name:
+                        edit_mode = "inpaint"
+                        denoise = float(context.get("denoise", 0.78))
+                        workflow = self.build_inpaint_workflow(
+                            input_image_name=staged_input_name,
+                            mask_image_name=staged_mask_name,
+                            prompt=effective_prompt,
+                            negative_prompt=effective_negative,
+                            seed=curr_seed,
+                            denoise=denoise,
+                            steps=steps,
+                            cfg=cfg,
+                            sampler=sampler,
+                            scheduler=scheduler,
+                            checkpoint=checkpoint,
+                            use_inpaint_conditioning=use_inpaint_cond,
+                        )
+                    elif controlnet_name:
+                        edit_mode = "controlnet"
+                        denoise = float(context.get("denoise", 0.72))
+                        workflow = self.build_controlnet_workflow(
+                            input_image_name=staged_input_name,
+                            controlnet_name=controlnet_name,
+                            prompt=effective_prompt,
+                            negative_prompt=effective_negative,
+                            seed=curr_seed,
+                            denoise=denoise,
+                            control_type=requested_control_type or "canny",
+                            control_strength=float(control_strength if control_strength is not None else 0.8),
+                            steps=steps,
+                            cfg=cfg,
+                            sampler=sampler,
+                            scheduler=scheduler,
+                            checkpoint=checkpoint,
+                        )
+                    else:
+                        edit_mode = "img2img"
+                        denoise = float(context.get("denoise", 0.65))
+                        workflow = self.build_img2img_workflow(
+                            input_image_name=staged_input_name,
+                            prompt=effective_prompt,
+                            negative_prompt=effective_negative,
+                            seed=curr_seed,
+                            denoise=denoise,
+                            steps=steps,
+                            cfg=cfg,
+                            sampler=sampler,
+                            scheduler=scheduler,
+                            checkpoint=checkpoint
+                        )
                 else:
+                    edit_mode = "txt2img"
                     workflow = self.build_workflow(
                         prompt=effective_prompt,
                         negative_prompt=effective_negative,
@@ -741,6 +1257,9 @@ class ImageAgent(SubAgent):
                 "positive_prompt": effective_prompt,
                 "negative_prompt": effective_negative,
                 "prompt_metadata": prompt_meta,
+                "edit_mode": edit_mode,
+                "mask_used": bool(staged_mask_name),
+                "controlnet_used": controlnet_name,
                 "width": width,
                 "height": height,
                 "steps": steps,
@@ -757,13 +1276,14 @@ class ImageAgent(SubAgent):
         except Exception as e:
             generation_error = str(e)
         finally:
-            # Очистка временного файла в ComfyUI input при редактировании
-            if staged_input_path:
-                try:
-                    if staged_input_path.exists():
-                        staged_input_path.unlink()
-                except Exception:
-                    pass
+            # Очистка временных файлов (вход + маска) в ComfyUI input при редактировании
+            for staged_p in (staged_input_path, staged_mask_path):
+                if staged_p:
+                    try:
+                        if staged_p.exists():
+                            staged_p.unlink()
+                    except Exception:
+                        pass
 
             # Гарантированное освобождение VRAM через VRAMManager в блоке finally
             if manage_vram and self.vram_manager:

@@ -228,6 +228,11 @@ def edit_image(
     positive_prompt: Optional[str] = None,
     negative_prompt: Optional[str] = None,
     denoise: Optional[float] = None,
+    mask_bbox: Optional[List[float]] = None,
+    mask_path: Optional[str] = None,
+    feather: int = 16,
+    control_type: Optional[str] = None,
+    control_strength: Optional[float] = None,
 ) -> Dict[str, Any]:
     """
     Редактирует активное или указанное изображение с учётом типа правки и промптов.
@@ -291,6 +296,38 @@ def edit_image(
 
     eff_negative = _merge_negative_prompts(negative_prompt, plan.compiled_negative)
 
+    clean_mask_path = str(mask_path).strip() if mask_path else None
+    if clean_mask_path and not os.path.isfile(clean_mask_path):
+        return {
+            "success": False,
+            "error": f"Файл маски не найден на диске: {clean_mask_path}",
+        }
+
+    norm_bbox: Optional[List[float]] = None
+    if mask_bbox is not None and not clean_mask_path:
+        src_w: Optional[int] = None
+        src_h: Optional[int] = None
+        try:
+            from PIL import Image
+            with Image.open(source_path) as im:
+                src_w, src_h = im.size
+        except Exception:
+            pass
+        norm_bbox = _normalize_bbox(mask_bbox, img_width=src_w, img_height=src_h)
+        if norm_bbox is None:
+            return {
+                "success": False,
+                "error": "Некорректные координаты mask_bbox: ожидается список [x1, y1, x2, y2] в диапазоне 0..1.",
+            }
+
+    try:
+        eff_feather = max(0, min(128, int(feather)))
+    except (TypeError, ValueError):
+        eff_feather = 16
+
+    if denoise is None and (clean_mask_path or norm_bbox is not None) and eff_edit_type in ("remove", "add", "replace"):
+        eff_denoise = max(eff_denoise, 0.78)
+
     subagent_kwargs: Dict[str, Any] = {
         "action": "edit",
         "edit_type": eff_edit_type,
@@ -301,7 +338,21 @@ def edit_image(
         "what_to_change": plan.what_to_change,
         "what_to_keep": plan.what_to_keep,
         "skip_compile": True,
+        "feather": eff_feather,
     }
+    if clean_mask_path:
+        subagent_kwargs["mask_path"] = clean_mask_path
+    elif norm_bbox is not None:
+        subagent_kwargs["mask_bbox"] = norm_bbox
+
+    if control_type and str(control_type).strip():
+        subagent_kwargs["control_type"] = str(control_type).strip().lower()
+    if control_strength is not None:
+        try:
+            subagent_kwargs["control_strength"] = max(0.0, min(2.0, float(control_strength)))
+        except (TypeError, ValueError):
+            pass
+
     if tracker.active_image and isinstance(tracker.active_image.metadata, dict):
         w_meta = tracker.active_image.metadata.get("width")
         h_meta = tracker.active_image.metadata.get("height")
@@ -359,6 +410,8 @@ def edit_image(
         "active_image_path": created[0] if created else source_path,
         "source_image_path": source_path,
         "edit_type": eff_edit_type,
+        "edit_mode": res_data.get("edit_mode"),
+        "mask_used": bool(res_data.get("mask_used", False)),
         "denoise": eff_denoise,
         "positive_prompt": res_data.get("positive_prompt", eff_positive),
         "negative_prompt": res_data.get("negative_prompt", eff_negative),

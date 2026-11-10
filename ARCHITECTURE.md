@@ -10,7 +10,7 @@
 
 ### Ключевые характеристики
 * **Среда выполнения**: Python 3.13, Windows PowerShell, виртуальное окружение `.venv`.
-* **LLM-бэкенд**: Локальный сервер Ollama (`http://localhost:11434/api/chat`), модель `qwen3:8b`.
+* **LLM-бэкенд**: Локальный сервер Ollama (`http://localhost:11434/api/chat`), основная модель `qwen3:8b` (Native Tool Calling) и локальная Vision-модель `qwen3-vl:4b` (`inspect_image`).
 * **Взаимодействие**:
   * **Консольный терминал (CLI)**: интерактивный REPL (`main.py`).
   * **Графический интерфейс (GUI 2.0)**: полноэкранный Desktop Hub 1920x1280 на Tkinter (`gui.py`) с процедурной 3D-визуализацией Neural Core (`ui/neural_core.py`).
@@ -49,7 +49,7 @@
                    │
 ┌──────────────────▼──────────────────────────────────────────────────────┐
 │                    5. ИНСТРУМЕНТАЛЬНЫЙ СЛОЙ (TOOLS)                     │
-│  Registry (tools/registry.py — 23 инструмента)                          │
+│  Registry (tools/registry.py — 42 инструмента)                          │
 │  Dispatcher (tools/dispatcher.py с подтверждением confirmation_callback)│
 │  Files │ Git │ Terminal │ Analysis │ Validation │ Memory │ Household    │
 └─────────────────────────────────────────────────────────────────────────┘
@@ -122,6 +122,7 @@
   * Скользящее окно краткосрочной памяти (`max_turns=10`).
   * Защита от prompt injection (пользовательские данные передаются как справочный блок, а не часть системного промпта).
   * Контекстное извлечение релевантных фактов из долговременной памяти по ключевым словам.
+  * Динамическая инъекция контекста активного PNG в системный промпт раунда (`format_image_context_instruction()`).
   * Потокобезопасность (`threading.RLock`).
 * [skills/registry.py](file:///c:/Akakiy%20agent/skills/registry.py): Реестр навыков (`SkillRegistry`). Управляет навыками `ProjectSkill`, `MemorySkill`, `HouseholdSkill`.
 * [tools/planner.py](file:///c:/Akakiy%20agent/tools/planner.py): Модуль планирования задач (Task Planner v2):
@@ -152,8 +153,9 @@
   * `AgentResult` и `Artifact` (`tools/agents/result.py`): Унифицированный результат выполнения (`success`, `message`, `created_files`, `data`, `error`, `artifacts`). Включает отдельную модель `Artifact` (имя, путь, содержимое, метаданные) и классификатор `ArtifactType` (image, document, file, text, code, audio, data) с автоопределением. Поддерживает двустороннюю синхронизацию с `created_files`, фильтрацию по типу (`images`), фабрики `ok`/`fail` и 100% обратную совместимость через dict-like интерфейс.
   * `AgentRegistry` (`tools/agents/registry.py`): Потокобезопасный реестр с поиском, динамическим включением/отключением и синглтоном `get_agent_registry()`.
   * `EchoAgent` (`tools/agents/echo.py`): Эталонный тестовый Sub-Agent для отладки передачи контекста, генерации файлов и симуляции сбоев.
-  * `ImageAgent` (`tools/agents/image.py`): Специализированный Sub-Agent генерации и редактирования изображений через изолированный HTTP Worker на базе ComfyUI (`127.0.0.1:8188`, SDXL-Lightning 4-step). Поддерживает генерацию с нуля (text2img), ревизию промпта и редактирование (img2img с подачей исходного PNG через временную папку `workers/comfyui/input/`). Включает аудит доступных моделей (`has_controlnet_openpose()`, `has_inpaint_model()`) и честное информирование пользователя об отсутствующих компонентах с предложением доступных альтернатив. Предоставляет `ComfyUIClient` на стандартной библиотеке Python с получением бинарных данных PNG через `/view`, безопасным сохранением в `data/generated/images/` и освобождением VRAM через `/free`.
-* [tools/image_context.py](file:///c:/Akakiy%20agent/tools/image_context.py): Класс `ImageContextTracker` — компонент Image Context. Отслеживает активное изображение (`active_image_path`), исходный оригинал (`root_image_path`), цепочки последовательных модификаций (root -> edit_1 -> edit_2) без перезаписи исходных файлов, валидирует файлы на диске (`is_valid_on_disk`) и обеспечивает 100% обратную совместимость с `_last_image_result`.
+  * `ImageAgent` (`tools/agents/image.py`): Специализированный Sub-Agent генерации и редактирования изображений через изолированный HTTP Worker на базе ComfyUI (`127.0.0.1:8188`, SDXL-Lightning 4-step). Поддерживает генерацию с нуля (`build_workflow`), `img2img` (`build_img2img_workflow`), точечный Masked Inpainting (`build_inpaint_workflow` через `LoadImageMask` + `SetLatentNoiseMask` / `InpaintModelConditioning` по feathered PIL-маске `mask_bbox`/`mask_path`) и ControlNet (`build_controlnet_workflow` через `ControlNetLoader`, встроенный `Canny` и `ControlNetApplyAdvanced`). Включает аудит локальных моделей (`has_controlnet_openpose()`, `has_controlnet_canny()`, `find_controlnet_model()`, `has_inpaint_model()`, `get_inpaint_checkpoint()`), честное информирование при нехватке весов, временный staging в `workers/comfyui/input/` с гарантированной очисткой в `finally` и освобождение VRAM через `/free`.
+* [tools/image_tools.py](file:///c:/Akakiy%20agent/tools/image_tools.py): Инструментальный слой Native Tool Calling для изображений (`generate_image`, `edit_image`, `inspect_image`, `get_active_image`, `select_image`) с обходом устаревших словарных ограничений для английских SDXL-промптов Qwen, нормализацией `mask_bbox` [0..1] и синхронизацией `ImageContextTracker`.
+* [tools/image_context.py](file:///c:/Akakiy%20agent/tools/image_context.py): Класс `ImageContextTracker` — компонент Image Context с персистентностью на диск (`data/image_context.json`). Отслеживает активное изображение (`active_image_path`), исходный оригинал (`root_image_path`), цепочки последовательных модификаций (root -> edit_1 -> edit_2) без перезаписи исходных файлов, валидирует файлы на диске (`is_valid_on_disk`) и обеспечивает обратную совместимость с `_last_image_result`.
 * [tools/edit_planner.py](file:///c:/Akakiy%20agent/tools/edit_planner.py): Класс `EditPlanner` и модель `EditPlan` — компонент Edit Planner. Преобразует произвольные инструкции модификации (формы, пропорции, свет, цвета, материалы, окружение, стили, добавление/удаление объектов) в структурированный план с выбором режима обработки (img2img, pose_control, inpaint), адаптивным расчетом `denoise` и компиляцией промптов через `PromptCompiler`.
 * [tools/prompt_compiler.py](file:///c:/Akakiy%20agent/tools/prompt_compiler.py): Семантический компилятор промптов для SDXL-Lightning (`PromptCompiler`). Анализирует объекты, атрибуты, позы, фоны и исключения, формируя специфицированные Positive и Negative промпты для KSampler.
   * `PresentationAgent` (`tools/agents/presentation.py`): Специализированный Sub-Agent создания презентаций (.pptx) на базе чистой стандартной библиотеки Python (Office OpenXML / zipfile). Поддерживает титульный слайд, слайды содержания, текстовые блоки (bullet points), авторазбор темы из задачи/метаданных, сохранение в `data/generated/presentations/` и возврат `AgentResult` с `Artifact` типа `presentation`/`document`.
@@ -215,7 +217,7 @@
   * Централизованная оценка действий (`PermissionAssessment`) ДО их фактического выполнения.
   * Контекстный анализ риска (детекция перезаписи существующих файлов, анализ опасных команд PowerShell, git-мутаций и удалений).
   * Интеграция с `Dispatcher`, `TeamworkPipeline`, `PlanExecutor`, `Agent.run_subagent` и модальными окнами подтверждения GUI `request_confirmation`.
-* [tools/registry.py](file:///c:/Akakiy%20agent/tools/registry.py): Центральный реестр `TOOLS` (24 зарегистрированных инструмента) с описаниями, схемами параметров и хелпером `get_tool_risk_level`.
+* [tools/registry.py](file:///c:/Akakiy%20agent/tools/registry.py): Центральный реестр `TOOLS` (42 зарегистрированных инструмента) с описаниями, схемами параметров и хелпером `get_tool_risk_level`.
 * [tools/dispatcher.py](file:///c:/Akakiy%20agent/tools/dispatcher.py): Функция `dispatch()` — вызов инструментов по имени с обязательным централизованным перехватом разрешений через `PermissionManager`.
 * [tools/daily_briefing.py](file:///c:/Akakiy%20agent/tools/daily_briefing.py): `daily_briefing` — сводка дня.
 * [tools/files.py](file:///c:/Akakiy%20agent/tools/files.py): `list_files`, `find_file`, `read_file`, `write_file`, `edit_file`, `search_files`.
@@ -248,7 +250,7 @@
 ### 3.7. Управление VRAM и изолированные воркеры (GPU & External Workers)
 * **VRAMManager** (`tools/vram.py`):
   * Централизованный инфраструктурный менеджер координации видеопамяти GPU (RTX 4070 Laptop GPU 8 GB VRAM).
-  * Безопасная выгрузка Ollama (`qwen3:8b`) через API `/api/generate` с параметром `keep_alive: 0` (высвобождает ~5.5 GB VRAM перед запуском генерации).
+  * Безопасная мультимодельная выгрузка Ollama (`unload_ollama(model=None)` через `/api/ps` + `/api/generate` с `keep_alive: 0` для `qwen3:8b`, `qwen3-vl:4b` и др., высвобождает VRAM перед запуском генерации).
   * Освобождение видеопамяти ComfyUI через POST `/free` (`unload_models: true, free_memory: true`).
   * Сбор статистики VRAM через стандартный `nvidia-smi` без внешних библиотек.
   * Гарантированное освобождение видеопамяти в блоке `finally` даже при сбоях инференса.
@@ -264,7 +266,7 @@
 * [infrastructure/ollama_manager.py](file:///c:/Akakiy%20agent/infrastructure/ollama_manager.py): Менеджер жизненного цикла локальной среды LLM (`OllamaManager`, `get_ollama_manager`):
   * Проверка доступности API локального сервера Ollama (`http://localhost:11434/api/tags`).
   * Автоматический запуск процесса `ollama serve` в фоновом режиме на Windows (`CREATE_NO_WINDOW`), если сервер не запущен.
-  * Проверка наличия целевой модели `qwen3:8b` без автоскачивания (с выводом чёткой инструкции пользователю при отсутствии).
+  * Проверка наличия целевой модели `qwen3:8b` (`check_model_available()`) и Vision-модели `qwen3-vl:4b` (`check_vision_model_available()`) без автоскачивания (с выводом чёткой инструкции пользователю при отсутствии).
   * Строгое отслеживание владельца (`started_by_akakiy`): чужой, ранее запущенный процесс Ollama никогда не останавливается.
   * Корректная остановка только собственного процесса (`terminate` -> `wait` -> `kill`) при выходе из GUI или CLI (`finally: cleanup()`).
   * Регистрация аварийной очистки в `atexit` и полная изоляция внутренних исключений.

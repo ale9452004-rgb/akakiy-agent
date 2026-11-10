@@ -1378,6 +1378,34 @@
   * **Плюсы**: Идеальная семантическая точность без языковых и концептуальных искажений; полная защита от удаления файлов и сетевых сбоев; сохранение нулевой задержки для типовых запросов.
   * **Минусы**: Для полностью неструктурированных абстрактных запросов время планирования зависит от ответа локальной LLM (с тайм-аутным fallback).
 
+---
+
+## ADR-049: Единый стек мультимодального анализа и редактирования изображений (`qwen3:8b` + `qwen3-vl:4b` + ComfyUI Inpaint/ControlNet)
+
+* **Статус**: Принято
+* **Контекст**:
+  После интеграции `EditPlanner` и `PromptCompiler` оставались два фундаментальных ограничения:
+  1. Основная языковая модель `qwen3:8b` не могла вызывать инструменты генерации и редактирования картинок через Native Tool Calling (изображения управлялись только через regex fast-path и теряли контекст между перезапусками);
+  2. `qwen3:8b` и `ImageAgent` не видели фактическое содержимое созданного PNG, а `ComfyUI` выполнял только полноэкранный `img2img` без локальных масок (inpainting) и без структурного `ControlNet`.
+  При ограничении 8 GB VRAM требовалась устойчивая локальная связка без одновременного удержания LLM/VLM и SDXL в видеопамяти.
+* **Решение**:
+  Реализована трёхэтапная архитектура:
+  1. **Этап 1 — Native Tool Calling и персистентный контекст (`tools/image_tools.py`, `tools/registry.py`, `tools/image_context.py`, `tools/dispatcher.py`)**:
+     * Зарегистрированы инструменты `generate_image`, `edit_image`, `get_active_image`, `select_image`;
+     * Реализована персистентность `data/image_context.json` в `ImageContextTracker` с безопасным откатом по истории и кнопкой «✏️ Редактировать» на `ImageArtifactCard`;
+     * Обеспечен проброс артефактов из Native Tool Calling в `Agent.process()` и скоупинг `PermissionManager` через `bind_permission_manager`.
+  2. **Этап 2 — Локальный VLM `qwen3-vl:4b` и мультимодельная выгрузка VRAM (`ollama_client.py`, `infrastructure/ollama_manager.py`, `tools/vram.py`, `tools/image_tools.py`)**:
+     * Добавлены `OllamaClient.send_vision_query()`, настройка `AppSettings.vision_model` (`qwen3-vl:4b`), проверка наличия `check_vision_model_available()` и отображение модели в `SettingsView`;
+     * Зарегистрирован безопасный инструмент `inspect_image` (`RiskLevel.SAFE`) с поддержкой нормализованных координат `mask_bbox` `[x1, y1, x2, y2]` (`0..1`);
+     * В `VRAMManager.unload_ollama(model=None)` реализована выгрузка всех активных моделей Ollama по `GET /api/ps` перед запуском ComfyUI.
+  3. **Этап 3 — Masked Inpainting и ControlNet в `ImageAgent` (`tools/agents/image.py`)**:
+     * Реализована генерация мягких RGB-масок с размытием границ (`generate_feathered_mask_png`) по `mask_bbox` и поддержка пользовательских `mask_path` со staging в `workers/comfyui/input/` и гарантированной очисткой в `finally`;
+     * Реализован `build_inpaint_workflow()` (`LoadImageMask` + `SetLatentNoiseMask` для стандартных SDXL-чекпоинтов и `InpaintModelConditioning` при наличии специализированного `*inpaint*`-чекпоинта);
+     * Реализован `build_controlnet_workflow()` (`ControlNetLoader`, встроенный препроцессор `Canny`, `ControlNetApplyAdvanced`) и аудит весов (`has_controlnet_canny`, `find_controlnet_model`, `get_inpaint_checkpoint`) с честным возвратом `missing_model` при отсутствии весов.
+* **Последствия**:
+  * **Плюсы**: Полный цикл визуальной обратной связи (`inspect_image` $\to$ `edit_image` с `mask_bbox` $\to$ inpainting в ComfyUI); сохранение фона вне маски; отсутствие конфликтов VRAM на 8 GB GPU; обратная совместимость с существующими тестами `CommandRouter` и `missing_model`.
+  * **Минусы**: Для живой работы на GPU требуются отдельные локальные веса (`ollama pull qwen3-vl:4b`, SDXL Inpaint / ControlNet чекпоинты по выбору пользователя).
+
 
 
 
