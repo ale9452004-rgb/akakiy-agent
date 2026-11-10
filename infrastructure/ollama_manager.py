@@ -25,6 +25,7 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_OLLAMA_URL = "http://localhost:11434"
 DEFAULT_MODEL = "qwen3:8b"
+DEFAULT_VISION_MODEL = "qwen3-vl:4b"
 DEFAULT_TIMEOUT = 15.0
 DEFAULT_CHECK_INTERVAL = 0.4
 
@@ -120,6 +121,38 @@ class OllamaManager:
         Упрощённый предикат проверки доступности модели.
         """
         available, _ = self.check_model_available(model)
+        return available
+
+    @staticmethod
+    def get_configured_vision_model() -> str:
+        """Возвращает настроенную vision-модель из AppSettings (по умолчанию qwen3-vl:4b)."""
+        try:
+            from tools.settings import get_app_settings
+            val = getattr(get_app_settings(), "vision_model", None)
+            if isinstance(val, str) and val.strip():
+                return val.strip()
+        except Exception:
+            pass
+        return DEFAULT_VISION_MODEL
+
+    def check_vision_model_available(self, model: Optional[str] = None) -> Tuple[bool, str]:
+        """
+        Проверяет наличие локальной Vision-модели в Ollama (/api/tags) без автоскачивания.
+        """
+        target = (model or self.get_configured_vision_model()).strip() or DEFAULT_VISION_MODEL
+        available, msg = self.check_model_available(target)
+        if available:
+            return True, msg
+        if "не найдена в Ollama" in msg:
+            return (
+                False,
+                f"Vision-модель '{target}' не найдена в Ollama. Загрузите её командой: ollama pull {target}",
+            )
+        return False, msg
+
+    def is_vision_model_available(self, model: Optional[str] = None) -> bool:
+        """Предикат доступности Vision-модели в локальном Ollama."""
+        available, _ = self.check_vision_model_available(model)
         return available
 
     def _resolve_executable(self) -> str:

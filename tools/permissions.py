@@ -220,7 +220,7 @@ class PermissionManager:
             "list_files", "find_file", "read_file", "search_files", "analyze_file",
             "validate_project", "git_status", "git_diff", "git_log",
             "recall_memory", "list_tasks", "list_reminders", "list_notes",
-            "show_list", "check_due_reminders", "daily_briefing", "get_active_image"
+            "show_list", "check_due_reminders", "daily_briefing", "get_active_image", "inspect_image"
         ):
             # Read-only инструменты
             return PermissionAssessment(
@@ -876,7 +876,7 @@ class PermissionManager:
             "list_files", "find_file", "read_file", "search_files", "analyze_file",
             "validate_project", "git_status", "git_diff", "git_log",
             "recall_memory", "list_tasks", "list_reminders", "list_notes",
-            "show_list", "check_due_reminders", "daily_briefing", "get_active_image"
+            "show_list", "check_due_reminders", "daily_briefing", "get_active_image", "inspect_image"
         }
 
     def _format_generic_tool_details(self, tool_name: str, params: Dict[str, Any]) -> str:

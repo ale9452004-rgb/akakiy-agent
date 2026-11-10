@@ -54,12 +54,17 @@ class SettingsView(BaseView):
             bg=self.BG_CARD
         ).pack(anchor="w", padx=20, pady=(20, 8))
 
+        from infrastructure.ollama_manager import DEFAULT_MODEL, DEFAULT_VISION_MODEL
+        raw_vision = getattr(self.settings, "vision_model", None) if self.settings is not None else None
+        vision_model = raw_vision.strip() if isinstance(raw_vision, str) and raw_vision.strip() else DEFAULT_VISION_MODEL
+
         tk.Label(
             panel,
-            text="• LLM Engine: Ollama Local Server (http://localhost:11434)\n"
-                 "• Модель: qwen3:8b\n"
-                 "• Skills Registry: project, memory, household\n"
-                 "• Context Manager: Sliding Window + Data Injection Shield",
+            text=f"• LLM Engine: Ollama Local Server (http://localhost:11434)\n"
+                 f"• Основная модель (LLM): {DEFAULT_MODEL}\n"
+                 f"• Vision-модель (VLM): {vision_model}\n"
+                 f"• Skills Registry: project, memory, household\n"
+                 f"• Context Manager: Sliding Window + Data Injection Shield",
             font=self.FONT_BODY,
             fg=self.FG_MAIN,
             bg=self.BG_CARD,

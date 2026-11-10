@@ -94,23 +94,40 @@ class VRAMManager:
 
     def unload_ollama(self, model: Optional[str] = None) -> Dict[str, Any]:
         """
-        Выгружает модель Ollama из памяти с keep_alive: 0.
+        Выгружает модель(и) Ollama из памяти с keep_alive: 0.
+        Если model не указан (None), выгружает ВСЕ модели, загруженные в /api/ps
+        (например, qwen3:8b и qwen3-vl:4b перед запуском ComfyUI).
         Не считает ошибкой, если модель уже выгружена.
         """
-        target = model or self.default_model
+        explicit_model = model.strip() if isinstance(model, str) and model.strip() else None
+        targets = [explicit_model] if explicit_model else []
 
-        # 1. Проверяем /api/ps - если модель не загружена, фиксируем факт
+        # 1. Проверяем /api/ps
         already_unloaded = False
+        ps_checked = False
         try:
             ps_resp = requests.get(f"{self.ollama_url}/api/ps", timeout=self.timeout)
             if ps_resp.status_code == 200:
+                ps_checked = True
                 models = ps_resp.json().get("models", [])
-                is_loaded = any(
-                    target == m.get("name", "") or target == m.get("model", "") or target in m.get("name", "")
-                    for m in models
-                )
-                if not is_loaded:
-                    already_unloaded = True
+                if explicit_model:
+                    is_loaded = any(
+                        explicit_model == m.get("name", "")
+                        or explicit_model == m.get("model", "")
+                        or explicit_model in m.get("name", "")
+                        for m in models
+                    )
+                    if not is_loaded:
+                        already_unloaded = True
+                else:
+                    seen = set()
+                    for m in models:
+                        m_name = str(m.get("model") or m.get("name") or "").strip()
+                        if m_name and m_name not in seen:
+                            seen.add(m_name)
+                            targets.append(m_name)
+                    if not targets:
+                        already_unloaded = True
         except (requests.exceptions.ConnectionError, requests.exceptions.Timeout):
             # Если сервер Ollama не запущен или недоступен, модель гарантированно не загружена в VRAM
             already_unloaded = True
@@ -118,46 +135,61 @@ class VRAMManager:
             # Если /api/ps недоступен по иной причине, продолжаем попытку через /api/generate
             pass
 
+        if not explicit_model and not ps_checked and not already_unloaded and not targets:
+            targets = [self.default_model]
+
+        display_target = explicit_model or (", ".join(targets) if targets else self.default_model)
+
         if already_unloaded:
             return {
                 "success": True,
-                "model": target,
+                "model": display_target,
                 "unloaded": False,
                 "already_unloaded": True,
-                "message": f"Модель '{target}' уже выгружена из памяти Ollama."
+                "unloaded_models": [],
+                "message": f"Модель '{display_target}' уже выгружена из памяти Ollama."
             }
 
-        # 2. Вызываем /api/generate с keep_alive: 0
+        # 2. Вызываем /api/generate с keep_alive: 0 для каждой целевой модели
+        unloaded_models = []
+        last_done_reason = "unload"
         try:
-            resp = requests.post(
-                f"{self.ollama_url}/api/generate",
-                json={"model": target, "keep_alive": 0},
-                timeout=self.timeout
-            )
-            if resp.status_code == 200:
-                data = resp.json()
-                return {
-                    "success": True,
-                    "model": target,
-                    "unloaded": True,
-                    "already_unloaded": False,
-                    "done_reason": data.get("done_reason", "unload"),
-                    "message": f"Модель '{target}' успешно выгружена из памяти Ollama."
-                }
-            else:
-                return {
-                    "success": False,
-                    "model": target,
-                    "unloaded": False,
-                    "already_unloaded": False,
-                    "error": f"Ollama вернула HTTP {resp.status_code}: {resp.text}"
-                }
+            for tgt in targets:
+                resp = requests.post(
+                    f"{self.ollama_url}/api/generate",
+                    json={"model": tgt, "keep_alive": 0},
+                    timeout=self.timeout
+                )
+                if resp.status_code == 200:
+                    data = resp.json()
+                    unloaded_models.append(tgt)
+                    last_done_reason = data.get("done_reason", "unload")
+                else:
+                    return {
+                        "success": False,
+                        "model": tgt,
+                        "unloaded": bool(unloaded_models),
+                        "already_unloaded": False,
+                        "unloaded_models": unloaded_models,
+                        "error": f"Ollama вернула HTTP {resp.status_code}: {resp.text}"
+                    }
+
+            return {
+                "success": True,
+                "model": display_target,
+                "unloaded": bool(unloaded_models),
+                "already_unloaded": False,
+                "unloaded_models": unloaded_models,
+                "done_reason": last_done_reason,
+                "message": f"Модель '{display_target}' успешно выгружена из памяти Ollama."
+            }
         except Exception as e:
             return {
                 "success": False,
-                "model": target,
-                "unloaded": False,
+                "model": display_target,
+                "unloaded": bool(unloaded_models),
                 "already_unloaded": False,
+                "unloaded_models": unloaded_models,
                 "error": f"Ошибка соединения с Ollama: {e}"
             }
 

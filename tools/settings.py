@@ -19,6 +19,7 @@ from typing import Any, Dict, Optional, Union
 logger = logging.getLogger(__name__)
 
 DEFAULT_SETTINGS_PATH = Path(__file__).resolve().parent.parent / "data" / "settings.json"
+DEFAULT_VISION_MODEL = "qwen3-vl:4b"
 
 
 class AppSettings:
@@ -33,6 +34,7 @@ class AppSettings:
         # Значения по умолчанию
         self.notification_sound: bool = True
         self.speak_reminders: bool = True
+        self.vision_model: str = DEFAULT_VISION_MODEL
         self.extra_settings: Dict[str, Any] = {}
 
         self.load()
@@ -50,9 +52,15 @@ class AppSettings:
                 if isinstance(data, dict):
                     self.notification_sound = bool(data.get("notification_sound", True))
                     self.speak_reminders = bool(data.get("speak_reminders", True))
+                    raw_vision = data.get("vision_model")
+                    self.vision_model = (
+                        str(raw_vision).strip()
+                        if isinstance(raw_vision, str) and raw_vision.strip()
+                        else DEFAULT_VISION_MODEL
+                    )
                     self.extra_settings = {
                         k: v for k, v in data.items()
-                        if k not in ("notification_sound", "speak_reminders")
+                        if k not in ("notification_sound", "speak_reminders", "vision_model")
                     }
                     return True
             except Exception as e:
@@ -83,7 +91,8 @@ class AppSettings:
         with self._lock:
             res = {
                 "notification_sound": self.notification_sound,
-                "speak_reminders": self.speak_reminders
+                "speak_reminders": self.speak_reminders,
+                "vision_model": self.vision_model,
             }
             res.update(self.extra_settings)
             return res
@@ -98,9 +107,16 @@ class AppSettings:
                 self.notification_sound = bool(data["notification_sound"])
             if "speak_reminders" in data:
                 self.speak_reminders = bool(data["speak_reminders"])
+            if "vision_model" in data:
+                raw_vision = data["vision_model"]
+                self.vision_model = (
+                    str(raw_vision).strip()
+                    if isinstance(raw_vision, str) and raw_vision.strip()
+                    else DEFAULT_VISION_MODEL
+                )
 
             for k, v in data.items():
-                if k not in ("notification_sound", "speak_reminders"):
+                if k not in ("notification_sound", "speak_reminders", "vision_model"):
                     self.extra_settings[k] = v
 
             if save:
@@ -113,6 +129,8 @@ class AppSettings:
                 return self.notification_sound
             elif key == "speak_reminders":
                 return self.speak_reminders
+            elif key == "vision_model":
+                return self.vision_model
             return self.extra_settings.get(key, default)
 
     def set(self, key: str, value: Any, save: bool = True) -> None:
@@ -122,6 +140,12 @@ class AppSettings:
                 self.notification_sound = bool(value)
             elif key == "speak_reminders":
                 self.speak_reminders = bool(value)
+            elif key == "vision_model":
+                self.vision_model = (
+                    str(value).strip()
+                    if isinstance(value, str) and value.strip()
+                    else DEFAULT_VISION_MODEL
+                )
             else:
                 self.extra_settings[key] = value
 

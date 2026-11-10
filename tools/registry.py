@@ -45,6 +45,7 @@ from tools.household import (
 )
 from tools.daily_briefing import daily_briefing
 from tools.image_tools import (
+    inspect_image,
     generate_image,
     edit_image,
     get_active_image,
@@ -53,6 +54,14 @@ from tools.image_tools import (
 
 
 TOOLS = {
+    "inspect_image": {
+        "function": inspect_image,
+        "description": (
+            "Анализирует содержимое активного или указанного PNG-изображения с помощью Vision-модели "
+            "(отвечает на вопросы о деталях, подсчитывает объекты и при return_bbox=True возвращает mask_bbox [x1, y1, x2, y2])."
+        ),
+        "requires_confirmation": False
+    },
     "generate_image": {
         "function": generate_image,
         "description": (
@@ -313,6 +322,23 @@ def get_tools_description():
 
 
 TOOL_PARAMETERS = {
+    "inspect_image": {
+        "properties": {
+            "question": {
+                "type": "string",
+                "description": "Вопрос к изображению (что проверить, какие объекты найти или какую область выделить)"
+            },
+            "image_path": {
+                "type": "string",
+                "description": "Путь к PNG-файлу (опционально; по умолчанию используется текущее активное изображение)"
+            },
+            "return_bbox": {
+                "type": "boolean",
+                "description": "Если True — вернуть нормализованные координаты mask_bbox [x1, y1, x2, y2] (0..1) для точечного редактирования"
+            }
+        },
+        "required": ["question"]
+    },
     "generate_image": {
         "properties": {
             "prompt": {

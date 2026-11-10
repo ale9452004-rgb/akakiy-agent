@@ -11,6 +11,8 @@
 
 from contextlib import contextmanager
 from contextvars import ContextVar
+import json
+import math
 import os
 from pathlib import Path
 import re
@@ -435,3 +437,239 @@ def select_image(file_path: str, prompt: Optional[str] = None) -> Dict[str, Any]
         "prompt": entry.prompt,
         "message": msg,
     }
+
+
+def _normalize_bbox(
+    raw_bbox: Any,
+    img_width: Optional[int] = None,
+    img_height: Optional[int] = None,
+) -> Optional[List[float]]:
+    """
+    Валидирует и нормализует bounding box в [x1, y1, x2, y2] (0.0 .. 1.0).
+    """
+    if not isinstance(raw_bbox, (list, tuple)) or len(raw_bbox) != 4:
+        return None
+    try:
+        vals = [float(v) for v in raw_bbox]
+    except (TypeError, ValueError):
+        return None
+    if any(not math.isfinite(v) for v in vals):
+        return None
+
+    x1, y1, x2, y2 = vals
+    max_v = max(abs(x1), abs(y1), abs(x2), abs(y2))
+    # Значения до ~1.5 считаем лёгким выходом за [0..1] и просто зажимаем,
+    # а > 1.5 пересчитываем из пикселей или шкалы 0..1000.
+    if max_v > 1.5:
+        if img_width and img_height and img_width > 0 and img_height > 0:
+            x1 /= float(img_width)
+            x2 /= float(img_width)
+            y1 /= float(img_height)
+            y2 /= float(img_height)
+        elif max_v <= 1000.0:
+            x1 /= 1000.0
+            y1 /= 1000.0
+            x2 /= 1000.0
+            y2 /= 1000.0
+
+    x1 = max(0.0, min(1.0, x1))
+    y1 = max(0.0, min(1.0, y1))
+    x2 = max(0.0, min(1.0, x2))
+    y2 = max(0.0, min(1.0, y2))
+
+    left, right = (x1, x2) if x1 <= x2 else (x2, x1)
+    top, bottom = (y1, y2) if y1 <= y2 else (y2, y1)
+    if (right - left) < 0.01 or (bottom - top) < 0.01:
+        return None
+
+    return [round(left, 4), round(top, 4), round(right, 4), round(bottom, 4)]
+
+
+def _parse_vision_json(raw_text: str) -> Optional[Dict[str, Any]]:
+    """Извлекает JSON-объект из ответа Vision-модели."""
+    text = str(raw_text or "").strip()
+    if not text:
+        return None
+    try:
+        parsed = json.loads(text)
+        if isinstance(parsed, dict):
+            return parsed
+    except Exception:
+        pass
+
+    m = re.search(r"\{.*\}", text, re.DOTALL)
+    if not m:
+        return None
+    try:
+        parsed = json.loads(m.group(0))
+        return parsed if isinstance(parsed, dict) else None
+    except Exception:
+        return None
+
+
+def inspect_image(
+    question: str,
+    image_path: Optional[str] = None,
+    return_bbox: bool = False,
+) -> Dict[str, Any]:
+    """
+    Анализирует содержимое активного или указанного PNG-изображения через локальную Vision-модель
+    (`qwen3-vl:4b`), отвечает на вопрос и при return_bbox=True возвращает координаты области [x1, y1, x2, y2].
+    """
+    clean_q = str(question or "").strip()
+    if not clean_q:
+        return {
+            "success": False,
+            "error": "Не указан вопрос для инспекции изображения (question).",
+        }
+
+    agent = get_bound_image_agent()
+    tracker = _resolve_context_tracker(agent)
+
+    if image_path and str(image_path).strip():
+        target_path = str(image_path).strip()
+        if not os.path.isfile(target_path):
+            return {
+                "success": False,
+                "error": f"Файл изображения не найден на диске: {target_path}",
+            }
+    else:
+        target_path = tracker.get_active_image_path(validate_disk=True)
+        if not target_path:
+            return {
+                "success": False,
+                "error": (
+                    "Нет активного изображения для инспекции. "
+                    "Сначала сгенерируйте изображение или передайте путь image_path."
+                ),
+            }
+
+    from infrastructure.ollama_manager import DEFAULT_VISION_MODEL, get_ollama_manager
+    from ollama_client import OllamaClient
+    from tools.settings import get_app_settings
+
+    try:
+        cfg_model = getattr(get_app_settings(), "vision_model", None)
+    except Exception:
+        cfg_model = None
+    vision_model = (
+        cfg_model.strip()
+        if isinstance(cfg_model, str) and cfg_model.strip()
+        else DEFAULT_VISION_MODEL
+    )
+
+    ollama_mgr = get_ollama_manager()
+    avail, avail_msg = ollama_mgr.check_vision_model_available(vision_model)
+    if not avail:
+        return {
+            "success": False,
+            "error": avail_msg,
+            "missing_vision_model": vision_model,
+            "image_path": target_path,
+        }
+
+    img_width: Optional[int] = None
+    img_height: Optional[int] = None
+    try:
+        from PIL import Image
+        with Image.open(target_path) as im:
+            img_width, img_height = im.size
+    except Exception:
+        pass
+
+    bound_ai = getattr(agent, "ai", None) if agent is not None else None
+    client = bound_ai if isinstance(bound_ai, OllamaClient) else OllamaClient()
+
+    try:
+        if return_bbox:
+            vision_prompt = (
+                "Analyze this image carefully and answer the question strictly based on what is visible.\n"
+                "Return ONLY a JSON object matching this schema:\n"
+                "{\n"
+                '  "answer": "concise factual answer in Russian",\n'
+                '  "objects": [{"label": "object name", "bbox": [x1, y1, x2, y2]}],\n'
+                '  "mask_bbox": [x1, y1, x2, y2]\n'
+                "}\n"
+                "Rules: coordinates in bbox and mask_bbox MUST be normalized floats in [0.0, 1.0] "
+                "(left, top, right, bottom). If no specific region needs editing or the object is absent, "
+                'set "mask_bbox": null.\n\n'
+                f"Question: {clean_q}"
+            )
+            res = client.send_vision_query(
+                prompt=vision_prompt,
+                images=target_path,
+                model=vision_model,
+                response_format="json",
+            )
+            raw_content = str(res.get("content", "")).strip()
+            parsed = _parse_vision_json(raw_content)
+
+            objects_clean: List[Dict[str, Any]] = []
+            mask_bbox: Optional[List[float]] = None
+            answer_text = raw_content
+
+            if parsed:
+                if isinstance(parsed.get("answer"), str) and parsed["answer"].strip():
+                    answer_text = parsed["answer"].strip()
+                mask_bbox = _normalize_bbox(parsed.get("mask_bbox"), img_width, img_height)
+                raw_objs = parsed.get("objects")
+                if isinstance(raw_objs, list):
+                    for obj in raw_objs:
+                        if not isinstance(obj, dict):
+                            continue
+                        norm_obj_bbox = _normalize_bbox(obj.get("bbox"), img_width, img_height)
+                        if norm_obj_bbox is not None:
+                            objects_clean.append({
+                                "label": str(obj.get("label") or "object"),
+                                "bbox": norm_obj_bbox,
+                            })
+                    if mask_bbox is None and objects_clean:
+                        mask_bbox = objects_clean[0]["bbox"]
+
+            return {
+                "success": True,
+                "image_path": target_path,
+                "vision_model": vision_model,
+                "answer": answer_text or "Анализ изображения выполнен.",
+                "width": img_width,
+                "height": img_height,
+                "objects": objects_clean,
+                "mask_bbox": mask_bbox,
+                "message": answer_text or "Анализ изображения выполнен.",
+            }
+        else:
+            vision_prompt = (
+                "Внимательно рассмотри изображение и ответь точно только по тому, что реально видно на картинке "
+                "(учитывай количество объектов, цвета, позы, фон и возможные дефекты).\n\n"
+                f"Вопрос: {clean_q}"
+            )
+            res = client.send_vision_query(
+                prompt=vision_prompt,
+                images=target_path,
+                model=vision_model,
+            )
+            answer_text = str(res.get("content", "")).strip()
+            if not answer_text:
+                return {
+                    "success": False,
+                    "error": f"Vision-модель '{vision_model}' вернула пустой ответ.",
+                    "image_path": target_path,
+                }
+            return {
+                "success": True,
+                "image_path": target_path,
+                "vision_model": vision_model,
+                "answer": answer_text,
+                "width": img_width,
+                "height": img_height,
+                "objects": [],
+                "mask_bbox": None,
+                "message": answer_text,
+            }
+    except Exception as e:
+        return {
+            "success": False,
+            "error": f"Ошибка при анализе изображения через Vision-модель '{vision_model}': {e}",
+            "image_path": target_path,
+            "vision_model": vision_model,
+        }

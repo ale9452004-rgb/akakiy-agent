@@ -1,13 +1,45 @@
+import base64
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Union
+
 import requests
 
 
 OLLAMA_URL = "http://localhost:11434/api/chat"
 MODEL = "qwen3:8b"
+DEFAULT_VISION_MODEL = "qwen3-vl:4b"
+
+
+def encode_images_base64(images: Union[str, Path, bytes, bytearray, List[Any], tuple]) -> List[str]:
+    """
+    Кодирует одно или несколько изображений (пути к файлам или bytes) в base64-строки
+    для мультимодального Ollama /api/chat.
+    """
+    if images is None:
+        return []
+    if isinstance(images, (str, Path, bytes, bytearray)):
+        items = [images]
+    else:
+        items = list(images)
+
+    encoded: List[str] = []
+    for item in items:
+        if isinstance(item, (bytes, bytearray)):
+            encoded.append(base64.b64encode(bytes(item)).decode("ascii"))
+        elif isinstance(item, (str, Path)):
+            p = Path(item)
+            if not p.is_file():
+                raise FileNotFoundError(f"Изображение для Vision-запроса не найдено: {p}")
+            encoded.append(base64.b64encode(p.read_bytes()).decode("ascii"))
+        else:
+            raise TypeError(f"Неподдерживаемый тип изображения: {type(item).__name__}")
+    return encoded
 
 
 class OllamaClient:
-    def __init__(self, max_history: int = 24):
+    def __init__(self, max_history: int = 24, model: Optional[str] = None):
         self.max_history = max_history
+        self.model = model or MODEL
         self.base_system_prompt = (
             "Ты Акакий — локальный ИИ-ассистент пользователя. "
             "Отвечай на русском языке."
@@ -61,23 +93,33 @@ class OllamaClient:
         else:
             self.messages = []
 
-    def send_chat(self, messages, tools=None):
+    def send_chat(
+        self,
+        messages,
+        tools=None,
+        model: Optional[str] = None,
+        response_format: Optional[Union[str, Dict[str, Any]]] = None,
+        timeout: int = 120,
+    ):
         """
         Отправляет список сообщений в Ollama /api/chat.
+        Поддерживает переопределение модели (например, vision-модели) и формата ответа.
         """
-        payload = {
-            "model": MODEL,
+        payload: Dict[str, Any] = {
+            "model": model or self.model,
             "messages": messages,
             "stream": False
         }
 
         if tools is not None:
             payload["tools"] = tools
+        if response_format is not None:
+            payload["format"] = response_format
 
         response = requests.post(
             OLLAMA_URL,
             json=payload,
-            timeout=120
+            timeout=timeout
         )
 
         response.raise_for_status()
@@ -93,6 +135,38 @@ class OllamaClient:
             "message": message
         }
 
+    def send_vision_query(
+        self,
+        prompt: str,
+        images: Union[str, Path, bytes, bytearray, List[Any], tuple],
+        model: Optional[str] = None,
+        response_format: Optional[Union[str, Dict[str, Any]]] = None,
+        timeout: int = 120,
+    ) -> Dict[str, Any]:
+        """
+        Отправляет одиночный мультимодальный запрос к локальной Vision-модели Ollama.
+        Не добавляет base64-изображения в диалоговую историю.
+        """
+        encoded = encode_images_base64(images)
+        if not encoded:
+            raise ValueError("Не переданы изображения для Vision-запроса.")
+
+        eff_model = (model or DEFAULT_VISION_MODEL).strip() or DEFAULT_VISION_MODEL
+        messages = [
+            {
+                "role": "user",
+                "content": str(prompt or "").strip(),
+                "images": encoded,
+            }
+        ]
+        return self.send_chat(
+            messages,
+            tools=None,
+            model=eff_model,
+            response_format=response_format,
+            timeout=timeout,
+        )
+
     def send_tool_step(self, turn_messages, tools=None):
         """
         Отправляет сообщения текущего хода (turn_messages) вместе с историей сообщений.
@@ -107,15 +181,24 @@ class OllamaClient:
         self.messages.extend(turn_messages)
         self._trim_history()
 
-    def ask(self, user_message, add_to_history=True, tools=None):
+    def ask(self, user_message, add_to_history=True, tools=None, images=None, model: Optional[str] = None):
         request_messages = self.messages.copy()
 
-        request_messages.append({
+        outgoing_msg: Dict[str, Any] = {
             "role": "user",
             "content": user_message
-        })
+        }
+        if images is not None:
+            encoded = encode_images_base64(images)
+            if encoded:
+                outgoing_msg["images"] = encoded
 
-        result = self.send_chat(request_messages, tools=tools)
+        request_messages.append(outgoing_msg)
+
+        if model is not None:
+            result = self.send_chat(request_messages, tools=tools, model=model)
+        else:
+            result = self.send_chat(request_messages, tools=tools)
         answer = result["content"]
         tool_calls = result["tool_calls"]
 
