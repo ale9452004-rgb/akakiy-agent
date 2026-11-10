@@ -44,9 +44,45 @@ from tools.household import (
     delete_list
 )
 from tools.daily_briefing import daily_briefing
+from tools.image_tools import (
+    generate_image,
+    edit_image,
+    get_active_image,
+    select_image,
+)
 
 
 TOOLS = {
+    "generate_image": {
+        "function": generate_image,
+        "description": (
+            "Генерирует новое изображение (PNG) через ComfyUI SDXL-Lightning. "
+            "Передавай детальный prompt на английском языке (объект, поза, фон, освещение, стиль), "
+            "чтобы генерация точно соответствовала запросу пользователя."
+        ),
+        "requires_confirmation": False
+    },
+
+    "edit_image": {
+        "function": edit_image,
+        "description": (
+            "Редактирует активное или указанное PNG-изображение с сохранением неизменяемых деталей. "
+            "Используй для любых правок картинки: поза, цвет, фон, добавление или удаление объекта, освещение, стиль."
+        ),
+        "requires_confirmation": False
+    },
+
+    "get_active_image": {
+        "function": get_active_image,
+        "description": "Возвращает путь, описание (промпт), размеры и историю правок текущего активного изображения в сессии.",
+        "requires_confirmation": False
+    },
+
+    "select_image": {
+        "function": select_image,
+        "description": "Выбирает конкретный существующий файл PNG как текущее активное изображение для последующего редактирования.",
+        "requires_confirmation": False
+    },
     "list_files": {
         "function": list_files,
         "description": "Показывает список файлов проекта.",
@@ -277,6 +313,87 @@ def get_tools_description():
 
 
 TOOL_PARAMETERS = {
+    "generate_image": {
+        "properties": {
+            "prompt": {
+                "type": "string",
+                "description": (
+                    "Детальное описание изображения (предпочтительно на английском для SDXL, например: "
+                    "'a lone ginger cat sitting on a sandy beach at sunset, waves, photorealistic, sharp focus')"
+                )
+            },
+            "aspect_ratio": {
+                "type": "string",
+                "description": "Соотношение сторон: 'square' (1024x1024), 'landscape' (1216x832), 'portrait' (832x1216) или 'custom'"
+            },
+            "count": {
+                "type": "integer",
+                "description": "Количество изображений для генерации (от 1 до 4, по умолчанию 1)"
+            },
+            "negative_prompt": {
+                "type": "string",
+                "description": "Что нужно исключить из изображения (на английском, опционально)"
+            },
+            "width": {
+                "type": "integer",
+                "description": "Ширина изображения в пикселях (кратна 64, опционально)"
+            },
+            "height": {
+                "type": "integer",
+                "description": "Высота изображения в пикселях (кратна 64, опционально)"
+            }
+        },
+        "required": ["prompt"]
+    },
+    "edit_image": {
+        "properties": {
+            "instruction": {
+                "type": "string",
+                "description": "Инструкция: что именно изменить, добавить или убрать на изображении"
+            },
+            "target_image_path": {
+                "type": "string",
+                "description": "Путь к PNG файлу для редактирования (опционально; если не указан, используется активное изображение)"
+            },
+            "edit_type": {
+                "type": "string",
+                "description": "Тип правки: 'pose', 'color', 'remove', 'add', 'background', 'style', 'proportions', 'lighting', 'general' (опционально)"
+            },
+            "positive_prompt": {
+                "type": "string",
+                "description": (
+                    "Полный обновлённый английский промпт итоговой сцены с сохранением неизменяемых деталей "
+                    "(опционально, существенно повышает точность img2img)"
+                )
+            },
+            "negative_prompt": {
+                "type": "string",
+                "description": "Нежелательные детали или удаляемые объекты на английском (опционально)"
+            },
+            "denoise": {
+                "type": "number",
+                "description": "Сила изменения img2img от 0.15 до 0.90 (чем выше, тем сильнее меняется картинка)"
+            }
+        },
+        "required": ["instruction"]
+    },
+    "get_active_image": {
+        "properties": {},
+        "required": []
+    },
+    "select_image": {
+        "properties": {
+            "file_path": {
+                "type": "string",
+                "description": "Путь к существующему PNG-файлу, который нужно сделать активным для редактирования"
+            },
+            "prompt": {
+                "type": "string",
+                "description": "Краткое текстовое описание выбранного изображения (опционально)"
+            }
+        },
+        "required": ["file_path"]
+    },
     "list_files": {
         "properties": {},
         "required": []

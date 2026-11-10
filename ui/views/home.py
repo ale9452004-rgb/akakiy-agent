@@ -589,9 +589,12 @@ class HomeView(BaseView):
                 # Отрисовка интерактивных карточек IMAGE Artifact с preview
                 if image_arts:
                     from ui.artifact_card import create_artifact_card
+                    edit_cb = None
+                    if self.shell and callable(getattr(self.shell, "select_image_for_edit", None)):
+                        edit_cb = self.shell.select_image_for_edit
                     for img_art in image_arts[:2]:
                         try:
-                            card = create_artifact_card(row, img_art, compact=True)
+                            card = create_artifact_card(row, img_art, compact=True, on_edit=edit_cb)
                             card.pack(fill="x", padx=10, pady=(2, 6))
                         except Exception:
                             pass

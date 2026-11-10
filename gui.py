@@ -39,6 +39,7 @@ from tools.dispatcher import (
     set_confirmation_handler
 )
 from tools.household import get_household_manager
+from tools.image_context import DEFAULT_IMAGE_CONTEXT_PATH
 from tools.memory import get_memory_manager
 from tools.settings import get_app_settings
 from tools.validation import validate_project
@@ -122,7 +123,7 @@ class AkakiyGUI:
         self.root.configure(bg=self.BG_MAIN)
 
         # 2. Инициализация логики и бэкенда (с поддержкой dependency injection)
-        self.agent = agent if agent is not None else Agent()
+        self.agent = agent if agent is not None else Agent(image_context_path=DEFAULT_IMAGE_CONTEXT_PATH)
         self.household = household if household is not None else get_household_manager()
         self.memory = memory if memory is not None else get_memory_manager()
         self.household_mgr = self.household
@@ -723,7 +724,7 @@ class AkakiyGUI:
                 try:
                     from ui.artifact_card import create_artifact_card
                     for art in artifacts:
-                        card = create_artifact_card(self.chat_text, art, compact=False)
+                        card = create_artifact_card(self.chat_text, art, compact=False, on_edit=self.select_image_for_edit)
                         self.chat_text.insert(tk.END, "\n")
                         self.chat_text.window_create(tk.END, window=card)
                         self.chat_text.insert(tk.END, "\n")
@@ -732,6 +733,38 @@ class AkakiyGUI:
 
             self.chat_text.insert(tk.END, "─" * 48 + "\n", "div")
             self.chat_text.see(tk.END)
+
+    def select_image_for_edit(self, file_path: str, metadata: Optional[Dict[str, Any]] = None) -> None:
+        """Устанавливает выбранное изображение активным для редактирования и переводит фокус на ввод."""
+        if not file_path:
+            return
+        meta = metadata if isinstance(metadata, dict) else {}
+        prompt_hint = meta.get("prompt")
+        if hasattr(self, "agent") and self.agent is not None and getattr(self.agent, "image_context", None) is not None:
+            ok, _, msg = self.agent.image_context.select_active_image(
+                file_path=file_path,
+                prompt=prompt_hint,
+                validate_disk=True,
+            )
+            if ok:
+                self.agent._last_image_result = self.agent.image_context.to_legacy_dict(validate_disk=True)
+                self._append_log("INFO", f"Активное изображение для правки: {Path(file_path).name}")
+            else:
+                self._append_log("ERR", msg)
+                return
+        else:
+            self._append_log("INFO", f"Выбрано изображение: {Path(file_path).name}")
+
+        if hasattr(self, "cmd_input") and self.cmd_input and self.cmd_input.winfo_exists():
+            try:
+                cur_val = self.cmd_input.get()
+                if cur_val == getattr(self, "cmd_placeholder", ""):
+                    self.cmd_input.delete(0, tk.END)
+                    self.cmd_input.config(fg=self.FG_WHITE)
+                self.cmd_input.focus_set()
+                self.cmd_input.icursor(tk.END)
+            except Exception:
+                pass
 
     def _append_chat(self, author: str, message: str, artifacts: Optional[List[Any]] = None, domain_badge: Optional[str] = None):
         t_str = time.strftime("%H:%M:%S")

@@ -134,6 +134,44 @@ class ContextManager:
         lines.append("[КОНЕЦ СПРАВОЧНЫХ ДАННЫХ]")
         return "\n".join(lines)
 
+    def format_image_context_instruction(self, image_info: Optional[Dict[str, Any]]) -> str:
+        """
+        Формирует динамическую системную инструкцию о текущем активном изображении
+        для Native Tool Calling без мутации base_system_prompt.
+        """
+        if not isinstance(image_info, dict):
+            return ""
+
+        files = image_info.get("created_files") or []
+        active_path = image_info.get("active_image_path") or (files[0] if files else None)
+        if not active_path:
+            return ""
+
+        prompt_txt = str(image_info.get("prompt") or "").strip()
+        width = image_info.get("width")
+        height = image_info.get("height")
+        history_cnt = image_info.get("history_count")
+
+        lines = [
+            "[КОНТЕКСТ АКТИВНОГО ИЗОБРАЖЕНИЯ В СЕССИИ]",
+            f"- Активный файл: {active_path}",
+        ]
+        if prompt_txt:
+            lines.append(f"- Текущее описание/промпт: {prompt_txt}")
+        if width and height:
+            lines.append(f"- Размер: {width}x{height}")
+        if isinstance(history_cnt, int) and history_cnt > 0:
+            lines.append(f"- Шагов в истории правок: {history_cnt}")
+
+        lines.extend([
+            "- PNG-файлы МОЖНО и НУЖНО редактировать через инструмент `edit_image` (никогда не отвечай, что PNG нельзя редактировать).",
+            "- Если пользователь просит изменить, добавить, убрать объект, поменять цвет, фон, освещение или позу на этой картинке — "
+            "вызови `edit_image`, сформулировав `positive_prompt` на английском языке с сохранением неизменяемых деталей.",
+            "- Если пользователь просит нарисовать совершенно новую картинку, не связанную с текущей — вызови `generate_image` с детальным английским `prompt`.",
+            "[КОНЕЦ КОНТЕКСТА ИЗОБРАЖЕНИЯ]",
+        ])
+        return "\n".join(lines)
+
     # =========================================================================
     # Сборка сообщений для инференса LLM
     # =========================================================================

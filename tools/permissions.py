@@ -220,7 +220,7 @@ class PermissionManager:
             "list_files", "find_file", "read_file", "search_files", "analyze_file",
             "validate_project", "git_status", "git_diff", "git_log",
             "recall_memory", "list_tasks", "list_reminders", "list_notes",
-            "show_list", "check_due_reminders", "daily_briefing"
+            "show_list", "check_due_reminders", "daily_briefing", "get_active_image"
         ):
             # Read-only инструменты
             return PermissionAssessment(
@@ -236,7 +236,8 @@ class PermissionManager:
 
         elif t_name in (
             "create_task", "create_reminder", "complete_task", "complete_reminder",
-            "create_note", "create_list", "add_list_item", "complete_list_item", "remember"
+            "create_note", "create_list", "add_list_item", "complete_list_item", "remember",
+            "generate_image", "edit_image", "select_image"
         ):
             # Безопасные локальные добавления/отметки
             req_confirm = (self.policy == SecurityPolicy.STRICT)
@@ -875,12 +876,23 @@ class PermissionManager:
             "list_files", "find_file", "read_file", "search_files", "analyze_file",
             "validate_project", "git_status", "git_diff", "git_log",
             "recall_memory", "list_tasks", "list_reminders", "list_notes",
-            "show_list", "check_due_reminders", "daily_briefing"
+            "show_list", "check_due_reminders", "daily_briefing", "get_active_image"
         }
 
     def _format_generic_tool_details(self, tool_name: str, params: Dict[str, Any]) -> str:
         lines = []
-        if tool_name == "delete_task":
+        if tool_name == "generate_image":
+            lines.append("Действие: Генерация изображения (SDXL)")
+            lines.append(f"Описание: {params.get('prompt', '')}")
+        elif tool_name == "edit_image":
+            lines.append("Действие: Редактирование изображения")
+            lines.append(f"Инструкция: {params.get('instruction', '')}")
+            if params.get("target_image_path"):
+                lines.append(f"Файл: {params.get('target_image_path')}")
+        elif tool_name == "select_image":
+            lines.append("Действие: Выбор активного изображения")
+            lines.append(f"Файл: {params.get('file_path', '')}")
+        elif tool_name == "delete_task":
             task_id = params.get("task_id", "")
             lines.append("Действие: Удаление бытовой задачи")
             lines.append(f"Идентификатор / название задачи: {task_id}")

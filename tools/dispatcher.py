@@ -1,4 +1,19 @@
+from contextlib import contextmanager
+import contextvars
 from tools.registry import get_tool
+
+
+_bound_permission_manager = contextvars.ContextVar("_bound_permission_manager", default=None)
+
+
+@contextmanager
+def bind_permission_manager(perm_mgr):
+    """Временно привязывает экземпляр PermissionManager для dispatch в текущем контексте выполнения."""
+    token = _bound_permission_manager.set(perm_mgr)
+    try:
+        yield
+    finally:
+        _bound_permission_manager.reset(token)
 
 
 _confirmation_handler = None
@@ -149,7 +164,7 @@ def dispatch(tool_name, **kwargs):
     function = tool["function"]
 
     # Централизованная оценка безопасности и разрешений
-    perm_mgr = get_permission_manager()
+    perm_mgr = _bound_permission_manager.get() or get_permission_manager()
     assessment = perm_mgr.assess_tool(tool_name, kwargs)
 
     # 1. Если действие заблокировано политикой безопасности

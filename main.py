@@ -6,6 +6,7 @@ from commands import (
     handle_cli_command
 )
 from tools.agent import Agent
+from tools.image_context import DEFAULT_IMAGE_CONTEXT_PATH
 from cli_formatters import (
     print_step_result,
     print_plan,
@@ -71,7 +72,7 @@ def main():
 
 
 def _run_cli():
-    agent = Agent()
+    agent = Agent(image_context_path=DEFAULT_IMAGE_CONTEXT_PATH)
 
     print("Акакий запущен.")
     print(

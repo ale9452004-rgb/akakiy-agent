@@ -40,7 +40,7 @@ class Agent:
     - координацию единого контекста диалога и памяти.
     """
 
-    def __init__(self, memory_manager=None, context_manager=None, ai_client=None, skill_registry=None, router=None, agent_registry=None, permission_manager=None, bridge=_DEFAULT_BRIDGE):
+    def __init__(self, memory_manager=None, context_manager=None, ai_client=None, skill_registry=None, router=None, agent_registry=None, permission_manager=None, bridge=_DEFAULT_BRIDGE, image_context_path=None):
         mem = memory_manager or get_memory_manager()
         self.context_manager = context_manager or ContextManager(memory_manager=mem)
         self.ai = ai_client or OllamaClient()
@@ -67,7 +67,7 @@ class Agent:
             self.bridge = bridge
         self._last_result = None
         from tools.image_context import ImageContextTracker
-        self.image_context = ImageContextTracker()
+        self.image_context = ImageContextTracker(storage_path=image_context_path)
         self._last_image_result = None
         from tools.edit_planner import EditPlanner
         self.edit_planner = EditPlanner(ai_client=getattr(self, "ai", None))
@@ -262,10 +262,14 @@ class Agent:
         # Выполняем инструмент
         # =================================================
 
-        res = dispatch(
-            tool_name,
-            **normalized_arguments
-        )
+        from tools.dispatcher import bind_permission_manager
+        from tools.image_tools import bind_active_image_agent
+        with bind_permission_manager(getattr(self, "permission_manager", None)):
+            with bind_active_image_agent(self):
+                res = dispatch(
+                    tool_name,
+                    **normalized_arguments
+                )
         self._last_result = res
         return res
 
@@ -487,8 +491,7 @@ class Agent:
         elif getattr(self, "_last_image_result", None):
             last_img = self._last_image_result
             if hasattr(self, "image_context") and self.image_context and not self.image_context.has_active_image(validate_disk=False):
-                from tools.image_context import ImageContextTracker
-                self.image_context = ImageContextTracker.from_legacy_dict(last_img)
+                self.image_context.sync_from_legacy_dict(last_img, validate_disk=True)
                 if not self.image_context.has_active_image(validate_disk=True):
                     last_img = None
                 else:
@@ -714,6 +717,17 @@ class Agent:
                 subagent_kwargs["what_to_keep"] = route.get("what_to_keep")
             if source_image_path:
                 subagent_kwargs["source_image_path"] = source_image_path
+
+            if action in ("generate", "revise") and prompt and getattr(self, "ai", None) is not None:
+                try:
+                    from tools.prompt_compiler import compile_image_prompt, translate_prompt_to_sdxl_tags
+                    _, _, comp_meta = compile_image_prompt(raw_prompt=prompt, count=count)
+                    if comp_meta.get("subject") is None:
+                        translated = translate_prompt_to_sdxl_tags(prompt, self.ai)
+                        if translated:
+                            subagent_kwargs["llm_translated_prompt"] = translated
+                except Exception:
+                    pass
 
             subagent_res = self.run_subagent("image", task=prompt, **subagent_kwargs)
             if subagent_res.success:
@@ -1072,7 +1086,12 @@ class Agent:
             extra_instruction = active_skill.system_prompt
         else:
             tools_for_llm = get_tools_schema()
-            extra_instruction = None
+            img_instruction = (
+                self.context_manager.format_image_context_instruction(last_img)
+                if hasattr(self.context_manager, "format_image_context_instruction")
+                else ""
+            )
+            extra_instruction = img_instruction or None
 
         # =================================================
         # Native Tool Calling (Ollama)
@@ -1082,6 +1101,8 @@ class Agent:
         MAX_CORRECTION_ATTEMPTS = 1
         correction_attempts = 0
         has_validation_errors = False
+        collected_files = []
+        collected_artifacts = []
 
         # Формируем сообщения с учётом единого ContextManager, релевантной памяти и контекста навыка
         llm_messages = self.context_manager.build_messages_for_llm(
@@ -1165,10 +1186,15 @@ class Agent:
                 if hasattr(self.ai, "messages"):
                     self.ai.messages = self.context_manager.build_messages_for_llm("")[:-1]
                 ans = content if (isinstance(content, str) and content.strip()) else "Достигнут лимит попыток исправления. В проекте сохраняются синтаксические ошибки."
-                return {
+                chat_payload = {
                     "type": "chat",
                     "answer": ans
                 }
+                if collected_files:
+                    chat_payload["created_files"] = collected_files
+                if collected_artifacts:
+                    chat_payload["artifacts"] = collected_artifacts
+                return chat_payload
 
             turn_messages.append(assistant_msg)
 
@@ -1234,6 +1260,18 @@ class Agent:
                     self._record_interaction(user_input, resp, tool_name=tool_name, is_native_chat=False)
                     return resp
 
+                if isinstance(result, dict):
+                    inner_res = result.get("result") if isinstance(result.get("result"), dict) else result
+                    if isinstance(inner_res, dict):
+                        for fpath in inner_res.get("created_files") or []:
+                            f_str = str(fpath)
+                            if f_str and f_str not in collected_files:
+                                collected_files.append(f_str)
+                        for art in inner_res.get("artifacts") or []:
+                            art_dict = art.to_dict() if hasattr(art, "to_dict") else art
+                            if art_dict and art_dict not in collected_artifacts:
+                                collected_artifacts.append(art_dict)
+
                 tool_content = self.serialize_tool_result(result)
                 tool_message = {
                     "role": "tool",
@@ -1289,10 +1327,15 @@ class Agent:
                 if hasattr(self.ai, "messages"):
                     self.ai.messages = self.context_manager.build_messages_for_llm("")[:-1]
                 ans = content if (isinstance(content, str) and content.strip()) else "Действие успешно выполнено."
-                return {
+                chat_payload = {
                     "type": "chat",
                     "answer": ans
                 }
+                if collected_files:
+                    chat_payload["created_files"] = collected_files
+                if collected_artifacts:
+                    chat_payload["artifacts"] = collected_artifacts
+                return chat_payload
 
         # При достижении лимита раундов запрашиваем финальный ответ без инструментов (tools=None)
         step_messages = llm_messages[:-1] + turn_messages
@@ -1312,7 +1355,12 @@ class Agent:
         self.context_manager.commit_turn_messages(turn_messages, clean_user_input=user_input)
         if hasattr(self.ai, "messages"):
             self.ai.messages = self.context_manager.build_messages_for_llm("")[:-1]
-        return {
+        chat_payload = {
             "type": "chat",
             "answer": final_answer
         }
+        if collected_files:
+            chat_payload["created_files"] = collected_files
+        if collected_artifacts:
+            chat_payload["artifacts"] = collected_artifacts
+        return chat_payload

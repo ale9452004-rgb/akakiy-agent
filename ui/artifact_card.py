@@ -14,7 +14,7 @@ import os
 import shutil
 import sys
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple, Union
+from typing import Any, Callable, Dict, Optional, Tuple, Union
 import tkinter as tk
 from tkinter import filedialog, messagebox
 
@@ -104,6 +104,7 @@ class ImageArtifactCard(tk.Frame):
         artifact: Union[Artifact, Dict[str, Any], str],
         compact: bool = False,
         max_size: Optional[Tuple[int, int]] = None,
+        on_edit: Optional[Callable[[str, Dict[str, Any]], None]] = None,
         **kwargs
     ):
         if "bg" not in kwargs:
@@ -117,6 +118,7 @@ class ImageArtifactCard(tk.Frame):
         )
         self.compact = compact
         self.max_size = max_size or ((260, 160) if compact else (440, 280))
+        self.on_edit_callback = on_edit
 
         # Нормализация входного артефакта
         if isinstance(artifact, str):
@@ -328,6 +330,23 @@ class ImageArtifactCard(tk.Frame):
         btn_save.pack(side="left")
         _bind_btn_hover(btn_save, "#131c2e", "#1e2d48")
 
+        if callable(self.on_edit_callback):
+            btn_edit = tk.Button(
+                actions_bar,
+                text="✏️ Редактировать",
+                font=typography.FONT_CAPTION,
+                fg=self.ACCENT_CYAN,
+                bg="#131c2e",
+                bd=0,
+                padx=12,
+                pady=4,
+                cursor="hand2",
+                state="normal" if not self._is_error else "disabled",
+                command=self.on_edit_image
+            )
+            btn_edit.pack(side="left", padx=(8, 0))
+            _bind_btn_hover(btn_edit, "#131c2e", "#1e2d48")
+
     def _build_compact_ui(self) -> None:
         """Компактный вид карточки (для HomeView / Активность и результаты)."""
         main_row = tk.Frame(self, bg=self.BG_CARD)
@@ -455,6 +474,23 @@ class ImageArtifactCard(tk.Frame):
         btn_save.pack(side="left")
         _bind_btn_hover(btn_save, "#131c2e", "#1e2d48")
 
+        if callable(self.on_edit_callback):
+            btn_edit = tk.Button(
+                btn_row,
+                text="✏️ Редактировать",
+                font=typography.FONT_CAPTION,
+                fg=self.ACCENT_CYAN,
+                bg="#131c2e",
+                bd=0,
+                padx=8,
+                pady=2,
+                cursor="hand2",
+                state="normal" if not self._is_error else "disabled",
+                command=self.on_edit_image
+            )
+            btn_edit.pack(side="left", padx=(6, 0))
+            _bind_btn_hover(btn_edit, "#131c2e", "#1e2d48")
+
     def _setup_copy_menu(self, widget: tk.Widget) -> None:
         """Привязка контекстного меню копирования к карточке и её элементам."""
         prompt_val = str(self.metadata.get("prompt") or self.metadata.get("description") or "").strip()
@@ -514,6 +550,21 @@ class ImageArtifactCard(tk.Frame):
                 messagebox.showinfo("Сохранено", f"Изображение успешно сохранено:\n{dest}")
             except Exception as ex:
                 messagebox.showerror("Ошибка сохранения", f"Не удалось сохранить файл:\n{ex}")
+
+    def on_edit_image(self) -> None:
+        """Передаёт изображение в контекст редактирования ассистента."""
+        target = self.resolved_path or self.raw_path
+        if not target or not os.path.exists(target):
+            messagebox.showwarning("Файл не найден", f"Файл не найден на диске:\n{target}")
+            return
+        if callable(self.on_edit_callback):
+            meta = dict(self.metadata)
+            if "name" not in meta:
+                meta["name"] = self.artifact_name
+            try:
+                self.on_edit_callback(str(target), meta)
+            except Exception as ex:
+                messagebox.showerror("Ошибка выбора изображения", f"Не удалось выбрать изображение:\n{ex}")
 
 
 class FileArtifactCard(tk.Frame):
@@ -661,6 +712,7 @@ def create_artifact_card(
     master: tk.Widget,
     artifact: Union[Artifact, Dict[str, Any], str],
     compact: bool = False,
+    on_edit: Optional[Callable[[str, Dict[str, Any]], None]] = None,
     **kwargs
 ) -> tk.Widget:
     """
@@ -689,5 +741,5 @@ def create_artifact_card(
     )
 
     if is_image:
-        return ImageArtifactCard(master, art_obj, compact=compact, **kwargs)
+        return ImageArtifactCard(master, art_obj, compact=compact, on_edit=on_edit, **kwargs)
     return FileArtifactCard(master, art_obj, compact=compact, **kwargs)

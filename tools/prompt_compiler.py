@@ -82,7 +82,7 @@ COLOR_CATALOG: List[Tuple[re.Pattern, List[str], List[str]]] = [
         ["white fur", "black fur", "grey fur", "dark fur", "calico", "spotted fur"]
     ),
     (
-        re.compile(r"\b(?:бел\w*|white fur|white coat|pure white)\b", re.IGNORECASE),
+        re.compile(r"\b(?:бел(?:ый|ая|ое|ые|ого|ому|ым|ом|ой|ую|ыми|ых)|белоснежн\w*|white fur|white coat|pure white)\b", re.IGNORECASE),
         ["pure white fur", "snow white coat"],
         ["black fur", "orange fur", "ginger fur", "brown fur", "spotted"]
     ),
@@ -383,6 +383,20 @@ class PromptCompiler:
         if positive_env:
             pos_parts.extend(positive_env)
 
+        # Безопасный fallback, если каталог не распознал субъект (особенно при неизвестном объекте на русском)
+        # (предотвращает генерацию пустого промпта или только цвета без самого объекта)
+        used_unmatched_fallback = False
+        if not detected_subject and text and (not pos_parts or not re.search(r"[a-zA-Z]{3,}", text)):
+            cleaned_scene = re.sub(
+                r"^(?:(?:акакий|пожалуйста|сген[еи]рируй\w*|создай\w*|нарисуй\w*|сделай\w*|изобрази\w*|отрисуй\w*|мне|картинк\w*|изображен\w*|рисун\w*|фото\w*|арт\b)\s*[:,]?\s*)+",
+                "",
+                text,
+                flags=re.IGNORECASE,
+            ).strip(" .,;:!?\"'«»“”")
+            if cleaned_scene:
+                pos_parts.insert(0, cleaned_scene)
+                used_unmatched_fallback = True
+
         # Теги фотографического качества и реализма для SDXL
         pos_parts.extend([
             "photorealistic",
@@ -457,10 +471,62 @@ class PromptCompiler:
             "actions": positive_actions,
             "environment": positive_env,
             "user_explicit_negatives": user_explicit_negatives,
-            "is_revision": is_revision
+            "is_revision": is_revision,
+            "unmatched_fallback": used_unmatched_fallback,
         }
 
         return compiled_positive, compiled_negative, metadata
+
+
+def translate_prompt_to_sdxl_tags(raw_prompt: str, ai_client: Any) -> Optional[str]:
+    """
+    Переводит произвольное описание сцены (включая редкие объекты вне словаря)
+    в лаконичные английские SDXL-теги через доступный ai_client.
+    Возвращает None при сбое или отсутствии валидной строки ответа.
+    """
+    raw = str(raw_prompt or "").strip()
+    if not raw or ai_client is None:
+        return None
+
+    system_msg = (
+        "Convert the user's image description into concise English SDXL positive tags "
+        "(subject, appearance, action, setting, lighting, composition). "
+        "Output ONLY comma-separated English prompt text, no explanations or quotes."
+    )
+    try:
+        answer = None
+        if hasattr(ai_client, "send_chat") and callable(ai_client.send_chat):
+            res = ai_client.send_chat(
+                [
+                    {"role": "system", "content": system_msg},
+                    {"role": "user", "content": raw},
+                ],
+                tools=None,
+            )
+            if isinstance(res, dict):
+                answer = res.get("content")
+            elif isinstance(res, str):
+                answer = res
+        elif hasattr(ai_client, "ask") and callable(ai_client.ask):
+            res = ai_client.ask(f"{system_msg}\nDescription: {raw}", add_to_history=False)
+            if isinstance(res, str):
+                answer = res
+            elif isinstance(res, dict):
+                answer = res.get("content")
+
+        if not isinstance(answer, str):
+            return None
+        cleaned = re.sub(r"\s+", " ", answer).strip().strip("\"'`")
+        # Убеждаемся, что ответ содержит осмысленные английские теги без кириллицы
+        if (
+            len(cleaned) >= 3
+            and re.search(r"[a-zA-Z]{3,}", cleaned)
+            and not re.search(r"[а-яА-ЯёЁ]", cleaned)
+        ):
+            return cleaned
+    except Exception:
+        return None
+    return None
 
 
 def compile_image_prompt(

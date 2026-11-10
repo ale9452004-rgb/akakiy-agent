@@ -190,9 +190,12 @@ class ChatView(BaseView):
         # Встраивание интерактивных карточек артефактов (включая IMAGE с preview)
         if artifacts:
             from ui.artifact_card import create_artifact_card
+            edit_cb = None
+            if self.shell and callable(getattr(self.shell, "select_image_for_edit", None)):
+                edit_cb = self.shell.select_image_for_edit
             for art in artifacts:
                 try:
-                    card = create_artifact_card(self.chat_text, art, compact=False)
+                    card = create_artifact_card(self.chat_text, art, compact=False, on_edit=edit_cb)
                     self.chat_text.insert(tk.END, "\n", (msg_tag,))
                     self.chat_text.window_create(tk.END, window=card)
                     self.chat_text.insert(tk.END, "\n", (msg_tag,))

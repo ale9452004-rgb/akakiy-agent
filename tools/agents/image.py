@@ -490,6 +490,15 @@ class ImageAgent(SubAgent):
                 return AgentResult.fail(
                     error=f"Исходное изображение не найдено на диске: {source_image_path}"
                 )
+            if raw_width is None and raw_height is None:
+                try:
+                    from PIL import Image
+                    with Image.open(source_image_path) as src_im:
+                        src_w, src_h = src_im.size
+                        if src_w > 0 and src_h > 0:
+                            width, height = int(src_w), int(src_h)
+                except Exception:
+                    pass
 
             # Проверка доступности специализированных моделей (Rule 5 & Rule 7)
             if edit_type == "pose" and not self.has_controlnet_openpose():
@@ -604,9 +613,15 @@ class ImageAgent(SubAgent):
                     is_revision=bool(context.get("is_revision", False)),
                     critique_details=context.get("critique_details")
                 )
+                llm_translated = context.get("llm_translated_prompt")
+                if prompt_meta.get("subject") is None and llm_translated and str(llm_translated).strip():
+                    effective_prompt = str(llm_translated).strip()
+                    prompt_meta = dict(prompt_meta)
+                    prompt_meta["llm_translated"] = True
             else:
                 effective_prompt = prompt
-                effective_negative = str(context.get("negative_prompt", self.DEFAULT_NEGATIVE_PROMPT))
+                raw_neg = context.get("negative_prompt")
+                effective_negative = str(raw_neg) if raw_neg else self.DEFAULT_NEGATIVE_PROMPT
                 prompt_meta = {}
 
             negative_prompt = effective_negative
