@@ -171,6 +171,7 @@ class ContextManager:
             "вызови `edit_image` с явным `edit_type` (`replace`, `remove`, `add`, `color`, `pose`, `background`, `lighting`, `style`), "
             "сформулировав `positive_prompt` на английском языке "
             "(при наличии координат от `inspect_image` передай `mask_bbox` для точечного inpainting).",
+            "- Для смены фона (edit_type='background') с сохранением главного персонажа/объекта: передай `protect_bbox` с координатами персонажа (из `inspect_image`) или `mask_bbox` персонажа — область персонажа будет защищена, а весь фон вокруг перерисован под новый английский `positive_prompt` (например: 'dark Mordor fortress, Barad-dur, volcanic clouds, dramatic cinematic fantasy').",
             "- При вызове `edit_image` с `mask_bbox`: если новый объект выше прежнего (например, бутылка вместо кружки), немного расширь верхнюю границу `y1` вверх; "
             "в `positive_prompt` (на английском) описывай ТОЛЬКО сам новый объект и ближайшую опору внутри маски БЕЗ перечисления внешнего фона (без lawn, grass, sky, sunny garden), "
             "а в `negative_prompt` перечисляй ТОЛЬКО удаляемый/заменяемый объект (например, white porcelain cup, mug, handle) и дефекты "

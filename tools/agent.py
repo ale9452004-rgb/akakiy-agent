@@ -64,7 +64,7 @@ class Agent:
     - координацию единого контекста диалога и памяти.
     """
 
-    def __init__(self, memory_manager=None, context_manager=None, ai_client=None, skill_registry=None, router=None, agent_registry=None, permission_manager=None, bridge=_DEFAULT_BRIDGE, image_context_path=None):
+    def __init__(self, memory_manager=None, context_manager=None, ai_client=None, skill_registry=None, router=None, agent_registry=None, permission_manager=None, bridge=_DEFAULT_BRIDGE, image_context_path=None, enable_llm_image_routing=None):
         mem = memory_manager or get_memory_manager()
         self.context_manager = context_manager or ContextManager(memory_manager=mem)
         self.ai = ai_client or OllamaClient()
@@ -98,6 +98,10 @@ class Agent:
         if hasattr(self, "router") and self.router is not None:
             if not getattr(self.router, "_edit_planner", None):
                 self.router._edit_planner = self.edit_planner
+        if enable_llm_image_routing is not None:
+            self.enable_llm_image_routing = bool(enable_llm_image_routing)
+        else:
+            self.enable_llm_image_routing = False
         self._sync_memory_to_system_prompt()
 
     @property
@@ -516,8 +520,7 @@ class Agent:
 
         return execution_result
 
-    @staticmethod
-    def _is_image_tool_query(user_input: str, last_img=None) -> bool:
+    def _is_image_tool_query(self, user_input: str, last_img=None) -> bool:
         text = str(user_input or "").strip()
         if not text:
             return False
@@ -529,6 +532,10 @@ class Agent:
             if last_img is not None:
                 return True
             if re.search(r"\bхоч\w*\s+увидет\w*\b", text, re.IGNORECASE):
+                return True
+        if hasattr(self, "router") and self.router is not None:
+            r = self.router.route(text, last_image=last_img)
+            if r.get("type") in ("image", "image_feedback_clarify"):
                 return True
         return False
 
@@ -720,169 +727,173 @@ class Agent:
 
         # 1.3. Генерация и редактирование изображений (Image Sub-Agent Fast-Path)
         if route_type == "image":
-            action = route.get("action", "generate")
-            prompt = route.get("prompt", "")
-            width = route.get("width")
-            height = route.get("height")
-            count = route.get("count", 1)
-            aspect_ratio = route.get("aspect_ratio")
-            is_revision = bool(route.get("is_revision", False))
-            critique_details = route.get("critique_details")
+            # При включенном LLM-First для изображений и живой модели AI передаём запрос в Native Tool Calling
+            if getattr(self, "enable_llm_image_routing", False) and getattr(self, "ai", None) is not None and not route.get("force_fastpath", False):
+                pass
+            else:
+                action = route.get("action", "generate")
+                prompt = route.get("prompt", "")
+                width = route.get("width")
+                height = route.get("height")
+                count = route.get("count", 1)
+                aspect_ratio = route.get("aspect_ratio")
+                is_revision = bool(route.get("is_revision", False))
+                critique_details = route.get("critique_details")
 
-            source_image_path = route.get("source_image_path") or route.get("source_image")
-            if hasattr(self, "image_context") and self.image_context:
-                valid_active = self.image_context.get_active_image_path(validate_disk=True)
-                if valid_active:
-                    source_image_path = valid_active
-                elif not source_image_path or not Path(source_image_path).exists():
+                source_image_path = route.get("source_image_path") or route.get("source_image")
+                if hasattr(self, "image_context") and self.image_context:
+                    valid_active = self.image_context.get_active_image_path(validate_disk=True)
+                    if valid_active:
+                        source_image_path = valid_active
+                    elif not source_image_path or not Path(source_image_path).exists():
+                        source_image_path = None
+                elif source_image_path and not Path(source_image_path).exists():
                     source_image_path = None
-            elif source_image_path and not Path(source_image_path).exists():
-                source_image_path = None
 
-            if not source_image_path and getattr(self, "_last_image_result", None):
-                last_files = self._last_image_result.get("created_files") or []
-                for fpath in last_files:
-                    if Path(fpath).exists():
-                        source_image_path = fpath
-                        break
+                if not source_image_path and getattr(self, "_last_image_result", None):
+                    last_files = self._last_image_result.get("created_files") or []
+                    for fpath in last_files:
+                        if Path(fpath).exists():
+                            source_image_path = fpath
+                            break
 
-            if action == "edit" and not source_image_path:
-                answer = "Нет ранее сгенерированного изображения для редактирования. Сначала сгенерируйте изображение или укажите путь к файлу."
+                if action == "edit" and not source_image_path:
+                    answer = "Нет ранее сгенерированного изображения для редактирования. Сначала сгенерируйте изображение или укажите путь к файлу."
+                    resp = {
+                        "type": "image",
+                        "tool": "image",
+                        "action": "edit",
+                        "answer": answer,
+                        "message": answer,
+                        "success": False,
+                        "created_files": [],
+                        "error": answer
+                    }
+                    self._record_interaction(user_input, answer, tool_name="image:edit")
+                    return resp
+
+                subagent_kwargs = {}
+                if width is not None:
+                    subagent_kwargs["width"] = width
+                if height is not None:
+                    subagent_kwargs["height"] = height
+                if count is not None:
+                    subagent_kwargs["count"] = count
+                if aspect_ratio is not None:
+                    subagent_kwargs["aspect_ratio"] = aspect_ratio
+                if is_revision:
+                    subagent_kwargs["is_revision"] = True
+                if critique_details:
+                    subagent_kwargs["critique_details"] = critique_details
+                if action:
+                    subagent_kwargs["action"] = action
+                if route.get("edit_type"):
+                    subagent_kwargs["edit_type"] = route.get("edit_type")
+                if route.get("edit_instruction"):
+                    subagent_kwargs["edit_instruction"] = route.get("edit_instruction")
+                if route.get("negative_prompt"):
+                    subagent_kwargs["negative_prompt"] = route.get("negative_prompt")
+                if route.get("denoise") is not None:
+                    subagent_kwargs["denoise"] = route.get("denoise")
+                if route.get("recommended_mode"):
+                    subagent_kwargs["recommended_mode"] = route.get("recommended_mode")
+                if route.get("requires_specialized_model"):
+                    subagent_kwargs["requires_specialized_model"] = route.get("requires_specialized_model")
+                if route.get("what_to_change"):
+                    subagent_kwargs["what_to_change"] = route.get("what_to_change")
+                if route.get("what_to_keep"):
+                    subagent_kwargs["what_to_keep"] = route.get("what_to_keep")
+                if source_image_path:
+                    subagent_kwargs["source_image_path"] = source_image_path
+
+                if action in ("generate", "revise") and prompt and getattr(self, "ai", None) is not None:
+                    try:
+                        from tools.prompt_compiler import compile_image_prompt, translate_prompt_to_sdxl_tags
+                        _, _, comp_meta = compile_image_prompt(raw_prompt=prompt, count=count)
+                        if comp_meta.get("subject") is None:
+                            translated = translate_prompt_to_sdxl_tags(prompt, self.ai)
+                            if translated:
+                                subagent_kwargs["llm_translated_prompt"] = translated
+                    except Exception:
+                        pass
+
+                subagent_res = self.run_subagent("image", task=prompt, **subagent_kwargs)
+                if subagent_res.success:
+                    if action == "edit":
+                        if subagent_res.created_files:
+                            file_names = ", ".join(Path(p).name for p in subagent_res.created_files)
+                            answer = f"Изображение успешно отредактировано: {file_names}"
+                        else:
+                            answer = subagent_res.message
+                    elif is_revision:
+                        file_names = ", ".join(Path(p).name for p in subagent_res.created_files)
+                        answer = f"Я перегенерировал изображение с учётом замечаний: {file_names}"
+                    else:
+                        answer = subagent_res.message
+                else:
+                    err_detail = subagent_res.error or subagent_res.message or "Неизвестная ошибка"
+                    answer = f"Ошибка генерации изображения: {err_detail}"
+
                 resp = {
                     "type": "image",
                     "tool": "image",
-                    "action": "edit",
+                    "action": action,
+                    "result": subagent_res,
                     "answer": answer,
                     "message": answer,
-                    "success": False,
-                    "created_files": [],
-                    "error": answer
+                    "success": subagent_res.success,
+                    "created_files": list(subagent_res.created_files),
+                    "artifacts": [a.to_dict() for a in subagent_res.artifacts],
+                    "width": width,
+                    "height": height,
+                    "count": len(subagent_res.created_files) if subagent_res.success else count,
+                    "is_revision": is_revision,
                 }
-                self._record_interaction(user_input, answer, tool_name="image:edit")
+                if not subagent_res.success:
+                    resp["error"] = subagent_res.error or subagent_res.message
+                elif subagent_res.created_files:
+                    new_file = subagent_res.created_files[0]
+                    if hasattr(self, "image_context") and self.image_context:
+                        if action == "edit":
+                            self.image_context.track_edit(
+                                file_path=new_file,
+                                instruction=route.get("edit_instruction", user_input),
+                                prompt=prompt,
+                                source_image_path=source_image_path,
+                                edit_type=route.get("edit_type", "general"),
+                                width=width,
+                                height=height,
+                                aspect_ratio=aspect_ratio,
+                                count=count,
+                            )
+                        else:
+                            self.image_context.track_generation(
+                                file_path=new_file,
+                                prompt=prompt,
+                                is_revision=is_revision,
+                                critique_details=critique_details,
+                                width=width,
+                                height=height,
+                                aspect_ratio=aspect_ratio,
+                                count=count,
+                            )
+                        self._last_image_result = self.image_context.to_legacy_dict()
+                        self._last_image_result["artifacts"] = [a.to_dict() for a in subagent_res.artifacts]
+                        self._last_image_result["data"] = getattr(subagent_res, "data", {})
+                    else:
+                        self._last_image_result = {
+                            "prompt": prompt,
+                            "created_files": list(subagent_res.created_files),
+                            "artifacts": [a.to_dict() for a in subagent_res.artifacts],
+                            "width": width,
+                            "height": height,
+                            "aspect_ratio": aspect_ratio,
+                            "count": count,
+                            "data": getattr(subagent_res, "data", {})
+                        }
+
+                self._record_interaction(user_input, answer, tool_name="image")
                 return resp
-
-            subagent_kwargs = {}
-            if width is not None:
-                subagent_kwargs["width"] = width
-            if height is not None:
-                subagent_kwargs["height"] = height
-            if count is not None:
-                subagent_kwargs["count"] = count
-            if aspect_ratio is not None:
-                subagent_kwargs["aspect_ratio"] = aspect_ratio
-            if is_revision:
-                subagent_kwargs["is_revision"] = True
-            if critique_details:
-                subagent_kwargs["critique_details"] = critique_details
-            if action:
-                subagent_kwargs["action"] = action
-            if route.get("edit_type"):
-                subagent_kwargs["edit_type"] = route.get("edit_type")
-            if route.get("edit_instruction"):
-                subagent_kwargs["edit_instruction"] = route.get("edit_instruction")
-            if route.get("negative_prompt"):
-                subagent_kwargs["negative_prompt"] = route.get("negative_prompt")
-            if route.get("denoise") is not None:
-                subagent_kwargs["denoise"] = route.get("denoise")
-            if route.get("recommended_mode"):
-                subagent_kwargs["recommended_mode"] = route.get("recommended_mode")
-            if route.get("requires_specialized_model"):
-                subagent_kwargs["requires_specialized_model"] = route.get("requires_specialized_model")
-            if route.get("what_to_change"):
-                subagent_kwargs["what_to_change"] = route.get("what_to_change")
-            if route.get("what_to_keep"):
-                subagent_kwargs["what_to_keep"] = route.get("what_to_keep")
-            if source_image_path:
-                subagent_kwargs["source_image_path"] = source_image_path
-
-            if action in ("generate", "revise") and prompt and getattr(self, "ai", None) is not None:
-                try:
-                    from tools.prompt_compiler import compile_image_prompt, translate_prompt_to_sdxl_tags
-                    _, _, comp_meta = compile_image_prompt(raw_prompt=prompt, count=count)
-                    if comp_meta.get("subject") is None:
-                        translated = translate_prompt_to_sdxl_tags(prompt, self.ai)
-                        if translated:
-                            subagent_kwargs["llm_translated_prompt"] = translated
-                except Exception:
-                    pass
-
-            subagent_res = self.run_subagent("image", task=prompt, **subagent_kwargs)
-            if subagent_res.success:
-                if action == "edit":
-                    if subagent_res.created_files:
-                        file_names = ", ".join(Path(p).name for p in subagent_res.created_files)
-                        answer = f"Изображение успешно отредактировано: {file_names}"
-                    else:
-                        answer = subagent_res.message
-                elif is_revision:
-                    file_names = ", ".join(Path(p).name for p in subagent_res.created_files)
-                    answer = f"Я перегенерировал изображение с учётом замечаний: {file_names}"
-                else:
-                    answer = subagent_res.message
-            else:
-                err_detail = subagent_res.error or subagent_res.message or "Неизвестная ошибка"
-                answer = f"Ошибка генерации изображения: {err_detail}"
-
-            resp = {
-                "type": "image",
-                "tool": "image",
-                "action": action,
-                "result": subagent_res,
-                "answer": answer,
-                "message": answer,
-                "success": subagent_res.success,
-                "created_files": list(subagent_res.created_files),
-                "artifacts": [a.to_dict() for a in subagent_res.artifacts],
-                "width": width,
-                "height": height,
-                "count": len(subagent_res.created_files) if subagent_res.success else count,
-                "is_revision": is_revision,
-            }
-            if not subagent_res.success:
-                resp["error"] = subagent_res.error or subagent_res.message
-            elif subagent_res.created_files:
-                new_file = subagent_res.created_files[0]
-                if hasattr(self, "image_context") and self.image_context:
-                    if action == "edit":
-                        self.image_context.track_edit(
-                            file_path=new_file,
-                            instruction=route.get("edit_instruction", user_input),
-                            prompt=prompt,
-                            source_image_path=source_image_path,
-                            edit_type=route.get("edit_type", "general"),
-                            width=width,
-                            height=height,
-                            aspect_ratio=aspect_ratio,
-                            count=count,
-                        )
-                    else:
-                        self.image_context.track_generation(
-                            file_path=new_file,
-                            prompt=prompt,
-                            is_revision=is_revision,
-                            critique_details=critique_details,
-                            width=width,
-                            height=height,
-                            aspect_ratio=aspect_ratio,
-                            count=count,
-                        )
-                    self._last_image_result = self.image_context.to_legacy_dict()
-                    self._last_image_result["artifacts"] = [a.to_dict() for a in subagent_res.artifacts]
-                    self._last_image_result["data"] = getattr(subagent_res, "data", {})
-                else:
-                    self._last_image_result = {
-                        "prompt": prompt,
-                        "created_files": list(subagent_res.created_files),
-                        "artifacts": [a.to_dict() for a in subagent_res.artifacts],
-                        "width": width,
-                        "height": height,
-                        "aspect_ratio": aspect_ratio,
-                        "count": count,
-                        "data": getattr(subagent_res, "data", {})
-                    }
-
-            self._record_interaction(user_input, answer, tool_name="image")
-            return resp
 
         # 1.3.1. Уточнение замечаний к изображению (Image Feedback Clarify)
         if route_type == "image_feedback_clarify":
@@ -1204,16 +1215,31 @@ class Agent:
         turn_messages = [current_user_msg]
 
         if hasattr(self.ai, "send_chat") and callable(self.ai.send_chat):
-            response = self.ai.send_chat(
-                llm_messages,
-                tools=tools_for_llm
-            )
+            try:
+                response = self.ai.send_chat(
+                    llm_messages,
+                    tools=tools_for_llm
+                )
+            except Exception as e:
+                # Если LLM-вызов для изображения упал из-за отсутствия связи, откатываемся на fast-path
+                if self._is_image_tool_query(user_input, last_img) and route_type == "image":
+                    logger.warning(f"Ошибка LLM Native Tool Calling: {e}. Откат к Image Fast-Path.")
+                    route["force_fastpath"] = True
+                    return self.process(user_input)
+                raise
         else:
-            response = self.ai.ask(
-                user_input,
-                add_to_history=False,
-                tools=tools_for_llm
-            )
+            try:
+                response = self.ai.ask(
+                    user_input,
+                    add_to_history=False,
+                    tools=tools_for_llm
+                )
+            except Exception as e:
+                if self._is_image_tool_query(user_input, last_img) and route_type == "image":
+                    logger.warning(f"Ошибка LLM Native Tool Calling: {e}. Откат к Image Fast-Path.")
+                    route["force_fastpath"] = True
+                    return self.process(user_input)
+                raise
 
         if isinstance(response, dict):
             tool_calls = response.get("tool_calls", [])

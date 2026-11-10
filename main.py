@@ -72,7 +72,7 @@ def main():
 
 
 def _run_cli():
-    agent = Agent(image_context_path=DEFAULT_IMAGE_CONTEXT_PATH)
+    agent = Agent(image_context_path=DEFAULT_IMAGE_CONTEXT_PATH, enable_llm_image_routing=True)
 
     print("Акакий запущен.")
     print(

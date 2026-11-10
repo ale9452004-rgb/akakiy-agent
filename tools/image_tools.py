@@ -167,14 +167,14 @@ def generate_image(
         subagent_kwargs["skip_compile"] = True
         subagent_kwargs["negative_prompt"] = eff_neg
     else:
-        # На русском — запускаем компилятор и опциональный LLM-перевод при неизвестном объекте
+        # На русском — запускаем компилятор и LLM-перевод при наличии доступного ai
         _, compiler_neg, comp_meta = PromptCompiler.compile(
             raw_prompt,
             count=eff_count,
             negative_prompt=negative_prompt,
         )
         subagent_kwargs["negative_prompt"] = _merge_negative_prompts(negative_prompt, compiler_neg)
-        if comp_meta.get("subject") is None and agent is not None and getattr(agent, "ai", None):
+        if agent is not None and getattr(agent, "ai", None):
             translated = translate_prompt_to_sdxl_tags(raw_prompt, agent.ai)
             if translated:
                 subagent_kwargs["llm_translated_prompt"] = translated
@@ -229,6 +229,8 @@ def edit_image(
     negative_prompt: Optional[str] = None,
     denoise: Optional[float] = None,
     mask_bbox: Optional[List[float]] = None,
+    protect_bbox: Optional[List[float]] = None,
+    invert_mask: bool = False,
     mask_path: Optional[str] = None,
     feather: int = 12,
     control_type: Optional[str] = None,
@@ -236,6 +238,8 @@ def edit_image(
 ) -> Dict[str, Any]:
     """
     Редактирует активное или указанное изображение с учётом типа правки и промптов.
+    Поддерживает точечный inpaint по mask_bbox, защиту объекта и перерисовку фона по protect_bbox / invert_mask,
+    а также цельный img2img.
     """
     clean_instr = str(instruction or "").strip()
     if not clean_instr:
@@ -269,7 +273,7 @@ def edit_image(
         }
 
     base_prompt = tracker.get_active_prompt()
-    planner = EditPlanner(ai_client=None)
+    planner = EditPlanner(ai_client=getattr(agent, "ai", None) if agent is not None else None)
     plan = planner.plan(
         instruction=clean_instr,
         base_prompt=base_prompt,
@@ -283,7 +287,15 @@ def edit_image(
         if req_type not in ("", "general", "auto")
         else str(plan.action_type or req_type or "general").strip().lower()
     )
-    has_mask_arg = bool((mask_path and str(mask_path).strip()) or mask_bbox is not None)
+
+    raw_target_bbox = protect_bbox if protect_bbox is not None else mask_bbox
+    eff_invert_mask = bool(
+        invert_mask
+        or (protect_bbox is not None)
+        or (eff_edit_type == "background" and mask_bbox is not None and not (invert_mask is False and protect_bbox is None and "mask_bbox" in (instruction or "")))
+    )
+
+    has_mask_arg = bool((mask_path and str(mask_path).strip()) or raw_target_bbox is not None)
     if denoise is not None:
         try:
             max_denoise = 0.98 if has_mask_arg else 0.90
@@ -291,7 +303,10 @@ def edit_image(
         except (TypeError, ValueError):
             eff_denoise = plan.denoise
     else:
-        eff_denoise = plan.denoise
+        if eff_invert_mask and has_mask_arg:
+            eff_denoise = 0.88
+        else:
+            eff_denoise = plan.denoise
 
     eff_positive = plan.compiled_prompt
     has_custom_en_positive = False
@@ -323,7 +338,7 @@ def edit_image(
         }
 
     norm_bbox: Optional[List[float]] = None
-    if mask_bbox is not None and not clean_mask_path:
+    if raw_target_bbox is not None and not clean_mask_path:
         src_w: Optional[int] = None
         src_h: Optional[int] = None
         try:
@@ -332,11 +347,11 @@ def edit_image(
                 src_w, src_h = im.size
         except Exception:
             pass
-        norm_bbox = _normalize_bbox(mask_bbox, img_width=src_w, img_height=src_h)
+        norm_bbox = _normalize_bbox(raw_target_bbox, img_width=src_w, img_height=src_h)
         if norm_bbox is None:
             return {
                 "success": False,
-                "error": "Некорректные координаты mask_bbox: ожидается список [x1, y1, x2, y2] в диапазоне 0..1.",
+                "error": "Некорректные координаты mask_bbox/protect_bbox: ожидается список [x1, y1, x2, y2] в диапазоне 0..1.",
             }
 
     try:
@@ -359,11 +374,14 @@ def edit_image(
         "what_to_keep": plan.what_to_keep,
         "skip_compile": True,
         "feather": eff_feather,
+        "invert_mask": eff_invert_mask,
     }
     if clean_mask_path:
         subagent_kwargs["mask_path"] = clean_mask_path
     elif norm_bbox is not None:
         subagent_kwargs["mask_bbox"] = norm_bbox
+        if protect_bbox is not None:
+            subagent_kwargs["protect_bbox"] = norm_bbox
 
     if control_type and str(control_type).strip():
         subagent_kwargs["control_type"] = str(control_type).strip().lower()

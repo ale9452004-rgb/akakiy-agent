@@ -232,10 +232,12 @@ def generate_feathered_mask_png(
     fallback_width: int = 1024,
     fallback_height: int = 1024,
     feather: int = 16,
+    invert: bool = False,
 ) -> Tuple[int, int]:
     """
-    Создаёт PNG-маску (белый внутри bbox — область правки, чёрный снаружи — сохраняется)
-    с мягким размытием краёв (GaussianBlur).
+    Создаёт PNG-маску с мягким размытием краёв (GaussianBlur).
+    Если invert=False: белый (255) внутри bbox — область правки, чёрный (0) снаружи — сохраняется.
+    Если invert=True: чёрный (0) внутри bbox — защищённый объект, белый (255) снаружи — область перерисовки (например, замена фона).
     """
     from PIL import Image, ImageDraw, ImageFilter
 
@@ -259,9 +261,11 @@ def generate_feathered_mask_png(
     px2 = max(px1 + 1, min(img_w, int(round(x2 * img_w))))
     py2 = max(py1 + 1, min(img_h, int(round(y2 * img_h))))
 
-    mask_img = Image.new("L", (img_w, img_h), 0)
+    bg_color = 255 if invert else 0
+    fg_color = 0 if invert else 255
+    mask_img = Image.new("L", (img_w, img_h), bg_color)
     draw = ImageDraw.Draw(mask_img)
-    draw.rectangle([px1, py1, px2, py2], fill=255)
+    draw.rectangle([px1, py1, px2, py2], fill=fg_color)
 
     try:
         blur_radius = max(0.0, min(128.0, float(feather)))
@@ -862,7 +866,10 @@ class ImageAgent(SubAgent):
         action = str(context.get("action", "generate")).strip().lower()
         edit_type = str(context.get("edit_type", "general")).strip().lower()
         source_image_path = context.get("source_image_path")
-        mask_bbox = context.get("mask_bbox")
+        protect_bbox = context.get("protect_bbox")
+        raw_mask_bbox = protect_bbox if protect_bbox is not None else context.get("mask_bbox")
+        invert_mask = bool(context.get("invert_mask", False) or (protect_bbox is not None) or (edit_type == "background" and raw_mask_bbox is not None and not context.get("invert_mask") is False))
+        mask_bbox = raw_mask_bbox
         mask_path_raw = context.get("mask_path")
         mask_path = str(mask_path_raw).strip() if mask_path_raw else None
         feather = context.get("feather", 12)
@@ -1043,6 +1050,7 @@ class ImageAgent(SubAgent):
                         fallback_width=width,
                         fallback_height=height,
                         feather=feather,
+                        invert=invert_mask,
                     )
             except Exception as ex:
                 for p in (staged_input_path, staged_mask_path):
@@ -1080,7 +1088,7 @@ class ImageAgent(SubAgent):
                     critique_details=context.get("critique_details")
                 )
                 llm_translated = context.get("llm_translated_prompt")
-                if prompt_meta.get("subject") is None and llm_translated and str(llm_translated).strip():
+                if llm_translated and str(llm_translated).strip():
                     effective_prompt = str(llm_translated).strip()
                     prompt_meta = dict(prompt_meta)
                     prompt_meta["llm_translated"] = True

@@ -123,7 +123,7 @@ class AkakiyGUI:
         self.root.configure(bg=self.BG_MAIN)
 
         # 2. Инициализация логики и бэкенда (с поддержкой dependency injection)
-        self.agent = agent if agent is not None else Agent(image_context_path=DEFAULT_IMAGE_CONTEXT_PATH)
+        self.agent = agent if agent is not None else Agent(image_context_path=DEFAULT_IMAGE_CONTEXT_PATH, enable_llm_image_routing=True)
         self.household = household if household is not None else get_household_manager()
         self.memory = memory if memory is not None else get_memory_manager()
         self.household_mgr = self.household

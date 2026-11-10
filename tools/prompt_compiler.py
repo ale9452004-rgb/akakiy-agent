@@ -494,14 +494,22 @@ def translate_prompt_to_sdxl_tags(raw_prompt: str, ai_client: Any) -> Optional[s
         "Output ONLY comma-separated English prompt text, no explanations or quotes."
     )
     try:
+        import inspect
         answer = None
         if hasattr(ai_client, "send_chat") and callable(ai_client.send_chat):
+            chat_kwargs = {"tools": None}
+            try:
+                sig = inspect.signature(ai_client.send_chat)
+                if "think" in sig.parameters:
+                    chat_kwargs["think"] = False
+            except Exception:
+                pass
             res = ai_client.send_chat(
                 [
                     {"role": "system", "content": system_msg},
                     {"role": "user", "content": raw},
                 ],
-                tools=None,
+                **chat_kwargs,
             )
             if isinstance(res, dict):
                 answer = res.get("content")
@@ -516,6 +524,8 @@ def translate_prompt_to_sdxl_tags(raw_prompt: str, ai_client: Any) -> Optional[s
 
         if not isinstance(answer, str):
             return None
+        if "<think>" in answer:
+            answer = re.sub(r"<think>.*?</think>", "", answer, flags=re.DOTALL)
         cleaned = re.sub(r"\s+", " ", answer).strip().strip("\"'`")
         # Убеждаемся, что ответ содержит осмысленные английские теги без кириллицы
         if (
